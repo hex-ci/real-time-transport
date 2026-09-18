@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ChevronRight } from '@lucide/vue'
 import { useIntervalFn, useWakeLock } from '@vueuse/core'
@@ -25,35 +25,36 @@ const locationStore = useLocationStore()
 const cityStore = useCityStore()
 const { favorites } = storeToRefs(transitStore)
 
-const clockTime = ref('')
-const loading = ref(false)
+const clockTime = shallowRef('')
+const loading = shallowRef(false)
 
 const { isActive: isWakeLocked, request: requestWakeLock } = useWakeLock()
 
-const lineDetails = ref<Record<string, LineDetail>>({})
-const liveMap = ref<Record<string, LiveBus[]>>({})
+const lineDetails = shallowRef<Record<string, LineDetail>>({})
+const liveMap = shallowRef<Record<string, LiveBus[]>>({})
 
 const cityFavorites = computed(() =>
-  favorites.value.filter(f => (f.cityCode || '027') === cityStore.currentCode),
+  favorites.value.filter(f => f.cityCode === cityStore.currentCode),
 )
 
 function detailKey(lineId: string, direction: number): string {
   return `${lineId}_${direction}`
 }
 
-const kioskCards = ref<KioskCard[]>([])
-
 async function loadDetails(): Promise<void> {
+  const nextDetails = { ...lineDetails.value }
+  let hasNew = false
   const tasks = cityFavorites.value.map(async (f) => {
     const dir = f.preferredDirection ?? 0
     const key = detailKey(f.lineId, dir)
-    if (lineDetails.value[key]) return
+    if (nextDetails[key]) return
     try {
       const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
       const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
       const json = await res.json()
       if (json.success && json.data) {
-        lineDetails.value[key] = json.data as LineDetail
+        nextDetails[key] = json.data as LineDetail
+        hasNew = true
       }
     }
     catch {
@@ -61,6 +62,9 @@ async function loadDetails(): Promise<void> {
     }
   })
   await Promise.allSettled(tasks)
+  if (hasNew) {
+    lineDetails.value = nextDetails
+  }
 }
 
 function pickTarget(detail: LineDetail | undefined, pinnedName?: string): { name: string, order: number } | null {
@@ -77,26 +81,8 @@ function pickTarget(detail: LineDetail | undefined, pinnedName?: string): { name
   return null
 }
 
-async function refreshKiosk(): Promise<void> {
-  loading.value = kioskCards.value.length === 0
-  await loadDetails()
-
-  // fetch live for all
-  const liveTasks = cityFavorites.value.map(async (f) => {
-    const dir = f.preferredDirection ?? 0
-    try {
-      const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-      const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}/live?${qs.toString()}`)
-      const json = await res.json()
-      liveMap.value[detailKey(f.lineId, dir)] = (json.success && json.data?.buses) ? json.data.buses : []
-    }
-    catch {
-      liveMap.value[detailKey(f.lineId, dir)] = []
-    }
-  })
-  await Promise.allSettled(liveTasks)
-
-  kioskCards.value = cityFavorites.value.map((f) => {
+const kioskCards = computed<KioskCard[]>(() => {
+  return cityFavorites.value.map((f) => {
     const dir = f.preferredDirection ?? 0
     const key = detailKey(f.lineId, dir)
     const detail = lineDetails.value[key]
@@ -131,7 +117,29 @@ async function refreshKiosk(): Promise<void> {
       vehicleCount: buses.length,
     }
   })
+})
 
+async function refreshKiosk(): Promise<void> {
+  loading.value = Object.keys(lineDetails.value).length === 0
+  await loadDetails()
+
+  // fetch live for all in a single batch
+  const nextLiveMap: Record<string, LiveBus[]> = {}
+  const liveTasks = cityFavorites.value.map(async (f) => {
+    const dir = f.preferredDirection ?? 0
+    const key = detailKey(f.lineId, dir)
+    try {
+      const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
+      const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}/live?${qs.toString()}`)
+      const json = await res.json()
+      nextLiveMap[key] = (json.success && json.data?.buses) ? json.data.buses : []
+    }
+    catch {
+      nextLiveMap[key] = []
+    }
+  })
+  await Promise.allSettled(liveTasks)
+  liveMap.value = nextLiveMap
   loading.value = false
 }
 
@@ -148,7 +156,6 @@ watch(
   () => {
     lineDetails.value = {}
     liveMap.value = {}
-    kioskCards.value = []
     void transitStore.fetchFavorites().then(() => refreshKiosk())
   },
 )

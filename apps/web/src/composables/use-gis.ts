@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import type { WalkDecision, NearbyStation } from '@real-time-transport/shared'
 
 /**
@@ -6,10 +6,10 @@ import type { WalkDecision, NearbyStation } from '@real-time-transport/shared'
  * All calls go through the Node layer (Amap Web-Service key never touches the browser).
  */
 export function useGis() {
-  const walkDecision = ref<WalkDecision | null>(null)
-  const nearbyStations = ref<NearbyStation[]>([])
-  const isLoadingDecision = ref(false)
-  const isLoadingNearby = ref(false)
+  const walkDecision = shallowRef<WalkDecision | null>(null)
+  const nearbyStations = shallowRef<NearbyStation[]>([])
+  const isLoadingDecision = shallowRef(false)
+  const isLoadingNearby = shallowRef(false)
 
   async function fetchWalkDecision(params: {
     originLng: number

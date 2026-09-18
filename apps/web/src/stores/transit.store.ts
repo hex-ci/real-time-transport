@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import type {
   LineDetail,
   LineGroup,
@@ -10,15 +10,15 @@ import type {
 } from '@real-time-transport/shared'
 
 export const useTransitStore = defineStore('transit', () => {
-  const currentLineDetail = ref<LineDetail | null>(null)
-  const currentLiveStatus = ref<LiveLineStatus | null>(null)
-  const commuteProfile = ref<CommuteProfile | null>(null)
-  const favorites = ref<UserFavoriteLine[]>([])
-  const wsConnected = ref(false)
-  const isLoading = ref(false)
+  const currentLineDetail = shallowRef<LineDetail | null>(null)
+  const currentLiveStatus = shallowRef<LiveLineStatus | null>(null)
+  const commuteProfile = shallowRef<CommuteProfile | null>(null)
+  const favorites = shallowRef<UserFavoriteLine[]>([])
+  const wsConnected = shallowRef(false)
+  const isLoading = shallowRef(false)
   /** True while a station tap triggers a live-status refetch. */
-  const isRefreshingLive = ref(false)
-  const loadError = ref<string | null>(null)
+  const isRefreshingLive = shallowRef(false)
+  const loadError = shallowRef<string | null>(null)
 
   let socket: WebSocket | null = null
   /** Line+direction currently subscribed, so a switch can unsubscribe cleanly. */

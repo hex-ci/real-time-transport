@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { MapPin } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
@@ -10,10 +10,10 @@ const transitStore = useTransitStore()
 const cityStore = useCityStore()
 const { favorites } = storeToRefs(transitStore)
 
-const searchKeyword = ref('')
-const searchResults = ref<LineGroup[]>([])
-const searched = ref(false)
-const lastKeyword = ref('')
+const searchKeyword = shallowRef('')
+const searchResults = shallowRef<LineGroup[]>([])
+const searched = shallowRef(false)
+const lastKeyword = shallowRef('')
 
 onMounted(() => {
   void transitStore.fetchFavorites()
@@ -21,7 +21,7 @@ onMounted(() => {
 
 /** Only show favorites belonging to the currently selected city. */
 const cityFavorites = computed(() =>
-  favorites.value.filter(f => (f.cityCode || '027') === cityStore.currentCode),
+  favorites.value.filter(f => f.cityCode === cityStore.currentCode),
 )
 
 async function performSearch(): Promise<void> {
@@ -38,7 +38,7 @@ function isRouteFollowed(item: LineGroup): boolean {
   if (item.up) ids.add(item.up.lineId)
   if (item.down) ids.add(item.down.lineId)
   return favorites.value.some(f =>
-    (f.cityCode || '027') === item.cityCode
+    f.cityCode === item.cityCode
     && (ids.has(f.lineId) || (f.reverseLineId !== undefined && ids.has(f.reverseLineId))),
   )
 }
@@ -106,23 +106,23 @@ watch(() => cityStore.currentCode, () => {
           <span>{{ cityStore.currentCityName }}</span>
         </span>
       </div>
-      <div class="mt-3 flex gap-2">
+      <form action="" class="mt-3 flex gap-2" @submit.prevent="performSearch">
         <!-- min-h-[44px] keeps both controls inside the Apple HIG touch-target
              size; 16px input text stops iOS Safari from zoom-jumping on focus. -->
         <input
           v-model="searchKeyword"
-          type="text"
+          type="search"
+          enterkeyhint="search"
           placeholder="输入线路号，如 372、地铁10号线、亦庄线..."
           class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 sm:text-xs"
-          @keyup.enter="performSearch"
         >
         <button
+          type="submit"
           class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 sm:px-4 sm:text-xs"
-          @click="performSearch"
         >
           搜索
         </button>
-      </div>
+      </form>
 
       <!-- Search Results: ONE row per route, both directions bundled -->
       <div v-if="searchResults.length > 0" class="mt-4 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ArrowLeftRight, ChevronRight, LocateFixed } from '@lucide/vue'
@@ -10,8 +10,8 @@ import { useCityStore } from '@/stores/city.store'
 import LineMiniCard from '@/components/LineMiniCard.vue'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
 import {
-  CITY_BEIJING,
   favoriteIsBidirectional,
+  haversineMeters,
   resolveFavoriteLineId,
 } from '@real-time-transport/shared'
 
@@ -22,7 +22,7 @@ const cityStore = useCityStore()
 
 const { commuteProfile, favorites } = storeToRefs(transitStore)
 
-const currentTimeStr = ref('')
+const currentTimeStr = shallowRef('')
 
 function updateTime(): void {
   const now = new Date()
@@ -32,7 +32,7 @@ function updateTime(): void {
 useIntervalFn(updateTime, 1000)
 useIntervalFn(refreshAllLive, 10000)
 
-const currentGlobalDir = ref(0)
+const currentGlobalDir = shallowRef(0)
 
 function toggleGlobalDirection(): void {
   currentGlobalDir.value = currentGlobalDir.value === 0 ? 1 : 0
@@ -56,10 +56,10 @@ interface MiniCardConfig {
 }
 
 /** Cached line details keyed by lineId_direction (for stop counts + target order). */
-const detailCache = ref<Record<string, LineDetail>>({})
+const detailCache = shallowRef<Record<string, LineDetail>>({})
 
 const cityFavorites = computed(() =>
-  favorites.value.filter(f => (f.cityCode || CITY_BEIJING) === cityStore.currentCode),
+  favorites.value.filter(f => f.cityCode === cityStore.currentCode),
 )
 
 /** At least one favourite supports switching -> show the global toggle. */
@@ -119,7 +119,7 @@ function resolveTargetOrder(detail: LineDetail | undefined, pinnedName?: string)
     let nearestOrder = 0
     for (const s of detail.stops) {
       if (!s.lat || !s.lng) continue
-      const d = getDistanceMeters(coords.lat, coords.lng, s.lat, s.lng)
+      const d = haversineMeters(coords.lat, coords.lng, s.lat, s.lng)
       if (d < minD) {
         minD = d
         nearestOrder = s.order
@@ -131,18 +131,7 @@ function resolveTargetOrder(detail: LineDetail | undefined, pinnedName?: string)
   return 0
 }
 
-/** Haversine distance in meters between two WGS/GCJ coordinate pairs. */
-function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const rad = Math.PI / 180
-  const R = 6371000
-  const dLat = (lat2 - lat1) * rad
-  const dLng = (lng2 - lng1) * rad
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-const liveBusesMap = ref<Record<string, LiveBus[]>>({})
+const liveBusesMap = shallowRef<Record<string, LiveBus[]>>({})
 
 /**
  * Load static line details for ALL favorites of the current city (both
@@ -153,7 +142,10 @@ const liveBusesMap = ref<Record<string, LiveBus[]>>({})
  * distinct id per direction (reverseLineId), subway reuses one id for both.
  */
 async function ensureDetails(): Promise<void> {
+  const nextCache = { ...detailCache.value }
+  let hasNew = false
   const tasks: Array<Promise<void>> = []
+
   for (const f of cityFavorites.value) {
     const bidirectional = favoriteIsBidirectional(f)
     for (const dir of [0 as const, 1 as const]) {
@@ -165,7 +157,7 @@ async function ensureDetails(): Promise<void> {
       if (!lineId) continue
 
       const key = `${lineId}_${dir}`
-      if (detailCache.value[key]) continue
+      if (nextCache[key]) continue
       tasks.push((async () => {
         try {
           const qs = new URLSearchParams({
@@ -175,7 +167,8 @@ async function ensureDetails(): Promise<void> {
           const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
           const json = await res.json()
           if (json.success && json.data) {
-            detailCache.value[key] = json.data as LineDetail
+            nextCache[key] = json.data as LineDetail
+            hasNew = true
           }
         }
         catch {
@@ -185,6 +178,9 @@ async function ensureDetails(): Promise<void> {
     }
   }
   await Promise.allSettled(tasks)
+  if (hasNew) {
+    detailCache.value = nextCache
+  }
 }
 
 function liveKey(lineId: string, direction: number): string {
@@ -192,6 +188,7 @@ function liveKey(lineId: string, direction: number): string {
 }
 
 async function refreshAllLive(): Promise<void> {
+  const nextMap: Record<string, LiveBus[]> = {}
   const promises = cardsData.value.map(async (card) => {
     const key = liveKey(card.lineId, card.direction)
     try {
@@ -201,13 +198,14 @@ async function refreshAllLive(): Promise<void> {
       })
       const res = await fetch(`/api/transit/lines/${encodeURIComponent(card.lineId)}/live?${qs.toString()}`)
       const json = await res.json()
-      liveBusesMap.value[key] = (json.success && json.data?.buses) ? json.data.buses : []
+      nextMap[key] = (json.success && json.data?.buses) ? json.data.buses : []
     }
     catch {
-      liveBusesMap.value[key] = []
+      nextMap[key] = []
     }
   })
   await Promise.allSettled(promises)
+  liveBusesMap.value = nextMap
 }
 
 function goToDetail(lineId: string, direction: number): void {

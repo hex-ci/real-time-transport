@@ -2,17 +2,17 @@
 import {
   computed,
   onMounted,
-  onUnmounted,
-  ref,
+  shallowRef,
   watch,
 } from 'vue'
 import { storeToRefs } from 'pinia'
 import { LocateFixed } from '@lucide/vue'
+import { useIntervalFn } from '@vueuse/core'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
 import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
-import { useGis } from '@/composables/useGis'
+import { useGis } from '@/composables/use-gis'
 
 interface PlatformLineRule {
   lineId: string
@@ -39,20 +39,21 @@ const { fetchNearbyStations } = useGis()
 
 const { favorites } = storeToRefs(transitStore)
 
-const currentStationName = ref('')
-const stationOptions = ref<string[]>([])
-const landmarkHint = ref('多线聚合')
-const loading = ref(false)
-const detecting = ref(false)
-const departureItems = ref<DepartureItem[]>([])
+const currentStationName = shallowRef('')
+const stationOptions = shallowRef<string[]>([])
+const landmarkHint = shallowRef('多线聚合')
+const loading = shallowRef(false)
+const detecting = shallowRef(false)
+const departureItems = shallowRef<DepartureItem[]>([])
 
 /** line details for all favorited lines in the current city (both directions resolved lazily) */
-const lineDetails = ref<Record<string, LineDetail>>({})
-let refreshTimer: any = null
+const lineDetails = shallowRef<Record<string, LineDetail>>({})
 
 const cityFavorites = computed(() =>
-  favorites.value.filter(f => (f.cityCode || '027') === cityStore.currentCode),
+  favorites.value.filter(f => f.cityCode === cityStore.currentCode),
 )
+
+useIntervalFn(loadPlatformDepartures, 12000)
 
 function detailKey(lineId: string, direction: number): string {
   return `${lineId}_${direction}`
@@ -300,11 +301,6 @@ watch(
 onMounted(() => {
   void cityStore.fetchCities()
   void transitStore.fetchFavorites().then(bootstrap)
-  refreshTimer = setInterval(loadPlatformDepartures, 12000)
-})
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
-import { Bus, ChevronRight, Clock, Settings, Tv } from '@lucide/vue'
+import { Bus, ChevronRight, Clock, Menu, Settings, Tv, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import CitySwitcher from '@/components/CitySwitcher.vue'
 
@@ -11,7 +11,7 @@ const router = useRouter()
 const route = useRoute()
 const { wsConnected } = storeToRefs(transitStore)
 
-const mobileMenuOpen = ref(false)
+const mobileMenuOpen = shallowRef(false)
 
 const navItems = [
   { to: '/', label: '关注线路', icon: Bus },
@@ -83,12 +83,8 @@ function onCityChange(): void {
           :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
           @click="mobileMenuOpen = !mobileMenuOpen"
         >
-          <svg v-if="!mobileMenuOpen" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-          <svg v-else class="h-5 w-5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <Menu v-if="!mobileMenuOpen" class="h-5 w-5" />
+          <X v-else class="h-5 w-5 text-cyan-400" />
         </button>
       </div>
     </div>

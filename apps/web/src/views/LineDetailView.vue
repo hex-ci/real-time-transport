@@ -4,7 +4,7 @@ import {
   nextTick,
   onMounted,
   onUnmounted,
-  ref,
+  shallowRef,
   watch,
   useTemplateRef,
 } from 'vue'
@@ -22,7 +22,7 @@ import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
-import { useGis } from '@/composables/useGis'
+import { useGis } from '@/composables/use-gis'
 import RouteBoard from '@/components/RouteBoard.vue'
 import type { Station } from '@real-time-transport/shared'
 
@@ -56,7 +56,7 @@ const pageRef = useTemplateRef('pageEl')
  * own bottom padding (App.vue gives <main> py-5 = 20px). Measured live because
  * the header height and padding are not constants we should hardcode.
  */
-const pageHeight = ref(600)
+const pageHeight = shallowRef(600)
 
 function getMainBottomPadding(): number {
   return typeof window !== 'undefined' && window.innerWidth < 640 ? 10 : 20
@@ -77,9 +77,9 @@ const { currentLineDetail, currentLiveStatus } = storeToRefs(transitStore)
 const { nearestStation } = storeToRefs(locationStore)
 const { isLoading, loadError, isRefreshingLive } = storeToRefs(transitStore)
 
-const selectedStation = ref<Station | null>(null)
-const showLineInfo = ref(false)
-const stationArrivals = ref<{ isExact: boolean, arrivals: Array<{ time: string, etaSeconds: number }> } | null>(null)
+const selectedStation = shallowRef<Station | null>(null)
+const showLineInfo = shallowRef(false)
+const stationArrivals = shallowRef<{ isExact: boolean, arrivals: Array<{ time: string, etaSeconds: number }> } | null>(null)
 
 /**
  * Honest freshness label for the live data shown in the station panel: how long
@@ -610,7 +610,7 @@ onUnmounted(() => {
           <div class="mt-2 flex flex-wrap gap-2">
             <span
               v-for="(a, i) in stationArrivals.arrivals"
-              :key="i"
+              :key="a.time || i"
               class="rounded-lg border px-2.5 py-1 font-mono text-xs"
               :class="i === 0
                 ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'

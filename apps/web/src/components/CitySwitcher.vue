@@ -3,7 +3,7 @@ import {
   computed,
   nextTick,
   onMounted,
-  ref,
+  shallowRef,
   useTemplateRef,
   watch,
 } from 'vue'
@@ -30,8 +30,8 @@ const mobileModalRef = useTemplateRef('mobileModalEl')
 const desktopSearchInputRef = useTemplateRef('desktopSearchInputEl')
 const mobileSearchInputRef = useTemplateRef('mobileSearchInputEl')
 
-const open = ref(false)
-const keyword = ref('')
+const open = shallowRef(false)
+const keyword = shallowRef('')
 
 function onDesktopSearchSubmit(): void {
   if (displayList.value.length === 1) {

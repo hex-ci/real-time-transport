@@ -3,7 +3,7 @@ import {
   computed,
   onMounted,
   onUnmounted,
-  ref,
+  shallowRef,
   useTemplateRef,
   watch,
 } from 'vue'
@@ -23,7 +23,7 @@ import {
   computeRouteLayout,
   type RouteLayoutMode,
   type RouteLayoutResult,
-} from '@/composables/useRouteLayout'
+} from '@/composables/use-route-layout'
 
 const {
   nearestStation = null,
@@ -61,7 +61,7 @@ function loadPersistedMode(): RouteLayoutMode {
   return 'folded'
 }
 
-const layoutMode = ref<RouteLayoutMode>(loadPersistedMode())
+const layoutMode = shallowRef<RouteLayoutMode>(loadPersistedMode())
 
 // Automatic reactive container resize tracking via VueUse
 useResizeObserver(containerRef, () => handleResize())

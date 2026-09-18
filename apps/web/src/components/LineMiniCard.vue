@@ -65,8 +65,10 @@ const positionedBuses = computed(() => buses.filter(b => typeof b.order === 'num
 
 const busPositions = computed(() => {
   const total = Math.max(totalStops, 1)
-  return positionedBuses.value
-    .map(b => Math.min(Math.max(((b.order as number) / total) * 100, 4), 96))
+  return positionedBuses.value.map((b, idx) => ({
+    id: b.id || b.license || `${b.order}_${idx}`,
+    pos: Math.min(Math.max(((b.order as number) / total) * 100, 4), 96),
+  }))
 })
 
 const trackProgress = computed(() => {
@@ -173,11 +175,11 @@ const congestionText = computed(() => {
 
           <!-- Bus Dots along the mini track -->
           <div
-            v-for="(pos, idx) in busPositions"
-            :key="idx"
+            v-for="bus in busPositions"
+            :key="bus.id"
             class="absolute -top-1 h-3 w-3 -translate-x-1/2 rounded-full border-2 border-slate-950"
             :class="accent.dot"
-            :style="{ left: `${pos}%` }"
+            :style="{ left: `${bus.pos}%` }"
           ></div>
         </div>
       </div>

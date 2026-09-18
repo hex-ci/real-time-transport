@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import type { Station } from '@real-time-transport/shared'
 import { haversineMeters } from '@real-time-transport/shared'
 
 export const useLocationStore = defineStore('location', () => {
-  const userCoords = ref<{ lat: number, lng: number } | null>(null)
-  const isLocating = ref(false)
-  const locationError = ref<string | null>(null)
-  const nearestStation = ref<Station | null>(null)
-  const nearestDistanceM = ref<number | null>(null)
-  const landmark = ref<string>('')
+  const userCoords = shallowRef<{ lat: number, lng: number } | null>(null)
+  const isLocating = shallowRef(false)
+  const locationError = shallowRef<string | null>(null)
+  const nearestStation = shallowRef<Station | null>(null)
+  const nearestDistanceM = shallowRef<number | null>(null)
+  const landmark = shallowRef<string>('')
 
   /**
    * True once the user (or the browser) has denied geolocation in this session.

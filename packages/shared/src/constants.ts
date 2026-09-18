@@ -1,5 +1,3 @@
-export const CITY_BEIJING = '027'
-
 export const DEFAULT_COMMUTE_HOURS = {
   morningStart: '06:30',
   morningEnd: '11:30',

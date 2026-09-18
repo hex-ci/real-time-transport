@@ -1,16 +1,16 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, shallowRef } from 'vue'
 import type { TransitCity } from '@real-time-transport/shared'
 import { DEFAULT_CITY_CODE } from '@real-time-transport/shared'
 
 const STORAGE_KEY = 'rt-transit-city'
 
 export const useCityStore = defineStore('city', () => {
-  const cities = ref<TransitCity[]>([])
-  const currentCode = ref<string>(
+  const cities = shallowRef<TransitCity[]>([])
+  const currentCode = shallowRef<string>(
     localStorage.getItem(STORAGE_KEY) || DEFAULT_CITY_CODE,
   )
-  const isLoading = ref(false)
+  const isLoading = shallowRef(false)
 
   const currentCity = computed<TransitCity | undefined>(() =>
     cities.value.find(c => c.code === currentCode.value),

@@ -25,22 +25,21 @@ import {
   type RouteLayoutResult,
 } from '@/composables/useRouteLayout'
 
-const props = withDefaults(
-  defineProps<{
-    lineDetail: LineDetail
-    buses: LiveBus[]
-    nearestStation?: Station | null
-    /** Currently selected station, drawn with a highlight ring. */
-    selectedStation?: Station | null
-    /** Optional initial layout mode ('folded' or 'linear'). Defaults to persisted preference or 'folded'. */
-    initialLayoutMode?: RouteLayoutMode
-  }>(),
-  {
-    nearestStation: null,
-    selectedStation: null,
-    initialLayoutMode: undefined,
-  },
-)
+const {
+  nearestStation = null,
+  selectedStation = null,
+  initialLayoutMode = undefined,
+  lineDetail,
+  buses,
+} = defineProps<{
+  lineDetail: LineDetail
+  buses: LiveBus[]
+  nearestStation?: Station | null
+  /** Currently selected station, drawn with a highlight ring. */
+  selectedStation?: Station | null
+  /** Optional initial layout mode ('folded' or 'linear'). Defaults to persisted preference or 'folded'. */
+  initialLayoutMode?: RouteLayoutMode
+}>()
 
 const emit = defineEmits<{
   (e: 'select-station', station: Station): void
@@ -51,7 +50,7 @@ const containerRef = useTemplateRef('containerEl')
 
 // Layout mode: 'folded' (compact multi-row) vs 'linear' (continuous straight line)
 function loadPersistedMode(): RouteLayoutMode {
-  if (props.initialLayoutMode) return props.initialLayoutMode
+  if (initialLayoutMode) return initialLayoutMode
   try {
     const saved = localStorage.getItem('realtime_transit_layout_mode')
     if (saved === 'linear' || saved === 'folded') return saved
@@ -141,7 +140,7 @@ const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
 const effectiveStationDistances = computed<number[]>(() => {
-  const detail = props.lineDetail
+  const detail = lineDetail
   if (detail?.stationDistances && detail.stationDistances.length >= 2) {
     return detail.stationDistances
   }
@@ -157,12 +156,12 @@ const effectiveStationDistances = computed<number[]>(() => {
 function routeLength(): number {
   const sd = effectiveStationDistances.value
   if (sd.length > 0) return sd[sd.length - 1]!
-  return props.lineDetail?.routeLengthMeters || 10000
+  return lineDetail?.routeLengthMeters || 10000
 }
 
 function busDistanceFromStart(b: LiveBus): number | null {
   const L = routeLength()
-  const stops = props.lineDetail?.stops || []
+  const stops = lineDetail?.stops || []
   const N = stops.length
   if (N < 2) return null
 
@@ -581,7 +580,7 @@ function renderStaticBoard(): void {
   stationLayer.destroyChildren()
 
   const width = stage.width()
-  const stops = props.lineDetail?.stops || []
+  const stops = lineDetail?.stops || []
   if (stops.length === 0) return
 
   const m = boardMetrics()
@@ -648,9 +647,9 @@ function renderStaticBoard(): void {
 
   // Render Station Nodes
   for (const pt of layout.points) {
-    const isNearest = props.nearestStation && props.nearestStation.id === pt.station.id
+    const isNearest = nearestStation && nearestStation.id === pt.station.id
     const isInterchange = pt.station.interchanges && pt.station.interchanges.length > 0
-    const isSelected = props.selectedStation?.id === pt.station.id
+    const isSelected = selectedStation?.id === pt.station.id
 
     // Interchange marker ring
     if (isInterchange && !isNearest) {
@@ -777,7 +776,7 @@ function renderDynamicElements(): void {
   rippleCircle1 = null
   rippleCircle2 = null
 
-  const stops = props.lineDetail?.stops || []
+  const stops = lineDetail?.stops || []
   if (stops.length === 0) return
 
   renderRipple()
@@ -796,8 +795,8 @@ function renderRipple(): void {
   rippleCircle1 = null
   rippleCircle2 = null
 
-  if (props.nearestStation) {
-    const pt = currentLayout.points.find(p => p.station.id === props.nearestStation?.id)
+  if (nearestStation) {
+    const pt = currentLayout.points.find(p => p.station.id === nearestStation?.id)
     if (pt) {
       rippleCircle1 = new Konva.Circle({
         x: pt.x,
@@ -884,7 +883,7 @@ function syncVehicles(): void {
   if (!stage || !dynamicLayer || !currentLayout) return
 
   const seenIds = new Set<string>()
-  const incoming = props.buses || []
+  const incoming = buses || []
 
   for (const bus of incoming) {
     const rawId = bus.id || bus.license || `b-${bus.order}`
@@ -961,15 +960,15 @@ function syncVehicles(): void {
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
 
-  let targetId = props.selectedStation?.id ?? props.nearestStation?.id
-  if (!targetId && props.buses.length > 0) {
-    const b = props.buses[0]!
+  let targetId = selectedStation?.id ?? nearestStation?.id
+  if (!targetId && buses.length > 0) {
+    const b = buses[0]!
     const targetOrder = b.nextOrder ?? b.order
-    const found = props.lineDetail?.stops.find(s => s.order === targetOrder)
+    const found = lineDetail?.stops.find(s => s.order === targetOrder)
     if (found) targetId = found.id
   }
-  if (!targetId && props.lineDetail?.stops.length) {
-    targetId = props.lineDetail.stops[0]!.id
+  if (!targetId && lineDetail?.stops.length) {
+    targetId = lineDetail.stops[0]!.id
   }
 
   const targetPt = currentLayout.points.find(p => p.station.id === targetId) ?? currentLayout.points[0]!
@@ -1145,7 +1144,7 @@ function handleVisibilityChange(): void {
 }
 
 watch(
-  () => [props.lineDetail?.lineId, props.lineDetail?.direction],
+  () => [lineDetail?.lineId, lineDetail?.direction],
   () => {
     userHasTransformed = false
     renderStaticBoard()
@@ -1160,18 +1159,18 @@ watch(
 )
 
 watch(
-  () => props.selectedStation?.id,
+  () => selectedStation?.id,
   () => {
     renderStaticBoard()
     stationLayer?.batchDraw()
-    if (layoutMode.value === 'linear' && props.selectedStation) {
+    if (layoutMode.value === 'linear' && selectedStation) {
       focusKeyStation(true)
     }
   },
 )
 
 watch(
-  () => props.buses,
+  () => buses,
   () => {
     syncVehicles()
   },
@@ -1179,7 +1178,7 @@ watch(
 )
 
 watch(
-  () => props.nearestStation,
+  () => nearestStation,
   () => {
     renderRipple()
     dynamicLayer?.batchDraw()

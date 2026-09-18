@@ -51,7 +51,7 @@ importers:
         specifier: ^11.3.0
         version: 11.3.0
       '@fastify/websocket':
-        specifier: ^11.3.0
+        specifier: ^11.3.1
         version: 11.3.1
       '@real-time-transport/shared':
         specifier: workspace:*

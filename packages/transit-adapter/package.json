@@ -1,0 +1,27 @@
+{
+  "name": "@real-time-transport/transit-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "实时交通数据源适配器包：车来了、极数本源、地铁排班推演、坐标纠偏与容灾降级",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@real-time-transport/shared": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.1"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "extends": ["@tsconfig/node22/tsconfig.json", "../../tsconfig.base.json"],
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/__tests__/*"],
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node"],
+    "module": "preserve",
+    "moduleResolution": "bundler"
+  }
+}

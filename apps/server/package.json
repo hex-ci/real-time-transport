@@ -1,0 +1,34 @@
+{
+  "name": "@real-time-transport/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "实时交通大屏服务端：Fastify 5 + WebSocket + PostgreSQL 18 + 实时轮询广播",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "start": "node --env-file-if-exists=../../.env src/index.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/websocket": "^11.3.0",
+    "@real-time-transport/shared": "workspace:*",
+    "@real-time-transport/transit-adapter": "workspace:*",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.1"
+  }
+}

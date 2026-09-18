@@ -1,0 +1,35 @@
+{
+  "name": "@real-time-transport/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "实时交通大屏前端：Vue 3 + TypeScript + Tailwind CSS 4 + Vite 8 + Pinia 4 + Konva 拓扑报站屏",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --build",
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.47.0",
+    "@real-time-transport/shared": "workspace:*",
+    "@use-gesture/vanilla": "^10.3.1",
+    "@vueuse/core": "^15.0.0",
+    "konva": "^10.5.0",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
+    "vue-konva": "^4.0.1",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1",
+    "vue-tsc": "^3.3.11"
+  }
+}

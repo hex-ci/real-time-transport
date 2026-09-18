@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: real-time-transport-postgres
+    environment:
+      POSTGRES_USER: transit
+      POSTGRES_PASSWORD: transit_password
+      POSTGRES_DB: transit
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U transit']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

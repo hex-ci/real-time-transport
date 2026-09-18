@@ -1,0 +1,10 @@
+{
+  "extends": ["@tsconfig/node22/tsconfig.json", "../../tsconfig.base.json"],
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src"],
+  "module": "preserve",
+  "moduleResolution": "bundler"
+}

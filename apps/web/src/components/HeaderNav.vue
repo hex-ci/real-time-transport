@@ -36,7 +36,7 @@ function onCityChange(): void {
 
 <template>
   <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
-    <div class="mx-auto flex max-w-5xl items-center justify-between px-3 py-1.5 sm:px-6 sm:py-3">
+    <div class="mx-auto flex max-w-[1200px] items-center justify-between px-3 py-1.5 sm:px-6 sm:py-3">
       <!-- Brand -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]">

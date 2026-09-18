@@ -3,7 +3,7 @@ import type { Station } from '@real-time-transport/shared'
 import {
   calculateResponsiveStopsPerRow,
   computeRouteLayout,
-} from '../composables/useRouteLayout'
+} from '../composables/use-route-layout'
 
 describe('Route Layout Algorithm', () => {
   const sampleStops: Station[] = Array.from({ length: 57 }, (_, i) => ({

@@ -33,6 +33,32 @@
 
 ---
 
+## 界面预览
+
+### 1. 首页动态关注流（Overview）
+
+| 桌面端看板 (1280px) | 移动端视图 (375px) |
+| :---: | :---: |
+| <img src="docs/screenshots/overview-pc.png" width="600" alt="桌面端首页" /> | <img src="docs/screenshots/overview-mobile.png" width="280" alt="移动端首页" /> |
+
+### 2. 线路拓扑大屏（折返排布 vs 直线排布）
+
+| 经典折返排布（桌面端 11 站/行高密度大屏） | 单轴贯通直线排布（桌面端长卷） |
+| :---: | :---: |
+| <img src="docs/screenshots/line-folded-pc.png" width="450" alt="折返排布" /> | <img src="docs/screenshots/line-linear-pc.png" width="450" alt="直线排布" /> |
+
+| 移动端折返排布（4~5 站/行舒适间距） | 移动端直线排布（聚焦当前站长卷） |
+| :---: | :---: |
+| <img src="docs/screenshots/line-folded-mobile.png" width="280" alt="移动端折返排布" /> | <img src="docs/screenshots/line-linear-mobile.png" width="280" alt="移动端直线排布" /> |
+
+### 3. 虚拟候车亭（站台大屏）与玄关 Always-On 看板
+
+| 虚拟站台起降大屏 (多线聚合重排) | 玄关 Always-On 态势监控看板 |
+| :---: | :---: |
+| <img src="docs/screenshots/platform-pc.png" width="450" alt="站台大屏" /> | <img src="docs/screenshots/kiosk-pc.png" width="450" alt="玄关看板" /> |
+
+---
+
 ## 技术架构
 
 Monorepo 标准工程分层：

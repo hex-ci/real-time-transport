@@ -92,8 +92,9 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     const q = req.query as Record<string, string>
     const direction = Number(q?.direction ?? 0)
     const cityCode = q?.cityCode
+    const simulate = q?.simulate === 'true'
 
-    const status = await transitService.getLiveStatus(lineId, direction, cityCode)
+    const status = await transitService.getLiveStatus(lineId, direction, cityCode, simulate)
     if (!status) {
       return reply.status(404).send({ success: false, error: 'Live status not available' })
     }

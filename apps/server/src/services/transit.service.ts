@@ -11,6 +11,7 @@ import {
 import type {
   LineDetail,
   LineSummary,
+  LiveBus,
   LiveLineStatus,
   UserFavoriteLine,
   WsServerMessage,
@@ -159,8 +160,78 @@ export class TransitService {
     return cached
   }
 
-  async getLiveStatus(lineId: string, direction: number = 0, cityCode?: string): Promise<LiveLineStatus | null> {
-    return this.aggregator.getLiveStatus(lineId, direction, cityCode)
+  async getLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+    forceSimulate = false,
+  ): Promise<LiveLineStatus | null> {
+    const status = await this.aggregator.getLiveStatus(lineId, direction, cityCode)
+    const isEmpty = !status || status.buses.length === 0
+    const shouldSimulate = forceSimulate
+      || process.env.TRANSIT_SIMULATION === 'true'
+      || process.env.TRANSIT_SIMULATE_NIGHT === 'true'
+      || process.env.DEMO_MODE === 'true'
+
+    if (shouldSimulate && isEmpty) {
+      return this.generateSimulatedLiveStatus(lineId, direction, cityCode)
+    }
+    return status
+  }
+
+  /**
+   * 模拟数据生成器：开启模拟模式或无在途车时，生成物理连续的在途模拟运行数据。
+   */
+  async generateSimulatedLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+  ): Promise<LiveLineStatus | null> {
+    const detail = await this.getLineDetail(lineId, direction, cityCode)
+    if (!detail || detail.stops.length < 2) return null
+
+    const totalStops = detail.stops.length
+    const L = detail.routeLengthMeters && detail.routeLengthMeters > 0
+      ? detail.routeLengthMeters
+      : (totalStops - 1) * 1000
+    const sd = detail.stationDistances && detail.stationDistances.length === totalStops
+      ? detail.stationDistances
+      : detail.stops.map((_, i) => i * (L / (totalStops - 1)))
+
+    const count = Math.min(6, Math.max(3, Math.floor(totalStops / 7)))
+    const now = Date.now()
+    const buses: LiveBus[] = []
+
+    for (let i = 0; i < count; i++) {
+      const baseRatio = (i + 0.6) / (count + 1)
+      const timeCycle = ((now / 15000) + (i * 0.33)) % 1
+      const stopIdx = Math.max(0, Math.min(totalStops - 2, Math.floor(baseRatio * (totalStops - 1))))
+      const s0 = sd[stopIdx] ?? 0
+      const s1 = sd[stopIdx + 1] ?? s0
+      const currentDist = s0 + (s1 - s0) * timeCycle
+
+      buses.push({
+        id: `sim_${lineId}_${direction}_${i + 1}`,
+        order: stopIdx + 1,
+        nextOrder: stopIdx + 2,
+        progress: timeCycle,
+        speed: 7.5 + (i % 3) * 1.5,
+        congestion: i % 2 === 0 ? 'low' : 'medium',
+        distanceFromStart: Math.round(currentDist),
+        distanceToWaitStn: Math.max(0, Math.round(L - currentDist)),
+        license: `京A·${7800 + (i * 127) % 900}`,
+        updatedAt: now,
+      })
+    }
+
+    return {
+      lineId,
+      direction,
+      buses,
+      dataSource: 'subway_schedule',
+      isDegraded: false,
+      updatedAt: now,
+    }
   }
 
   /**
@@ -436,7 +507,7 @@ export class TransitService {
       if (sub.clients.size === 0) continue
 
       try {
-        const status = await this.aggregator.getLiveStatus(sub.lineId, sub.direction, sub.cityCode)
+        const status = await this.getLiveStatus(sub.lineId, sub.direction, sub.cityCode)
         if (!status) continue
 
         const payload = JSON.stringify({

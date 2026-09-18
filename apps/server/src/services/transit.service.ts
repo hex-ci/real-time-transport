@@ -89,7 +89,7 @@ export class TransitService {
       merged.push({
         code: c.code,
         name: c.name,
-        pinyin: dictEntry?.pinyin || '',
+        pinyin: dictEntry?.pinyin || c.pinyin || '',
         hasMetro: true,
         hot: true,
       })

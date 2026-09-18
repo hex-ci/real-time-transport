@@ -170,7 +170,6 @@ export class TransitService {
     const isEmpty = !status || status.buses.length === 0
     const shouldSimulate = forceSimulate
       || process.env.TRANSIT_SIMULATION === 'true'
-      || process.env.TRANSIT_SIMULATE_NIGHT === 'true'
       || process.env.DEMO_MODE === 'true'
 
     if (shouldSimulate && isEmpty) {

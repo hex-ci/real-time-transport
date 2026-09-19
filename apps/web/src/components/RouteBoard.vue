@@ -14,7 +14,9 @@ import {
   Minus,
   MoveHorizontal,
   Plus,
+  SlidersHorizontal,
   WrapText,
+  X,
 } from '@lucide/vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import type { LineDetail, LiveBus, Station } from '@real-time-transport/shared'
@@ -62,6 +64,7 @@ function loadPersistedMode(): RouteLayoutMode {
 }
 
 const layoutMode = shallowRef<RouteLayoutMode>(loadPersistedMode())
+const mobileToolsOpen = shallowRef(false)
 
 // Automatic reactive container resize tracking via VueUse
 useResizeObserver(containerRef, () => handleResize())
@@ -1222,8 +1225,8 @@ function handleResize(): void {
 
 <template>
   <div class="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-    <!-- Desktop Top HUD / Legend bar -->
-    <div class="hidden sm:flex shrink-0 items-center justify-between gap-2 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 text-xs backdrop-blur-md">
+    <!-- Desktop Top HUD / Legend bar (md: and up) -->
+    <div class="hidden md:flex shrink-0 items-center justify-between gap-2 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 text-xs backdrop-blur-md">
       <div class="flex items-center gap-3">
         <span class="flex items-center gap-1.5 font-medium text-slate-300">
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-cyan-400"></span>
@@ -1291,9 +1294,9 @@ function handleResize(): void {
       </div>
     </div>
 
-    <!-- Mobile Floating Controls -->
+    <!-- Mobile Floating Controls (screens < md) -->
     <!-- Mode pill badge: tap to toggle layout instantly on mobile -->
-    <div class="sm:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md">
+    <div class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md">
       <button
         type="button"
         class="flex items-center gap-1 text-slate-300 active:scale-95"
@@ -1309,48 +1312,75 @@ function handleResize(): void {
       </span>
     </div>
 
-    <!-- Mobile Right FAB Action Buttons: WCAG min touch target 36-40px -->
-    <div class="sm:hidden absolute right-2.5 top-2.5 z-10 flex flex-col gap-1.5">
+    <!-- Mobile Right FAB Action Buttons: Collapsible to save visual area on mobile (default collapsed) -->
+    <div class="md:hidden absolute right-2.5 top-2.5 z-10 flex flex-col items-end gap-1.5">
+      <!-- Toggle Trigger Button -->
       <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/40 bg-slate-900/90 text-xs text-cyan-300 shadow-lg backdrop-blur-md active:scale-95"
-        :title="layoutMode === 'folded' ? '切换为直线排布' : '切换为折返排布'"
-        :aria-label="layoutMode === 'folded' ? '切换为直线排布' : '切换为折返排布'"
-        @click="toggleLayoutMode"
+        type="button"
+        class="flex h-9 w-9 items-center justify-center rounded-xl border text-xs shadow-lg backdrop-blur-md transition active:scale-95"
+        :class="mobileToolsOpen
+          ? 'border-cyan-500/50 bg-slate-800 text-cyan-400'
+          : 'border-slate-700/80 bg-slate-900/90 text-slate-300 hover:text-white'"
+        :aria-label="mobileToolsOpen ? '收起线路工具' : '展开线路工具'"
+        :title="mobileToolsOpen ? '收起线路工具' : '展开线路工具'"
+        @click="mobileToolsOpen = !mobileToolsOpen"
       >
-        <component :is="layoutMode === 'folded' ? GitCommitHorizontal : WrapText" class="h-4 w-4" />
+        <SlidersHorizontal v-if="!mobileToolsOpen" class="h-4 w-4" />
+        <X v-else class="h-4 w-4" />
       </button>
-      <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-        :title="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
-        :aria-label="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
-        @click="handleFitWidth"
+
+      <!-- Expandable Tool List -->
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-2 scale-95"
+        enter-to-class="opacity-100 translate-y-0 scale-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0 scale-100"
+        leave-to-class="opacity-0 -translate-y-2 scale-95"
       >
-        <MoveHorizontal class="h-4 w-4" />
-      </button>
-      <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-        title="适应屏幕"
-        aria-label="适应屏幕"
-        @click="handleFitScreen"
-      >
-        <Expand class="h-4 w-4" />
-      </button>
-      <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-        title="放大"
-        aria-label="放大"
-        @click="zoomIn"
-      >
-        <Plus class="h-4 w-4" />
-      </button>
-      <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-        title="缩小"
-        aria-label="缩小"
-        @click="zoomOut"
-      >
-        <Minus class="h-4 w-4" />
-      </button>
+        <div v-if="mobileToolsOpen" class="flex flex-col gap-1.5">
+          <button
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/40 bg-slate-900/90 text-xs text-cyan-300 shadow-lg backdrop-blur-md active:scale-95"
+            :title="layoutMode === 'folded' ? '切换为直线排布' : '切换为折返排布'"
+            :aria-label="layoutMode === 'folded' ? '切换为直线排布' : '切换为折返排布'"
+            @click="toggleLayoutMode"
+          >
+            <component :is="layoutMode === 'folded' ? GitCommitHorizontal : WrapText" class="h-4 w-4" />
+          </button>
+          <button
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
+            :title="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
+            :aria-label="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
+            @click="handleFitWidth"
+          >
+            <MoveHorizontal class="h-4 w-4" />
+          </button>
+          <button
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
+            title="适应屏幕"
+            aria-label="适应屏幕"
+            @click="handleFitScreen"
+          >
+            <Expand class="h-4 w-4" />
+          </button>
+          <button
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
+            title="放大"
+            aria-label="放大"
+            @click="zoomIn"
+          >
+            <Plus class="h-4 w-4" />
+          </button>
+          <button
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
+            title="缩小"
+            aria-label="缩小"
+            @click="zoomOut"
+          >
+            <Minus class="h-4 w-4" />
+          </button>
+        </div>
+      </Transition>
     </div>
 
     <!-- Canvas Container -->

@@ -52,32 +52,36 @@ export interface RouteLayoutOptions {
 export function calculateResponsiveStopsPerRow(viewportWidth: number, totalStops: number): number {
   let target: number
 
+  // < 640px: Phone (under 360px -> 4, 360-639px -> 5)
   if (viewportWidth < 360) {
     target = 4
   }
-  else if (viewportWidth < 480) {
+  else if (viewportWidth < 640) {
     target = 5
   }
-  else if (viewportWidth < 640) {
+  // 640px - 767px: sm (large phone / foldable)
+  else if (viewportWidth < 768) {
     target = 6
   }
-  else if (viewportWidth < 768) {
-    target = 7
-  }
+  // 768px - 1023px: md (tablet / iPad portrait)
   else if (viewportWidth < 1024) {
     target = 8
   }
+  // 1024px - 1279px: lg (laptop / iPad landscape)
   else if (viewportWidth < 1280) {
     target = 10
   }
-  else if (viewportWidth < 1440) {
-    target = 11
-  }
-  else if (viewportWidth < 1600) {
+  // 1280px - 1535px: xl (standard desktop)
+  else if (viewportWidth < 1536) {
     target = 12
   }
-  else {
+  // 1536px - 1919px: 2xl (wide desktop)
+  else if (viewportWidth < 1920) {
     target = 14
+  }
+  // >= 1920px: ultrawide / 4K
+  else {
+    target = 16
   }
 
   // Never require more stops per row than the line actually has (minimum 2)
@@ -97,9 +101,9 @@ export function computeRouteLayout(
 ): RouteLayoutResult {
   const mode: RouteLayoutMode = options.mode ?? 'folded'
   const viewportWidth = options.viewportWidth ?? 1024
-  const paddingX = options.paddingX ?? (viewportWidth < 640 ? 20 : 40)
-  const paddingY = options.paddingY ?? (viewportWidth < 640 ? 28 : 50)
-  const rowHeight = options.rowHeight ?? (viewportWidth < 640 ? 64 : 90)
+  const paddingX = options.paddingX ?? (viewportWidth < 768 ? 20 : 40)
+  const paddingY = options.paddingY ?? (viewportWidth < 768 ? 28 : 50)
+  const rowHeight = options.rowHeight ?? (viewportWidth < 768 ? 64 : 90)
 
   const total = stops.length
   if (total === 0) {

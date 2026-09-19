@@ -36,7 +36,7 @@ function onCityChange(): void {
 
 <template>
   <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
-    <div class="mx-auto flex max-w-[1200px] items-center justify-between px-3 py-1.5 sm:px-6 sm:py-3">
+    <div class="flex w-full items-center justify-between px-3 py-1.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-3">
       <!-- Brand -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]">
@@ -49,8 +49,8 @@ function onCityChange(): void {
         </div>
       </RouterLink>
 
-      <!-- Desktop Nav Items: hidden on mobile, visible on tablet/desktop -->
-      <nav class="hidden sm:flex items-center gap-2">
+      <!-- Desktop Nav Items: hidden on mobile, visible on tablet/desktop (md:) -->
+      <nav class="hidden md:flex items-center gap-2">
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
@@ -64,7 +64,7 @@ function onCityChange(): void {
 
       <!-- Right Controls: WS Status (desktop), City Switcher, Mobile Hamburger -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-        <div class="hidden sm:flex items-center gap-2 text-xs">
+        <div class="hidden lg:flex items-center gap-2 text-xs">
           <span
             class="inline-block h-2 w-2 rounded-full"
             :class="wsConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-amber-400 animate-ping'"
@@ -78,7 +78,7 @@ function onCityChange(): void {
 
         <!-- Mobile Hamburger Toggle: exact 40x40 (h-10 w-10), matching CitySwitcher's 40px height -->
         <button
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 sm:hidden"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:hidden"
           :class="mobileMenuOpen ? 'border-cyan-500/50 text-cyan-400 bg-slate-800' : ''"
           :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
           @click="mobileMenuOpen = !mobileMenuOpen"
@@ -100,7 +100,7 @@ function onCityChange(): void {
     >
       <div
         v-if="mobileMenuOpen"
-        class="absolute inset-x-0 top-full z-50 border-b border-slate-800 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur-xl sm:hidden"
+        class="absolute inset-x-0 top-full z-50 border-b border-slate-800 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur-xl md:hidden"
       >
         <nav class="flex flex-col gap-1.5">
           <RouterLink
@@ -147,7 +147,7 @@ function onCityChange(): void {
   >
     <div
       v-if="mobileMenuOpen"
-      class="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs sm:hidden"
+      class="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
       @click="mobileMenuOpen = false"
     ></div>
   </Transition>

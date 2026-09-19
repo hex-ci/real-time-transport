@@ -52,7 +52,7 @@ function onMobileSearchSubmit(): void {
 const isBodyLocked = useScrollLock(typeof document !== 'undefined' ? document.body : null)
 
 watch(open, (isOpen) => {
-  if (typeof window !== 'undefined' && window.innerWidth < 640) {
+  if (typeof window !== 'undefined' && window.innerWidth < 768) {
     isBodyLocked.value = isOpen
   }
 })
@@ -60,7 +60,7 @@ watch(open, (isOpen) => {
 onClickOutside(rootRef, (e: any) => {
   // Only dismiss via onClickOutside on desktop popover.
   // On mobile, the sheet modal is teleported to <body> with its own backdrop & X button.
-  if (typeof window !== 'undefined' && window.innerWidth < 640) return
+  if (typeof window !== 'undefined' && window.innerWidth < 768) return
   if (mobileModalRef.value && e.target && mobileModalRef.value.contains(e.target as Node)) return
   open.value = false
 })
@@ -87,7 +87,7 @@ function toggle(): void {
     keyword.value = ''
     void nextTick(() => {
       // Focus desktop search if visible; on mobile, avoid autofocus to prevent virtual keyboard from covering screen immediately
-      if (window.innerWidth >= 640) {
+      if (window.innerWidth >= 768) {
         desktopSearchInputRef.value?.focus()
       }
     })
@@ -112,7 +112,7 @@ onMounted(() => {
     <!-- Trigger Button -->
     <button
       type="button"
-      class="flex h-10 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 sm:h-9 sm:px-3"
+      class="flex h-10 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:h-9 md:px-3"
       :aria-expanded="open"
       aria-haspopup="dialog"
       aria-label="选择城市"
@@ -126,8 +126,8 @@ onMounted(() => {
       />
     </button>
 
-    <!-- Desktop Dropdown Panel (sm: and up) -->
-    <div class="hidden sm:block">
+    <!-- Desktop Dropdown Panel (md: and up) -->
+    <div class="hidden md:block">
       <Transition name="fade">
         <div
           v-if="open"
@@ -206,12 +206,12 @@ onMounted(() => {
       </Transition>
     </div>
 
-    <!-- Mobile Bottom Sheet (Screen < sm, teleported to body for clean viewport stacking) -->
+    <!-- Mobile Bottom Sheet (Screen < md, teleported to body for clean viewport stacking) -->
     <Teleport to="body">
       <Transition name="sheet">
         <div
           v-if="open"
-          class="sheet-wrapper fixed inset-0 z-[90] flex flex-col justify-end sm:hidden"
+          class="sheet-wrapper fixed inset-0 z-[90] flex flex-col justify-end md:hidden"
           role="dialog"
           aria-modal="true"
           aria-label="选择城市"

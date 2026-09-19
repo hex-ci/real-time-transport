@@ -172,7 +172,7 @@ onMounted(() => {
 <template>
   <div class="space-y-6 pb-12">
     <!-- Header -->
-    <div class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:p-4 md:p-5 md:flex-row md:items-center md:justify-between">
       <div>
         <h2 class="flex flex-wrap items-center gap-2 text-base font-bold text-white sm:text-lg">
           <span>玄关 Always-On 看板</span>
@@ -212,13 +212,13 @@ onMounted(() => {
       </RouterLink>
     </div>
 
-    <!-- Multi-Line Stacked Route Bars -->
-    <div v-else class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <!-- Multi-Line Stacked Route Bars: fluid grid across breakpoints -->
+    <div v-else class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       <div
         v-for="card in kioskCards"
         :key="`${card.lineId}_${card.direction}`"
         class="rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-xl"
-        :class="{ 'lg:col-span-2': kioskCards.length === 1 }"
+        :class="{ 'md:col-span-2 xl:col-span-3 2xl:col-span-4': kioskCards.length === 1 }"
       >
         <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
           <div class="flex items-center gap-2">

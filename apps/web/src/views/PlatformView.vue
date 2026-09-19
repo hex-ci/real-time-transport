@@ -307,13 +307,13 @@ onMounted(() => {
 <template>
   <div class="space-y-5 pb-12">
     <!-- Header -->
-    <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 shadow-xl backdrop-blur-md sm:rounded-3xl sm:p-5">
-      <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 shadow-xl backdrop-blur-md sm:rounded-3xl sm:p-5 md:p-6">
+      <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
         <div>
           <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
             虚拟候车亭 · 多线聚合起降牌
           </span>
-          <h2 class="mt-0.5 flex items-center gap-2 text-lg font-bold text-white sm:mt-1 sm:text-2xl">
+          <h2 class="mt-0.5 flex items-center gap-2 text-lg font-bold text-white sm:mt-1 md:text-2xl">
             当前站台：<span class="max-w-[200px] truncate text-cyan-300">{{ currentStationName || '选择中...' }}</span>
           </h2>
           <p class="text-xs text-slate-400">
@@ -321,7 +321,7 @@ onMounted(() => {
           </p>
         </div>
 
-        <div class="flex w-full items-center gap-2 sm:w-auto">
+        <div class="flex w-full items-center gap-2 md:w-auto">
           <button
             class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95"
             :disabled="detecting"
@@ -338,7 +338,7 @@ onMounted(() => {
           </button>
           <select
             v-model="currentStationName"
-            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-base font-medium text-slate-200 outline-none transition focus:border-cyan-500 sm:flex-none sm:text-xs"
+            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-base font-medium text-slate-200 outline-none transition focus:border-cyan-500 md:flex-none md:text-xs"
             @change="loadPlatformDepartures"
           >
             <option v-for="st in stationOptions" :key="st" :value="st">
@@ -352,7 +352,7 @@ onMounted(() => {
     <!-- Departure Board Table -->
     <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
       <!-- Desktop header: hidden on mobile, where the two-row card layout needs no headings -->
-      <div class="hidden grid-cols-12 border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider sm:grid">
+      <div class="hidden grid-cols-12 border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider md:grid">
         <div class="col-span-3">线路 / 始发</div>
         <div class="col-span-4">开往方向</div>
         <div class="col-span-3 text-right">预计到站</div>
@@ -371,21 +371,21 @@ onMounted(() => {
         <div
           v-for="item in departureItems"
           :key="item.id"
-          class="px-3 py-3 transition hover:bg-slate-900/50 sm:grid sm:grid-cols-12 sm:items-center sm:px-4 sm:py-3.5"
+          class="px-3 py-3 transition hover:bg-slate-900/50 md:grid md:grid-cols-12 md:items-center md:px-4 md:py-3.5"
         >
           <!-- Row 1 (mobile): line badge + direction -->
-          <div class="flex items-center gap-2.5 sm:col-span-3 sm:col-start-1 sm:row-start-1">
+          <div class="flex items-center gap-2.5 md:col-span-3 md:col-start-1 md:row-start-1">
             <span
               class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2 font-mono font-bold text-cyan-400 whitespace-nowrap"
               :class="item.lineName.length > 4 ? 'text-xs min-w-[58px]' : 'text-xs min-w-[44px]'"
             >
               {{ item.lineName }}
             </span>
-            <span class="min-w-0 truncate text-xs font-medium text-slate-200 sm:col-span-4 sm:col-start-4 sm:truncate">{{ item.terminal }}</span>
+            <span class="min-w-0 truncate text-xs font-medium text-slate-200 md:col-span-4 md:col-start-4 md:truncate">{{ item.terminal }}</span>
           </div>
 
           <!-- Row 2 (mobile): ETA + status, right-aligned against row 1's badge column -->
-          <div class="mt-2 flex items-end justify-between sm:col-span-6 sm:col-start-7 sm:row-start-1 sm:mt-0 sm:justify-end sm:gap-4">
+          <div class="mt-2 flex items-end justify-between md:col-span-6 md:col-start-7 md:row-start-1 md:mt-0 md:justify-end md:gap-4">
             <div class="font-mono">
               <template v-if="item.etaMinutes !== null">
                 <span class="text-base font-bold text-cyan-400">{{ item.etaMinutes }}</span>

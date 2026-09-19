@@ -17,20 +17,24 @@ describe('Route Layout Algorithm', () => {
 
   describe('calculateResponsiveStopsPerRow', () => {
     it('adapts stops per row across screen widths', () => {
-      // Narrow mobile
+      // Narrow mobile (<360)
       expect(calculateResponsiveStopsPerRow(320, 57)).toBe(4)
-      // Standard mobile
+      // Standard mobile (<640)
       expect(calculateResponsiveStopsPerRow(375, 57)).toBe(5)
       expect(calculateResponsiveStopsPerRow(390, 57)).toBe(5)
       expect(calculateResponsiveStopsPerRow(430, 57)).toBe(5)
-      // Small tablet
-      expect(calculateResponsiveStopsPerRow(640, 57)).toBe(7)
-      // Tablet
+      // sm: Large mobile / foldable (640 - 767)
+      expect(calculateResponsiveStopsPerRow(640, 57)).toBe(6)
+      // md: Tablet / iPad (768 - 1023)
       expect(calculateResponsiveStopsPerRow(768, 57)).toBe(8)
-      // Desktop PC
+      // lg: Laptop (1024 - 1279)
       expect(calculateResponsiveStopsPerRow(1024, 57)).toBe(10)
-      expect(calculateResponsiveStopsPerRow(1280, 57)).toBe(11)
-      expect(calculateResponsiveStopsPerRow(1920, 57)).toBe(14)
+      // xl: Desktop PC (1280 - 1535)
+      expect(calculateResponsiveStopsPerRow(1280, 57)).toBe(12)
+      // 2xl: Wide desktop (1536 - 1919)
+      expect(calculateResponsiveStopsPerRow(1600, 57)).toBe(14)
+      // Ultrawide (>= 1920)
+      expect(calculateResponsiveStopsPerRow(1920, 57)).toBe(16)
     })
 
     it('respects small line station counts without exceeding line total', () => {

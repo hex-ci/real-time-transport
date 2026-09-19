@@ -253,8 +253,8 @@ onMounted(() => {
 <template>
   <div class="space-y-5 pb-12">
     <!-- Smart Context Hero Banner -->
-    <div class="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5">
-      <div class="flex items-center justify-between gap-3 sm:gap-4">
+    <div class="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5 md:p-6">
+      <div class="flex items-center justify-between gap-3 md:gap-4">
         <!-- Left Column: Mode badge, Time, Title -->
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
@@ -265,26 +265,26 @@ onMounted(() => {
             <span class="font-mono text-xs text-slate-400">{{ currentTimeStr }}</span>
             <span class="text-xs text-slate-400">· {{ cityStore.currentCityName }}</span>
           </div>
-          <h2 class="mt-1.5 text-xl font-bold tracking-tight text-white sm:mt-2 sm:text-2xl">
+          <h2 class="mt-1.5 text-xl font-bold tracking-tight text-white sm:mt-2 md:text-2xl">
             {{ commuteProfile?.description || `${cityStore.currentCityName}通勤实时态势监控` }}
           </h2>
-          <p class="mt-1 hidden text-xs text-slate-400 sm:block">
+          <p class="mt-1 hidden text-xs text-slate-400 md:block">
             真实上游秒级推演，点击卡片进入拓扑长轴报站大屏
           </p>
         </div>
 
-        <!-- Right Column: Buttons (stacked vertically on mobile, horizontal row on desktop) -->
-        <div class="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+        <!-- Right Column: Buttons (stacked vertically on mobile, horizontal row on tablet/desktop) -->
+        <div class="flex shrink-0 flex-col gap-1.5 md:flex-row md:items-center md:gap-2">
           <button
             v-if="canSwitchAny"
-            class="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium whitespace-nowrap text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 sm:w-auto sm:px-3"
+            class="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium whitespace-nowrap text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:w-auto md:px-3"
             @click="toggleGlobalDirection"
           >
             <ArrowLeftRight class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
             <span>{{ currentGlobalDir === 0 ? '去程（上行）' : '返程（下行）' }}</span>
           </button>
           <button
-            class="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2.5 text-xs font-medium whitespace-nowrap text-cyan-400 shadow-sm transition hover:bg-cyan-500/20 active:scale-95 sm:w-auto sm:px-3"
+            class="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2.5 text-xs font-medium whitespace-nowrap text-cyan-400 shadow-sm transition hover:bg-cyan-500/20 active:scale-95 md:w-auto md:px-3"
             @click="locationStore.requestLocation({ userInitiated: true })"
           >
             <LocateFixed class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -308,8 +308,8 @@ onMounted(() => {
       </RouterLink>
     </div>
 
-    <!-- Cards Grid -->
-    <div v-if="cardsData.length > 0" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <!-- Cards Grid: fluid responsive grid from 1 col on mobile to 4 cols on ultrawide -->
+    <div v-if="cardsData.length > 0" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       <LineMiniCard
         v-for="line in cardsData"
         :key="`${line.lineId}_${line.direction}`"

@@ -13,7 +13,7 @@ onMounted(() => {
 <template>
   <div class="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased selection:bg-cyan-500 selection:text-white">
     <HeaderNav />
-    <main class="mx-auto max-w-[1200px] px-3 py-2.5 sm:px-6 sm:py-5">
+    <main class="w-full px-3 py-2.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-5">
       <RouterView />
     </main>
   </div>

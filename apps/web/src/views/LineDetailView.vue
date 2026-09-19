@@ -59,7 +59,7 @@ const pageRef = useTemplateRef('pageEl')
 const pageHeight = shallowRef(600)
 
 function getMainBottomPadding(): number {
-  return typeof window !== 'undefined' && window.innerWidth < 640 ? 10 : 20
+  return typeof window !== 'undefined' && window.innerWidth < 768 ? 10 : 20
 }
 
 function updatePageHeight(): void {
@@ -379,13 +379,13 @@ onUnmounted(() => {
        is not a known constant. -->
   <div
     ref="pageEl"
-    class="flex min-h-0 flex-col gap-2.5 overflow-hidden sm:gap-4"
+    class="flex min-h-0 flex-col gap-2.5 overflow-hidden md:gap-4"
     :style="{ height: `${pageHeight}px` }"
   >
-    <!-- Mobile Compact Single-Line Header: ~44px height, leaves 80%+ of screen for canvas -->
+    <!-- Mobile Compact Single-Line Header: ~44px height, leaves 80%+ of screen for canvas (screens < md) -->
     <div
       v-if="currentLineDetail"
-      class="flex sm:hidden shrink-0 items-center justify-between gap-1.5 rounded-xl border border-slate-800 bg-slate-900/90 px-2 py-1.5 shadow-md"
+      class="flex md:hidden shrink-0 items-center justify-between gap-1.5 rounded-xl border border-slate-800 bg-slate-900/90 px-2 py-1.5 shadow-md"
     >
       <div class="flex min-w-0 items-center gap-1.5">
         <RouterLink
@@ -436,8 +436,8 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- Desktop Top Action Bar -->
-    <div class="hidden sm:flex shrink-0 items-center justify-between">
+    <!-- Desktop Top Action Bar (screens >= md) -->
+    <div class="hidden md:flex shrink-0 items-center justify-between">
       <RouterLink
         to="/"
         class="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white"
@@ -476,12 +476,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Desktop Line Hero Banner -->
+    <!-- Desktop Line Hero Banner (screens >= md) -->
     <div
       v-if="currentLineDetail"
-      class="hidden sm:block shrink-0 overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-5 shadow-xl"
+      class="hidden md:block shrink-0 overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-5 shadow-xl"
     >
-      <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
         <div class="flex items-center gap-2.5 sm:gap-3.5">
           <div
             class="flex h-11 shrink-0 items-center justify-center rounded-xl border px-3 font-mono font-black whitespace-nowrap sm:h-14 sm:rounded-2xl sm:px-3.5"
@@ -546,114 +546,227 @@ onUnmounted(() => {
     </div>
 
     <!-- 2D Konva Route Board (supporting responsive folded and linear layouts).
-         `relative` so the station panel can float over the board instead of stealing
-         height from it — seeing the route is the whole point of this page, especially on a phone. -->
-    <div v-if="currentLineDetail" class="relative flex min-h-0 flex-1 flex-col">
-      <RouteBoard
-        :line-detail="currentLineDetail"
-        :buses="currentLiveStatus?.buses || []"
-        :nearest-station="nearestStation"
-        :selected-station="selectedStation"
-        @select-station="onSelectStation"
-      />
+         On screens >= xl: flex-row container where canvas and docked Station Inspector sit side-by-side with 0% track obstruction. -->
+    <div v-if="currentLineDetail" class="flex min-h-0 flex-1 flex-row gap-3 xl:gap-4 overflow-hidden">
+      <!-- Main Canvas Viewport -->
+      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <RouteBoard
+          :line-detail="currentLineDetail"
+          :buses="currentLiveStatus?.buses || []"
+          :nearest-station="nearestStation"
+          :selected-station="selectedStation"
+          @select-station="onSelectStation"
+        />
 
-      <!-- Floating station panel (bottom sheet on mobile, card on desktop) -->
-      <div
-        v-if="selectedStation"
-        class="absolute inset-x-2 bottom-2 z-20 max-h-[72%] space-y-2.5 overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-3.5 shadow-2xl backdrop-blur-md sm:inset-x-4 sm:bottom-4 sm:max-h-[60%] sm:p-4"
-      >
-        <div class="flex items-start justify-between gap-2">
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="inline-block h-3 w-3 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
-            <h4 class="truncate font-semibold text-slate-100">
-              {{ selectedStation.name }}
-            </h4>
-            <span class="shrink-0 font-mono text-xs text-slate-400">
-              (第 {{ selectedStation.order }} 站)
-            </span>
-          </div>
-          <button
-            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-400 transition hover:text-white active:scale-95"
-            aria-label="关闭"
-            @click="selectedStation = null"
+        <!-- Floating station panel on mobile & tablet (screens < xl) -->
+        <Transition name="fade">
+          <div
+            v-if="selectedStation"
+            class="xl:hidden absolute inset-x-2 bottom-2 z-20 max-h-[72%] space-y-2.5 overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-3.5 shadow-2xl backdrop-blur-md md:inset-x-4 md:bottom-4 md:max-h-[60%] md:p-4"
           >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="inline-block h-3 w-3 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
+                <h4 class="truncate font-semibold text-slate-100">
+                  {{ selectedStation.name }}
+                </h4>
+                <span class="shrink-0 font-mono text-xs text-slate-400">
+                  (第 {{ selectedStation.order }} 站)
+                </span>
+              </div>
+              <button
+                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-400 transition hover:text-white active:scale-95"
+                aria-label="关闭"
+                @click="selectedStation = null"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
 
-        <!-- Freshness: the tap re-requests live data, so say so honestly. -->
-        <div class="flex items-center gap-2 text-xs text-slate-400">
-          <span
-            class="inline-block h-1.5 w-1.5 rounded-full"
-            :class="isRefreshingLive ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
-          ></span>
-          {{ isRefreshingLive ? '正在获取最新实时数据…' : liveFreshnessLabel }}
-        </div>
+            <!-- Freshness: the tap re-requests live data, so say so honestly. -->
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+              <span
+                class="inline-block h-1.5 w-1.5 rounded-full"
+                :class="isRefreshingLive ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
+              ></span>
+              {{ isRefreshingLive ? '正在获取最新实时数据…' : liveFreshnessLabel }}
+            </div>
 
-        <p class="font-mono text-xs text-cyan-400">
-          {{ selectedStationEta }}
-        </p>
-
-        <!-- Exact timetable arrivals (official minute-level, when available) -->
-        <div v-if="stationArrivals && stationArrivals.arrivals.length > 0" class="rounded-xl border border-slate-700/60 bg-slate-950/60 px-3 py-2.5">
-          <span class="text-xs font-semibold text-slate-400">
-            到站时刻
-            <span
-              v-if="stationArrivals.isExact"
-              class="ml-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400"
-            >官方时刻表</span>
-            <span
-              v-else
-              class="ml-1.5 rounded bg-slate-700/50 px-1.5 py-0.5 text-xs font-medium text-slate-300"
-            >推演估算</span>
-          </span>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <span
-              v-for="(a, i) in stationArrivals.arrivals"
-              :key="a.time || i"
-              class="rounded-lg border px-2.5 py-1 font-mono text-xs"
-              :class="i === 0
-                ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
-                : 'border-slate-700 bg-slate-800/60 text-slate-300'"
-            >
-              {{ a.time }}
-              <span class="ml-1 text-xs opacity-75">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
-            </span>
-          </div>
-        </div>
-
-        <!-- Catch-the-bus decision (Amap real-road walking) -->
-        <div
-          v-if="walkDecision"
-          class="flex items-center gap-3 rounded-xl border px-3 py-2.5"
-          :class="decisionStyle.border"
-        >
-          <span class="text-lg" :class="decisionStyle.icon">
-            {{ decisionStyle.emoji }}
-          </span>
-          <div class="min-w-0 flex-1">
-            <p class="text-xs font-semibold" :class="decisionStyle.text">
-              {{ walkDecision.advice }}
+            <p class="font-mono text-xs text-cyan-400">
+              {{ selectedStationEta }}
             </p>
-            <p class="mt-0.5 font-mono text-xs text-slate-400">
-              步行 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟 / {{ walkDecision.walkMeters }} 米
+
+            <!-- Exact timetable arrivals (official minute-level, when available) -->
+            <div v-if="stationArrivals && stationArrivals.arrivals.length > 0" class="rounded-xl border border-slate-700/60 bg-slate-950/60 px-3 py-2.5">
+              <span class="text-xs font-semibold text-slate-400">
+                到站时刻
+                <span
+                  v-if="stationArrivals.isExact"
+                  class="ml-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400"
+                >官方时刻表</span>
+                <span
+                  v-else
+                  class="ml-1.5 rounded bg-slate-700/50 px-1.5 py-0.5 text-xs font-medium text-slate-300"
+                >推演估算</span>
+              </span>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="(a, i) in stationArrivals.arrivals"
+                  :key="a.time || i"
+                  class="rounded-lg border px-2.5 py-1 font-mono text-xs"
+                  :class="i === 0
+                    ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+                    : 'border-slate-700 bg-slate-800/60 text-slate-300'"
+                >
+                  {{ a.time }}
+                  <span class="ml-1 text-xs opacity-75">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- Catch-the-bus decision (Amap real-road walking) -->
+            <div
+              v-if="walkDecision"
+              class="flex items-center gap-3 rounded-xl border px-3 py-2.5"
+              :class="decisionStyle.border"
+            >
+              <span class="text-lg" :class="decisionStyle.icon">
+                {{ decisionStyle.emoji }}
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="text-xs font-semibold" :class="decisionStyle.text">
+                  {{ walkDecision.advice }}
+                </p>
+                <p class="mt-0.5 font-mono text-xs text-slate-400">
+                  步行 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟 / {{ walkDecision.walkMeters }} 米
+                  <template v-if="walkDecision.vehicleEtaSeconds !== null">
+                    · 车辆 {{ Math.round(walkDecision.vehicleEtaSeconds / 60) }} 分钟到站
+                  </template>
+                </p>
+              </div>
+            </div>
+
+            <button
+              v-else-if="locationStore.userCoords"
+              class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99]"
+              :disabled="gisLoading"
+              @click="computeWalkDecision"
+            >
+              <Footprints class="h-4 w-4 shrink-0 text-cyan-400" />
+              <span>{{ gisLoading ? '正在规划真实步行路径...' : `计算我到「${selectedStation.name}」的赶车决策` }}</span>
+            </button>
+          </div>
+        </Transition>
+      </div>
+
+      <!-- Docked Station Inspector Panel on Desktop (screens >= xl): 0% obstruction of transit lines -->
+      <Transition name="fade">
+        <div
+          v-if="selectedStation"
+          class="hidden xl:flex w-80 2xl:w-96 shrink-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-md"
+        >
+          <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
+            <div class="min-w-0">
+              <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
+                站点深度巡检
+              </span>
+              <div class="mt-1 flex items-center gap-2">
+                <span class="inline-block h-3 w-3 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
+                <h4 class="truncate text-base font-bold text-slate-100">
+                  {{ selectedStation.name }}
+                </h4>
+              </div>
+              <p class="mt-0.5 font-mono text-xs text-slate-400">
+                途经第 {{ selectedStation.order }} 站 · {{ currentLineDetail.lineName }}
+              </p>
+            </div>
+            <button
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-400 transition hover:text-white active:scale-95"
+              aria-label="关闭巡检面板"
+              @click="selectedStation = null"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+
+          <!-- Freshness Status -->
+          <div class="flex items-center gap-2 rounded-lg bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+            <span
+              class="inline-block h-1.5 w-1.5 rounded-full"
+              :class="isRefreshingLive ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
+            ></span>
+            <span>{{ isRefreshingLive ? '正在获取最新实时数据…' : liveFreshnessLabel }}</span>
+          </div>
+
+          <!-- Core Arrival ETA -->
+          <div class="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-3">
+            <span class="text-xs text-slate-400 block mb-1">最近来车预计</span>
+            <p class="font-mono text-sm font-semibold text-cyan-300">
+              {{ selectedStationEta }}
+            </p>
+          </div>
+
+          <!-- Exact Timetable Arrivals -->
+          <div v-if="stationArrivals && stationArrivals.arrivals.length > 0" class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-slate-300">后续进站计划</span>
+              <span
+                v-if="stationArrivals.isExact"
+                class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400"
+              >官方时刻</span>
+              <span
+                v-else
+                class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400"
+              >推演排班</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="(a, i) in stationArrivals.arrivals"
+                :key="a.time || i"
+                class="rounded-lg border px-2.5 py-1 font-mono text-xs"
+                :class="i === 0
+                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+                  : 'border-slate-800 bg-slate-900 text-slate-300'"
+              >
+                {{ a.time }}
+                <span class="ml-1 text-xs text-slate-400">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Walk decision (Amap GIS) -->
+          <div
+            v-if="walkDecision"
+            class="rounded-xl border p-3"
+            :class="decisionStyle.border"
+          >
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="text-base" :class="decisionStyle.icon">
+                {{ decisionStyle.emoji }}
+              </span>
+              <span class="text-xs font-semibold" :class="decisionStyle.text">
+                {{ walkDecision.advice }}
+              </span>
+            </div>
+            <p class="font-mono text-xs text-slate-400 leading-relaxed">
+              从当前位置步行约 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟（{{ walkDecision.walkMeters }} 米）
               <template v-if="walkDecision.vehicleEtaSeconds !== null">
-                · 车辆 {{ Math.round(walkDecision.vehicleEtaSeconds / 60) }} 分钟到站
+                · 下班车预计 {{ Math.round(walkDecision.vehicleEtaSeconds / 60) }} 分钟到站
               </template>
             </p>
           </div>
-        </div>
 
-        <button
-          v-else-if="locationStore.userCoords"
-          class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99]"
-          :disabled="gisLoading"
-          @click="computeWalkDecision"
-        >
-          <Footprints class="h-4 w-4 shrink-0 text-cyan-400" />
-          <span>{{ gisLoading ? '正在规划真实步行路径...' : `计算我到「${selectedStation.name}」的赶车决策` }}</span>
-        </button>
-      </div>
+          <button
+            v-else-if="locationStore.userCoords"
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-95"
+            :disabled="gisLoading"
+            @click="computeWalkDecision"
+          >
+            <Footprints class="h-4 w-4 shrink-0 text-cyan-400" />
+            <span>{{ gisLoading ? '计算路径中...' : `赶车决策（步行至本站）` }}</span>
+          </button>
+        </div>
+      </Transition>
     </div>
   </div>
 
@@ -662,7 +775,7 @@ onUnmounted(() => {
     <Transition name="fade">
       <div
         v-if="showLineInfo && currentLineDetail"
-        class="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm sm:hidden"
+        class="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm md:hidden"
         @click="showLineInfo = false"
       >
         <div

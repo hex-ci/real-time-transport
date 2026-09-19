@@ -13,17 +13,26 @@ import { storeToRefs } from 'pinia'
 import {
   ArrowLeft,
   ArrowLeftRight,
-  Footprints,
   Info,
   RefreshCw,
   X,
 } from '@lucide/vue'
+import {
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from 'reka-ui'
 import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { useGis } from '@/composables/use-gis'
-import RouteBoard from '@/components/RouteBoard.vue'
+import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
+import StationPopover from '@/components/StationPopover.vue'
 import type { Station } from '@real-time-transport/shared'
 
 const {
@@ -78,8 +87,19 @@ const { nearestStation } = storeToRefs(locationStore)
 const { isLoading, loadError, isRefreshingLive } = storeToRefs(transitStore)
 
 const selectedStation = shallowRef<Station | null>(null)
+const stationAnchor = shallowRef<StationAnchor | null>(null)
+const routeBoardRef = useTemplateRef<InstanceType<typeof RouteBoard>>('routeBoardRef')
 const showLineInfo = shallowRef(false)
-const stationArrivals = shallowRef<{ isExact: boolean, arrivals: Array<{ time: string, etaSeconds: number }> } | null>(null)
+const stationArrivals = shallowRef<{
+  isExact: boolean
+  arrivals: Array<{
+    time: string
+    etaSeconds: number
+    stopsAway?: number
+    distanceMeters?: number
+    isAtStation?: boolean
+  }>
+} | null>(null)
 
 /**
  * Honest freshness label for the live data shown in the station panel: how long
@@ -215,6 +235,7 @@ function switchDirection(opt: DirectionOption): void {
   if (isActiveTab(opt)) return
   // Clear the selected station: station orders differ between directions.
   selectedStation.value = null
+  stationAnchor.value = null
   stationArrivals.value = null
   clearDecision()
   void router.push({
@@ -256,22 +277,35 @@ async function fetchStationArrivals(): Promise<void> {
   }
 }
 
-function onSelectStation(st: Station): void {
-  // Re-tapping the selected station closes the floating panel.
+function onSelectStation(st: Station, anchor?: StationAnchor): void {
+  // Re-tapping the selected station closes the popover.
   if (selectedStation.value?.id === st.id) {
     selectedStation.value = null
+    stationAnchor.value = null
     clearDecision()
     return
   }
 
   selectedStation.value = st
+  if (anchor) {
+    stationAnchor.value = anchor
+  }
+  else if (routeBoardRef.value) {
+    stationAnchor.value = routeBoardRef.value.getStationAnchor(st.id)
+  }
   clearDecision()
-  // Fetch fresh data in parallel: the user tapped for CURRENT information, so
-  // re-request the live snapshot (chelaile is a cached upstream, its data can
-  // be a poll cycle old) and this station's arrivals. Failures keep whatever
-  // is already on screen — never blank the panel on a flaky refresh.
   void transitStore.refreshLive()
   void fetchStationArrivals()
+}
+
+function onStationAnchorChange(anchor: StationAnchor): void {
+  stationAnchor.value = anchor
+}
+
+function onCloseStationPopover(): void {
+  selectedStation.value = null
+  stationAnchor.value = null
+  clearDecision()
 }
 
 async function computeWalkDecision(): Promise<void> {
@@ -289,40 +323,89 @@ async function computeWalkDecision(): Promise<void> {
 }
 
 const selectedStationEta = computed(() => {
-  // Exact official timetable wins over simulated estimate
-  if (stationArrivals.value?.isExact && stationArrivals.value.arrivals.length > 0) {
+  if (!selectedStation.value) return '等待发车'
+  const targetOrder = selectedStation.value.order
+
+  // 1. Precise station arrivals returned by backend
+  if (stationArrivals.value && stationArrivals.value.arrivals.length > 0) {
     const next = stationArrivals.value.arrivals[0]!
+    if (next.isAtStation) {
+      return '车辆正在本站 (即将发车)'
+    }
     const mins = Math.max(1, Math.round(next.etaSeconds / 60))
-    return `官方时刻 ${next.time} 到站（约 ${mins} 分钟）`
+    if (stationArrivals.value.isExact) {
+      return `官方时刻 ${next.time} 到站 (约 ${mins} 分钟)`
+    }
+    const stopsText = next.stopsAway
+      ? (next.stopsAway === 1 ? '即将进站 (1 站)' : `距本站 ${next.stopsAway} 站`)
+      : ''
+    const distText = next.distanceMeters && next.distanceMeters > 0
+      ? ` · ${(next.distanceMeters / 1000).toFixed(1)}km`
+      : ''
+    return `预计 ${mins} 分钟到达 (${stopsText}${distText} · ${next.time})`
   }
-  if (!selectedStation.value || !currentLiveStatus.value) return '等待发车'
-  const buses = currentLiveStatus.value.buses
-  const upcoming = buses
-    .filter(b => typeof b.order === 'number' && (b.order as number) <= selectedStation.value!.order)
+
+  // 2. Explicitly confirmed no approaching buses from backend
+  if (stationArrivals.value && stationArrivals.value.arrivals.length === 0) {
+    const allBuses = currentLiveStatus.value?.buses || []
+    if (allBuses.length === 0) {
+      return '线路上暂无在途车辆 / 待发车'
+    }
+    const passedBuses = allBuses.filter(b => typeof b.order === 'number' && b.order >= targetOrder)
+    if (passedBuses.some(b => b.order === targetOrder)) {
+      return '车辆正在本站 (即将发车)'
+    }
+    if (passedBuses.length > 0) {
+      return '本班车已过本站 · 前序暂无在途车'
+    }
+    return '前序暂无在途车辆'
+  }
+
+  // 3. Fallback when stationArrivals is pending: derive from currentLiveStatus
+  if (!currentLiveStatus.value) return '等待发车'
+  const allBuses = currentLiveStatus.value.buses
+  if (allBuses.length === 0) return '线路上暂无在途车辆 / 待发车'
+
+  const upcoming = allBuses
+    .filter(b => typeof b.order === 'number' && (b.order as number) < targetOrder)
     .sort((a, b) => (b.order as number) - (a.order as number))
 
-  if (upcoming.length === 0) return '前序暂无在途车'
-  const bus = upcoming[0]!
-  if (!bus.travelTimeSec) {
-    // Upstream gave no travel time: refuse to guess minutes per stop
-    return '在途中，到站耗时未知（上游未提供）'
+  if (upcoming.length === 0) {
+    const passed = allBuses.filter(b => typeof b.order === 'number' && (b.order as number) >= targetOrder)
+    if (passed.some(b => b.order === targetOrder)) {
+      return '车辆正在本站 (即将发车)'
+    }
+    if (passed.length > 0) {
+      return '本班车已过本站 · 前序暂无在途车'
+    }
+    return '前序暂无在途车辆'
   }
-  const mins = Math.max(1, Math.round(bus.travelTimeSec / 60))
-  const stops = selectedStation.value.order - (bus.order as number)
-  return `预计 ${mins} 分钟到达 (距本站 ${stops} 站)`
-})
 
-const decisionStyle = computed(() => {
-  switch (walkDecision.value?.decision) {
-    case 'comfortable':
-      return { border: 'border-emerald-500/30 bg-emerald-500/10', text: 'text-emerald-300', icon: 'text-emerald-400', emoji: '🟢' }
-    case 'hurry':
-      return { border: 'border-amber-500/30 bg-amber-500/10', text: 'text-amber-300', icon: 'text-amber-400', emoji: '🏃' }
-    case 'missed':
-      return { border: 'border-rose-500/30 bg-rose-500/10', text: 'text-rose-300', icon: 'text-rose-400', emoji: '🔴' }
-    default:
-      return { border: 'border-slate-700 bg-slate-800/50', text: 'text-slate-300', icon: 'text-slate-400', emoji: 'ℹ️' }
+  const bus = upcoming[0]!
+  const stops = targetOrder - (bus.order as number)
+  const stopsText = stops === 1 ? '即将进站 (1 站)' : `距本站 ${stops} 站`
+
+  if (isSubway.value) {
+    const progress = typeof bus.progress === 'number' ? bus.progress : 0
+    const mins = Math.max(1, Math.round(((stops - progress) * 135) / 60))
+    return `预计 ${mins} 分钟到达 (${stopsText})`
   }
+
+  const sd = currentLineDetail.value?.stationDistances
+  if (sd && typeof bus.distanceFromStart === 'number' && sd[targetOrder - 1]) {
+    const targetDist = sd[targetOrder - 1]!
+    const remainingMeters = targetDist - bus.distanceFromStart
+    if (remainingMeters > 0) {
+      const speed = (bus.speed && bus.speed >= 3 && bus.speed <= 18) ? bus.speed : 6.0
+      const etaSec = Math.round(remainingMeters / speed + (stops - 1) * 30)
+      const mins = Math.max(1, Math.round(etaSec / 60))
+      const km = (remainingMeters / 1000).toFixed(1)
+      return `预计 ${mins} 分钟到达 (${stopsText} · ${km}km)`
+    }
+  }
+
+  const mins = Math.max(1, Math.round(stops * 2.5))
+  return `预计 ${mins} 分钟到达 (${stopsText})`
 })
 
 watch(
@@ -545,345 +628,155 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- 2D Konva Route Board (supporting responsive folded and linear layouts).
-         On screens >= xl: flex-row container where canvas and docked Station Inspector sit side-by-side with 0% track obstruction. -->
-    <div v-if="currentLineDetail" class="flex min-h-0 flex-1 flex-row gap-3 xl:gap-4 overflow-hidden">
-      <!-- Main Canvas Viewport -->
-      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <RouteBoard
-          :line-detail="currentLineDetail"
-          :buses="currentLiveStatus?.buses || []"
-          :nearest-station="nearestStation"
-          :selected-station="selectedStation"
-          @select-station="onSelectStation"
-        />
+    <!-- 2D Konva Route Board Viewport (Full width, zero obstruction, adaptive anchor popover) -->
+    <div
+      v-if="currentLineDetail"
+      class="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+    >
+      <RouteBoard
+        ref="routeBoardRef"
+        :line-detail="currentLineDetail"
+        :buses="currentLiveStatus?.buses || []"
+        :nearest-station="nearestStation"
+        :selected-station="selectedStation"
+        @select-station="onSelectStation"
+        @close-station="onCloseStationPopover"
+        @station-anchor-change="onStationAnchorChange"
+      />
 
-        <!-- Floating station panel on mobile & tablet (screens < xl) -->
-        <Transition name="fade">
-          <div
-            v-if="selectedStation"
-            class="xl:hidden absolute inset-x-2 bottom-2 z-20 max-h-[72%] space-y-2.5 overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-3.5 shadow-2xl backdrop-blur-md md:inset-x-4 md:bottom-4 md:max-h-[60%] md:p-4"
-          >
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex min-w-0 items-center gap-2">
-                <span class="inline-block h-3 w-3 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
-                <h4 class="truncate font-semibold text-slate-100">
-                  {{ selectedStation.name }}
-                </h4>
-                <span class="shrink-0 font-mono text-xs text-slate-400">
-                  (第 {{ selectedStation.order }} 站)
-                </span>
-              </div>
-              <button
-                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-400 transition hover:text-white active:scale-95"
-                aria-label="关闭"
-                @click="selectedStation = null"
-              >
-                <X class="h-4 w-4" />
-              </button>
-            </div>
-
-            <!-- Freshness: the tap re-requests live data, so say so honestly. -->
-            <div class="flex items-center gap-2 text-xs text-slate-400">
-              <span
-                class="inline-block h-1.5 w-1.5 rounded-full"
-                :class="isRefreshingLive ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
-              ></span>
-              {{ isRefreshingLive ? '正在获取最新实时数据…' : liveFreshnessLabel }}
-            </div>
-
-            <p class="font-mono text-xs text-cyan-400">
-              {{ selectedStationEta }}
-            </p>
-
-            <!-- Exact timetable arrivals (official minute-level, when available) -->
-            <div v-if="stationArrivals && stationArrivals.arrivals.length > 0" class="rounded-xl border border-slate-700/60 bg-slate-950/60 px-3 py-2.5">
-              <span class="text-xs font-semibold text-slate-400">
-                到站时刻
-                <span
-                  v-if="stationArrivals.isExact"
-                  class="ml-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400"
-                >官方时刻表</span>
-                <span
-                  v-else
-                  class="ml-1.5 rounded bg-slate-700/50 px-1.5 py-0.5 text-xs font-medium text-slate-300"
-                >推演估算</span>
-              </span>
-              <div class="mt-2 flex flex-wrap gap-2">
-                <span
-                  v-for="(a, i) in stationArrivals.arrivals"
-                  :key="a.time || i"
-                  class="rounded-lg border px-2.5 py-1 font-mono text-xs"
-                  :class="i === 0
-                    ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
-                    : 'border-slate-700 bg-slate-800/60 text-slate-300'"
-                >
-                  {{ a.time }}
-                  <span class="ml-1 text-xs opacity-75">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
-                </span>
-              </div>
-            </div>
-
-            <!-- Catch-the-bus decision (Amap real-road walking) -->
-            <div
-              v-if="walkDecision"
-              class="flex items-center gap-3 rounded-xl border px-3 py-2.5"
-              :class="decisionStyle.border"
-            >
-              <span class="text-lg" :class="decisionStyle.icon">
-                {{ decisionStyle.emoji }}
-              </span>
-              <div class="min-w-0 flex-1">
-                <p class="text-xs font-semibold" :class="decisionStyle.text">
-                  {{ walkDecision.advice }}
-                </p>
-                <p class="mt-0.5 font-mono text-xs text-slate-400">
-                  步行 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟 / {{ walkDecision.walkMeters }} 米
-                  <template v-if="walkDecision.vehicleEtaSeconds !== null">
-                    · 车辆 {{ Math.round(walkDecision.vehicleEtaSeconds / 60) }} 分钟到站
-                  </template>
-                </p>
-              </div>
-            </div>
-
-            <button
-              v-else-if="locationStore.userCoords"
-              class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99]"
-              :disabled="gisLoading"
-              @click="computeWalkDecision"
-            >
-              <Footprints class="h-4 w-4 shrink-0 text-cyan-400" />
-              <span>{{ gisLoading ? '正在规划真实步行路径...' : `计算我到「${selectedStation.name}」的赶车决策` }}</span>
-            </button>
-          </div>
-        </Transition>
-      </div>
-
-      <!-- Docked Station Inspector Panel on Desktop (screens >= xl): 0% obstruction of transit lines -->
-      <Transition name="fade">
-        <div
-          v-if="selectedStation"
-          class="hidden xl:flex w-80 2xl:w-96 shrink-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-md"
-        >
-          <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
-            <div class="min-w-0">
-              <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
-                站点深度巡检
-              </span>
-              <div class="mt-1 flex items-center gap-2">
-                <span class="inline-block h-3 w-3 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
-                <h4 class="truncate text-base font-bold text-slate-100">
-                  {{ selectedStation.name }}
-                </h4>
-              </div>
-              <p class="mt-0.5 font-mono text-xs text-slate-400">
-                途经第 {{ selectedStation.order }} 站 · {{ currentLineDetail.lineName }}
-              </p>
-            </div>
-            <button
-              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-400 transition hover:text-white active:scale-95"
-              aria-label="关闭巡检面板"
-              @click="selectedStation = null"
-            >
-              <X class="h-4 w-4" />
-            </button>
-          </div>
-
-          <!-- Freshness Status -->
-          <div class="flex items-center gap-2 rounded-lg bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
-            <span
-              class="inline-block h-1.5 w-1.5 rounded-full"
-              :class="isRefreshingLive ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
-            ></span>
-            <span>{{ isRefreshingLive ? '正在获取最新实时数据…' : liveFreshnessLabel }}</span>
-          </div>
-
-          <!-- Core Arrival ETA -->
-          <div class="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-3">
-            <span class="text-xs text-slate-400 block mb-1">最近来车预计</span>
-            <p class="font-mono text-sm font-semibold text-cyan-300">
-              {{ selectedStationEta }}
-            </p>
-          </div>
-
-          <!-- Exact Timetable Arrivals -->
-          <div v-if="stationArrivals && stationArrivals.arrivals.length > 0" class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-semibold text-slate-300">后续进站计划</span>
-              <span
-                v-if="stationArrivals.isExact"
-                class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400"
-              >官方时刻</span>
-              <span
-                v-else
-                class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400"
-              >推演排班</span>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="(a, i) in stationArrivals.arrivals"
-                :key="a.time || i"
-                class="rounded-lg border px-2.5 py-1 font-mono text-xs"
-                :class="i === 0
-                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-300'"
-              >
-                {{ a.time }}
-                <span class="ml-1 text-xs text-slate-400">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
-              </span>
-            </div>
-          </div>
-
-          <!-- Walk decision (Amap GIS) -->
-          <div
-            v-if="walkDecision"
-            class="rounded-xl border p-3"
-            :class="decisionStyle.border"
-          >
-            <div class="flex items-center gap-2 mb-1.5">
-              <span class="text-base" :class="decisionStyle.icon">
-                {{ decisionStyle.emoji }}
-              </span>
-              <span class="text-xs font-semibold" :class="decisionStyle.text">
-                {{ walkDecision.advice }}
-              </span>
-            </div>
-            <p class="font-mono text-xs text-slate-400 leading-relaxed">
-              从当前位置步行约 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟（{{ walkDecision.walkMeters }} 米）
-              <template v-if="walkDecision.vehicleEtaSeconds !== null">
-                · 下班车预计 {{ Math.round(walkDecision.vehicleEtaSeconds / 60) }} 分钟到站
-              </template>
-            </p>
-          </div>
-
-          <button
-            v-else-if="locationStore.userCoords"
-            class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-95"
-            :disabled="gisLoading"
-            @click="computeWalkDecision"
-          >
-            <Footprints class="h-4 w-4 shrink-0 text-cyan-400" />
-            <span>{{ gisLoading ? '计算路径中...' : `赶车决策（步行至本站）` }}</span>
-          </button>
-        </div>
-      </Transition>
+      <!-- Near-Station Anchor Popover (Powered by Reka UI with auto-flip, shift & zero clipping arrow) -->
+      <StationPopover
+        :station="selectedStation"
+        :anchor="stationAnchor"
+        :arrivals="stationArrivals"
+        :walk-decision="walkDecision"
+        :has-user-coords="Boolean(locationStore.userCoords)"
+        :gis-loading="gisLoading"
+        :eta="selectedStationEta"
+        :freshness="liveFreshnessLabel"
+        :is-refreshing="isRefreshingLive"
+        @close="onCloseStationPopover"
+        @compute-walk="computeWalkDecision"
+      />
     </div>
   </div>
 
-  <!-- Mobile Line Info Drawer: bottom sheet triggered by clicking the line badge or info chip -->
-  <Teleport to="body">
-    <Transition name="fade">
-      <div
-        v-if="showLineInfo && currentLineDetail"
-        class="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm md:hidden"
-        @click="showLineInfo = false"
+  <!-- Mobile Line Info Drawer: bottom sheet triggered by clicking the line badge or info chip (powered by Reka UI Dialog) -->
+  <DialogRoot v-model:open="showLineInfo">
+    <DialogPortal>
+      <DialogOverlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 md:hidden" />
+      <DialogContent
+        v-if="currentLineDetail"
+        class="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col space-y-4 overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 p-5 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full md:hidden"
       >
-        <div
-          class="max-h-[85vh] space-y-4 overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 p-5 shadow-2xl"
-          @click.stop
-        >
-          <!-- Header -->
-          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div class="flex items-center gap-2">
-              <span
-                class="flex h-8 items-center rounded-lg border px-2.5 font-mono text-sm font-bold"
-                :class="badgeAccent.lineName"
-              >
-                {{ currentLineDetail.lineName }}
-              </span>
-              <span class="text-sm font-bold text-white">{{ currentLineDetail.directionName }}</span>
-            </div>
+        <!-- Header -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex items-center gap-2">
+            <span
+              class="flex h-8 items-center rounded-lg border px-2.5 font-mono text-sm font-bold"
+              :class="badgeAccent.lineName"
+            >
+              {{ currentLineDetail.lineName }}
+            </span>
+            <DialogTitle class="text-sm font-bold text-white">
+              {{ currentLineDetail.directionName }}
+            </DialogTitle>
+          </div>
+          <DialogClose as-child>
             <button
+              type="button"
               class="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-400 active:scale-95"
-              aria-label="关闭"
-              @click="showLineInfo = false"
+              aria-label="关闭线路信息"
             >
               <X class="h-4 w-4" />
             </button>
-          </div>
+          </DialogClose>
+        </div>
+        <DialogDescription class="sr-only">
+          线路概况与行驶方向配置
+        </DialogDescription>
 
-          <!-- Specs Grid -->
-          <div class="grid grid-cols-2 gap-2.5 text-xs">
-            <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <span class="block text-xs text-slate-400">首末班运营时间</span>
-              <span class="font-mono text-sm font-semibold text-white">
-                {{ currentLineDetail.firstBusTime || '--:--' }} - {{ currentLineDetail.lastBusTime || '--:--' }}
-              </span>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <span class="block text-xs text-slate-400">全程站数 / 里程</span>
-              <span class="font-mono text-sm font-semibold text-white">
-                {{ currentLineDetail.stops.length }} 站
-                <span v-if="currentLineDetail.routeLengthMeters" class="text-xs font-normal text-slate-400">
-                  ({{ (currentLineDetail.routeLengthMeters / 1000).toFixed(1) }}km)
-                </span>
-              </span>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <span class="block text-xs text-slate-400">当前在途车辆</span>
-              <span class="font-mono text-base font-bold text-emerald-400">
-                {{ currentLiveStatus?.buses.length || 0 }} 辆
-              </span>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <span class="block text-xs text-slate-400">营运与数据源</span>
-              <span class="font-mono text-xs font-semibold text-cyan-400">
-                {{ currentLineDetail.type === 'subway' ? '官方排班推演' : '实时上游数据' }}
-              </span>
-            </div>
+        <!-- Specs Grid -->
+        <div class="grid grid-cols-2 gap-2.5 text-xs">
+          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <span class="block text-xs text-slate-400">首末班运营时间</span>
+            <span class="font-mono text-sm font-semibold text-white">
+              {{ currentLineDetail.firstBusTime || '--:--' }} - {{ currentLineDetail.lastBusTime || '--:--' }}
+            </span>
           </div>
-
-          <!-- Direction Switcher in Drawer -->
-          <div v-if="canSwitchDirection" class="space-y-1.5">
-            <span class="text-xs font-semibold text-slate-400">行驶方向选择</span>
-            <div class="grid grid-cols-2 gap-2">
-              <button
-                v-for="opt in directionOptions"
-                :key="opt.direction"
-                class="rounded-xl border p-3 text-left transition"
-                :class="isActiveTab(opt)
-                  ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
-                  : 'border-slate-800 bg-slate-950 text-slate-400'"
-                @click="switchDirection(opt); showLineInfo = false"
-              >
-                <span class="block font-mono text-xs text-slate-400">方向 {{ opt.direction === 0 ? '去程' : '返程' }}</span>
-                <span class="block truncate font-bold text-slate-200 text-xs">{{ opt.label }}</span>
-              </button>
-            </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <span class="block text-xs text-slate-400">全程站数 / 里程</span>
+            <span class="font-mono text-sm font-semibold text-white">
+              {{ currentLineDetail.stops.length }} 站
+              <span v-if="currentLineDetail.routeLengthMeters" class="text-xs font-normal text-slate-400">
+                ({{ (currentLineDetail.routeLengthMeters / 1000).toFixed(1) }}km)
+              </span>
+            </span>
           </div>
-
-          <!-- Legend Reference -->
-          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
-            <span class="block text-xs font-semibold text-slate-400 mb-2">地图图例</span>
-            <div class="flex flex-wrap gap-4 text-xs text-slate-300">
-              <span class="flex items-center gap-1.5">
-                <span class="h-2.5 w-2.5 rounded-full bg-cyan-400 inline-block"></span>
-                拓扑线路
-              </span>
-              <span class="flex items-center gap-1.5">
-                <span class="h-2.5 w-2.5 rounded-full bg-amber-400 inline-block"></span>
-                当前定位最近站
-              </span>
-              <span class="flex items-center gap-1.5">
-                <span class="h-2.5 w-2.5 rounded-full border-2 border-cyan-400 inline-block"></span>
-                选中站点
-              </span>
-            </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <span class="block text-xs text-slate-400">当前在途车辆</span>
+            <span class="font-mono text-base font-bold text-emerald-400">
+              {{ currentLiveStatus?.buses.length || 0 }} 辆
+            </span>
           </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+            <span class="block text-xs text-slate-400">营运与数据源</span>
+            <span class="font-mono text-xs font-semibold text-cyan-400">
+              {{ currentLineDetail.type === 'subway' ? '官方排班推演' : '实时上游数据' }}
+            </span>
+          </div>
+        </div>
 
-          <!-- Quick Action -->
-          <div class="pt-1">
+        <!-- Direction Switcher in Drawer -->
+        <div v-if="canSwitchDirection" class="space-y-1.5">
+          <span class="text-xs font-semibold text-slate-400">行驶方向选择</span>
+          <div class="grid grid-cols-2 gap-2">
             <button
-              class="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 active:scale-95"
-              :disabled="isRefreshingLive"
-              @click="transitStore.refreshLive()"
+              v-for="opt in directionOptions"
+              :key="opt.direction"
+              class="rounded-xl border p-3 text-left transition"
+              :class="isActiveTab(opt)
+                ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
+                : 'border-slate-800 bg-slate-950 text-slate-400'"
+              @click="switchDirection(opt); showLineInfo = false"
             >
-              <RefreshCw class="h-3.5 w-3.5 shrink-0" :class="isRefreshingLive ? 'animate-spin' : ''" />
-              <span>{{ isRefreshingLive ? '正在拉取实时数据…' : '刷新最新实时车况' }}</span>
+              <span class="block font-mono text-xs text-slate-400">方向 {{ opt.direction === 0 ? '去程' : '返程' }}</span>
+              <span class="block truncate font-bold text-slate-200 text-xs">{{ opt.label }}</span>
             </button>
           </div>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+
+        <!-- Legend Reference -->
+        <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
+          <span class="block text-xs font-semibold text-slate-400 mb-2">地图图例</span>
+          <div class="flex flex-wrap gap-4 text-xs text-slate-300">
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-cyan-400 inline-block"></span>
+              拓扑线路
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-amber-400 inline-block"></span>
+              当前定位最近站
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full border-2 border-cyan-400 inline-block"></span>
+              选中站点
+            </span>
+          </div>
+        </div>
+
+        <!-- Quick Action -->
+        <div class="pt-1">
+          <button
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 active:scale-95"
+            :disabled="isRefreshingLive"
+            @click="transitStore.refreshLive()"
+          >
+            <RefreshCw class="h-3.5 w-3.5 shrink-0" :class="isRefreshingLive ? 'animate-spin' : ''" />
+            <span>{{ isRefreshingLive ? '正在拉取实时数据…' : '刷新最新实时车况' }}</span>
+          </button>
+        </div>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 </template>

@@ -26,6 +26,7 @@ import {
   type RouteLayoutMode,
   type RouteLayoutResult,
 } from '@/composables/use-route-layout'
+import UiTooltip from '@/components/ui/UiTooltip.vue'
 
 const {
   nearestStation = null,
@@ -43,8 +44,18 @@ const {
   initialLayoutMode?: RouteLayoutMode
 }>()
 
+export interface StationAnchor {
+  screenX: number
+  screenY: number
+  radius: number
+  x: number
+  y: number
+}
+
 const emit = defineEmits<{
-  (e: 'select-station', station: Station): void
+  (e: 'select-station', station: Station, anchor?: StationAnchor): void
+  (e: 'close-station'): void
+  (e: 'station-anchor-change', anchor: StationAnchor): void
   (e: 'layout-change', mode: RouteLayoutMode): void
 }>()
 
@@ -75,6 +86,19 @@ useEventListener(containerRef, 'touchmove', onDomTouchMove, { passive: false })
 useEventListener(containerRef, 'touchend', onDomTouchEnd, { passive: false })
 useEventListener(containerRef, 'touchcancel', onDomTouchEnd, { passive: false })
 
+let stationClickedThisTurn = false
+
+function onContainerClick(): void {
+  if (isStageDragging || isPinching) return
+  if (stationClickedThisTurn) {
+    stationClickedThisTurn = false
+    return
+  }
+  emit('close-station')
+}
+
+useEventListener(containerRef, 'click', onContainerClick)
+
 /** Zoom limits for wheel / pinch interaction. */
 const MIN_SCALE = 0.35
 const MAX_SCALE = 3.5
@@ -93,6 +117,7 @@ let lastPinchDistance: number | null = null
 let lastPinchCenter: { x: number, y: number } | null = null
 
 let currentLayout: RouteLayoutResult | null = null
+let selectionRing: Konva.Circle | null = null
 let nearestAuraCircle: Konva.Circle | null = null
 let rippleCircle1: Konva.Circle | null = null
 let rippleCircle2: Konva.Circle | null = null
@@ -252,11 +277,23 @@ function initStage(): void {
   stage.on('dragstart', () => {
     isStageDragging = true
   })
+  stage.on('dragmove', () => {
+    notifyAnchorChange()
+  })
   stage.on('dragend', () => {
     userHasTransformed = true
+    notifyAnchorChange()
     setTimeout(() => {
       isStageDragging = false
     }, 100)
+  })
+
+  // Tapping on empty board canvas closes active station popover
+  stage.on('click tap', (e) => {
+    if (isStageDragging) return
+    if (e.target === stage) {
+      emit('close-station')
+    }
   })
 
   renderStaticBoard()
@@ -285,6 +322,7 @@ function applyZoomAt(newScale: number, pointer: { x: number, y: number }): void 
     y: pointer.y - mousePointTo.y * newScale,
   })
   stage.batchDraw()
+  notifyAnchorChange()
 }
 
 function clampScale(s: number): number {
@@ -666,20 +704,9 @@ function renderStaticBoard(): void {
       }))
     }
 
-    // Selected-station highlight ring
-    if (isSelected) {
-      stationLayer.add(new Konva.Circle({
-        x: pt.x,
-        y: pt.y,
-        radius: m.stationRadius + 6,
-        stroke: '#22d3ee',
-        strokeWidth: 2.5,
-        listening: false,
-      }))
-    }
-
     // Purely visual node: listening: false delegates all hits to `hit` circle
     const circle = new Konva.Circle({
+      id: `station-visual-${pt.station.id}`,
       x: pt.x,
       y: pt.y,
       radius: m.stationRadius,
@@ -727,10 +754,12 @@ function renderStaticBoard(): void {
     })
 
     const select = (e: any) => {
+      stationClickedThisTurn = true
       if (isPinching || isTouchMoved || isStageDragging || (e.evt?.touches && e.evt.touches.length > 1)) {
         return
       }
-      emit('select-station', pt.station)
+      const anchor = getStationAnchor(pt.station.id)
+      emit('select-station', pt.station, anchor || undefined)
     }
     hit.on('click tap', select)
 
@@ -747,6 +776,7 @@ function renderStaticBoard(): void {
 
     // Station Label
     stationLayer.add(new Konva.Text({
+      id: `station-label-${pt.station.id}`,
       x: pt.x - m.labelWidth / 2,
       y: pt.y + m.stationRadius + 4,
       text: pt.station.name,
@@ -758,6 +788,18 @@ function renderStaticBoard(): void {
       listening: false,
     }))
   }
+
+  // Dedicated selection highlight ring
+  selectionRing = new Konva.Circle({
+    radius: m.stationRadius + 6,
+    stroke: '#22d3ee',
+    strokeWidth: 2.5,
+    listening: false,
+    visible: false,
+  })
+  stationLayer.add(selectionRing)
+
+  updateSelectionVisual()
 
   trackLayer.batchDraw()
   stationLayer.batchDraw()
@@ -1128,6 +1170,43 @@ function setLayoutMode(mode: RouteLayoutMode): void {
   emit('layout-change', mode)
 }
 
+function getStationAnchor(stationId: string): StationAnchor | null {
+  if (!stage || !currentLayout) return null
+  const pt = currentLayout.points.find(p => p.station.id === stationId)
+  if (!pt) return null
+  const scale = stage.scaleX()
+  const m = boardMetrics()
+
+  const stageBox = stage.container().getBoundingClientRect()
+  const screenX = stageBox.left + stage.x() + pt.x * scale
+  const screenY = stageBox.top + stage.y() + pt.y * scale
+
+  // Visual station radius in screen pixels (outer edge of selection ring)
+  const radius = (m.stationRadius + 7.25) * scale
+
+  const container = containerRef.value
+  const root = container?.parentElement
+  const offsetX = (container && root) ? (container.getBoundingClientRect().left - root.getBoundingClientRect().left) : 0
+  const offsetY = (container && root) ? (container.getBoundingClientRect().top - root.getBoundingClientRect().top) : 0
+
+  return {
+    screenX,
+    screenY,
+    radius,
+    x: stage.x() + pt.x * scale + offsetX,
+    y: stage.y() + pt.y * scale + offsetY,
+  }
+}
+
+function notifyAnchorChange(): void {
+  if (selectedStation) {
+    const anchor = getStationAnchor(selectedStation.id)
+    if (anchor) {
+      emit('station-anchor-change', anchor)
+    }
+  }
+}
+
 defineExpose({
   layoutMode,
   setLayoutMode,
@@ -1135,6 +1214,7 @@ defineExpose({
   fitWidth,
   fitToViewport,
   focusKeyStation,
+  getStationAnchor,
 })
 
 function handleVisibilityChange(): void {
@@ -1144,6 +1224,48 @@ function handleVisibilityChange(): void {
   else {
     if (anim && !anim.isRunning()) anim.start()
   }
+}
+
+function updateSelectionVisual(): void {
+  if (!stage || !stationLayer || !currentLayout) return
+
+  const m = boardMetrics()
+  const selId = selectedStation?.id
+
+  // 1. Position & toggle the selection ring without destroying nodes
+  if (selectionRing) {
+    if (selId) {
+      const pt = currentLayout.points.find(p => p.station.id === selId)
+      if (pt) {
+        selectionRing.position({ x: pt.x, y: pt.y })
+        selectionRing.radius(m.stationRadius + 6)
+        selectionRing.visible(true)
+        selectionRing.moveToTop()
+      }
+      else {
+        selectionRing.visible(false)
+      }
+    }
+    else {
+      selectionRing.visible(false)
+    }
+  }
+
+  // 2. Refresh node fills and labels
+  for (const pt of currentLayout.points) {
+    const isNearest = nearestStation && nearestStation.id === pt.station.id
+    const isSelected = selId === pt.station.id
+    const visualCircle = stationLayer.findOne<Konva.Circle>(`#station-visual-${pt.station.id}`)
+    if (visualCircle) {
+      visualCircle.fill(isNearest ? '#facc15' : isSelected ? '#22d3ee' : '#cbd5e1')
+    }
+    const label = stationLayer.findOne<Konva.Text>(`#station-label-${pt.station.id}`)
+    if (label) {
+      label.fill(isNearest ? '#fde047' : isSelected ? '#67e8f9' : '#94a3b8')
+    }
+  }
+
+  stationLayer.batchDraw()
 }
 
 watch(
@@ -1164,11 +1286,8 @@ watch(
 watch(
   () => selectedStation?.id,
   () => {
-    renderStaticBoard()
-    stationLayer?.batchDraw()
-    if (layoutMode.value === 'linear' && selectedStation) {
-      focusKeyStation(true)
-    }
+    updateSelectionVisual()
+    notifyAnchorChange()
   },
 )
 
@@ -1259,38 +1378,42 @@ function handleResize(): void {
       </div>
 
       <div class="flex items-center gap-2">
-        <button
-          class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
-          :title="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'"
-          @click="handleFitWidth"
-        >
-          <MoveHorizontal class="h-3.5 w-3.5 text-cyan-400" />
-          <span>{{ layoutMode === 'linear' ? '聚焦站点' : '适应宽度' }}</span>
-        </button>
-        <button
-          class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
-          title="缩小到整条线路全部可见"
-          @click="handleFitScreen"
-        >
-          <Expand class="h-3.5 w-3.5 text-cyan-400" />
-          <span>适应屏幕</span>
-        </button>
-        <button
-          class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
-          title="放大"
-          aria-label="放大画布"
-          @click="zoomIn"
-        >
-          <Plus class="h-3.5 w-3.5" />
-        </button>
-        <button
-          class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
-          title="缩小"
-          aria-label="缩小画布"
-          @click="zoomOut"
-        >
-          <Minus class="h-3.5 w-3.5" />
-        </button>
+        <UiTooltip :content="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'">
+          <button
+            class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            @click="handleFitWidth"
+          >
+            <MoveHorizontal class="h-3.5 w-3.5 text-cyan-400" />
+            <span>{{ layoutMode === 'linear' ? '聚焦站点' : '适应宽度' }}</span>
+          </button>
+        </UiTooltip>
+        <UiTooltip content="缩小到整条线路全部可见">
+          <button
+            class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            @click="handleFitScreen"
+          >
+            <Expand class="h-3.5 w-3.5 text-cyan-400" />
+            <span>适应屏幕</span>
+          </button>
+        </UiTooltip>
+        <UiTooltip content="放大画布">
+          <button
+            class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            aria-label="放大画布"
+            @click="zoomIn"
+          >
+            <Plus class="h-3.5 w-3.5" />
+          </button>
+        </UiTooltip>
+        <UiTooltip content="缩小画布">
+          <button
+            class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            aria-label="缩小画布"
+            @click="zoomOut"
+          >
+            <Minus class="h-3.5 w-3.5" />
+          </button>
+        </UiTooltip>
       </div>
     </div>
 

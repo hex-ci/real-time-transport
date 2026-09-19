@@ -70,8 +70,15 @@ export class TransitAggregator {
     return null
   }
 
-  async getLiveStatus(lineId: string, direction: number = 0, cityCode?: string): Promise<LiveLineStatus | null> {
-    const cacheKey = `${lineId}_${direction}`
+  async getLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+    options?: { targetOrder?: number },
+  ): Promise<LiveLineStatus | null> {
+    const cacheKey = options?.targetOrder
+      ? `${lineId}_${direction}_target_${options.targetOrder}`
+      : `${lineId}_${direction}`
     const cached = this.liveCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data
@@ -82,7 +89,7 @@ export class TransitAggregator {
       if (!provider) continue
 
       try {
-        const status = await provider.getLiveStatus(lineId, direction, cityCode)
+        const status = await provider.getLiveStatus(lineId, direction, cityCode, options)
         if (status) {
           if (i > 0) {
             status.isDegraded = true

@@ -165,15 +165,16 @@ export class TransitService {
     direction: number = 0,
     cityCode?: string,
     forceSimulate = false,
+    options?: { targetOrder?: number },
   ): Promise<LiveLineStatus | null> {
-    const status = await this.aggregator.getLiveStatus(lineId, direction, cityCode)
+    const status = await this.aggregator.getLiveStatus(lineId, direction, cityCode, options)
     const isEmpty = !status || status.buses.length === 0
     const shouldSimulate = forceSimulate
       || process.env.TRANSIT_SIMULATION === 'true'
       || process.env.DEMO_MODE === 'true'
 
     if (shouldSimulate && isEmpty) {
-      return this.generateSimulatedLiveStatus(lineId, direction, cityCode)
+      return this.generateSimulatedLiveStatus(lineId, direction, cityCode, options)
     }
     return status
   }
@@ -185,6 +186,7 @@ export class TransitService {
     lineId: string,
     direction: number = 0,
     cityCode?: string,
+    options?: { targetOrder?: number },
   ): Promise<LiveLineStatus | null> {
     const detail = await this.getLineDetail(lineId, direction, cityCode)
     if (!detail || detail.stops.length < 2) return null
@@ -200,6 +202,7 @@ export class TransitService {
     const count = Math.min(6, Math.max(3, Math.floor(totalStops / 7)))
     const now = Date.now()
     const buses: LiveBus[] = []
+    const isSubway = detail.type === 'subway' || lineId.startsWith('subway_')
 
     for (let i = 0; i < count; i++) {
       const baseRatio = (i + 0.6) / (count + 1)
@@ -208,16 +211,36 @@ export class TransitService {
       const s0 = sd[stopIdx] ?? 0
       const s1 = sd[stopIdx + 1] ?? s0
       const currentDist = s0 + (s1 - s0) * timeCycle
+      const order = stopIdx + 1
+
+      let travelTimeSec: number | undefined
+      let distanceToWaitStn: number | undefined
+
+      if (options?.targetOrder) {
+        if (order < options.targetOrder) {
+          const stopsAway = options.targetOrder - order - timeCycle
+          travelTimeSec = isSubway
+            ? Math.max(30, Math.round(stopsAway * 135))
+            : Math.max(30, Math.round(stopsAway * 150))
+          if (sd[options.targetOrder - 1]) {
+            distanceToWaitStn = Math.max(0, Math.round(sd[options.targetOrder - 1]! - currentDist))
+          }
+        }
+      }
+      else {
+        distanceToWaitStn = Math.max(0, Math.round(L - currentDist))
+      }
 
       buses.push({
         id: `sim_${lineId}_${direction}_${i + 1}`,
-        order: stopIdx + 1,
+        order,
         nextOrder: stopIdx + 2,
         progress: timeCycle,
         speed: 7.5 + (i % 3) * 1.5,
         congestion: i % 2 === 0 ? 'low' : 'medium',
         distanceFromStart: Math.round(currentDist),
-        distanceToWaitStn: Math.max(0, Math.round(L - currentDist)),
+        distanceToWaitStn,
+        travelTimeSec,
         license: `京A·${7800 + (i * 127) % 900}`,
         updatedAt: now,
       })
@@ -300,21 +323,11 @@ export class TransitService {
     const walk = await this.amap.getWalkingEta(params.originLng, params.originLat, station.lng, station.lat)
     if (!walk) return null
 
-    const live = await this.getLiveStatus(params.lineId, params.direction, params.cityCode)
+    const arrivalsResult = await this.getStationArrivals(params.lineId, params.stationName, params.direction, 1, params.cityCode)
+    const nextArrival = arrivalsResult?.arrivals?.[0]
     let vehicleEtaSeconds: number | null = null
-
-    if (live && live.buses.length > 0) {
-      const upcoming = live.buses
-        .filter(b => typeof b.order === 'number' && (b.order as number) <= station.order)
-        .sort((a, b) => (b.order as number) - (a.order as number))
-      if (upcoming.length > 0) {
-        const b = upcoming[0]!
-        // Only real upstream travel time counts; guessing per-stop seconds
-        // would poison the buffer calculation, so leave null when absent.
-        vehicleEtaSeconds = b.travelTimeSec
-          ? Math.max(0, b.travelTimeSec)
-          : null
-      }
+    if (nextArrival) {
+      vehicleEtaSeconds = nextArrival.isAtStation ? 0 : nextArrival.etaSeconds
     }
 
     if (vehicleEtaSeconds === null) {
@@ -374,7 +387,17 @@ export class TransitService {
     direction: number = 0,
     count: number = 6,
     cityCode?: string,
-  ): Promise<{ isExact: boolean, arrivals: Array<{ time: string, etaSeconds: number }> } | null> {
+  ): Promise<{
+    isExact: boolean
+    arrivals: Array<{
+      time: string
+      etaSeconds: number
+      stopsAway?: number
+      distanceMeters?: number
+      isAtStation?: boolean
+      busId?: string
+    }>
+  } | null> {
     const now = Date.now()
     const bjDate = new Date(now + 8 * 3600 * 1000)
     const hours = bjDate.getUTCHours()
@@ -394,32 +417,89 @@ export class TransitService {
       }
     }
 
-    // 2) Simulated fallback: derive ETA from live engine positions
+    // 2) Station resolution
     const detail = await this.getLineDetail(lineId, direction, cityCode)
     if (!detail) return null
     const station = detail.stops.find(s => s.name === stationName || s.name.includes(stationName))
     if (!station) return null
+    const targetOrder = station.order
 
-    const live = await this.getLiveStatus(lineId, direction, cityCode)
-    if (!live) return null
+    // 3) Request live status targeted to this station
+    const live = await this.getLiveStatus(lineId, direction, cityCode, false, { targetOrder })
+    if (!live || !live.buses || live.buses.length === 0) {
+      return { isExact: false, arrivals: [] }
+    }
 
-    const upcoming = live.buses
-      .filter(b => typeof b.order === 'number' && (b.order as number) <= station.order)
-      .sort((a, b) => (b.order as number) - (a.order as number))
-      .slice(0, count)
+    const isSubway = detail.type === 'subway' || lineId.startsWith('subway_')
+    const arrivals: Array<{
+      time: string
+      etaSeconds: number
+      stopsAway?: number
+      distanceMeters?: number
+      isAtStation?: boolean
+      busId?: string
+    }> = []
 
-    const arrivals = upcoming
-      .filter(b => typeof b.travelTimeSec === 'number')
-      .map((b) => {
-        const etaSec = b.travelTimeSec as number
-        const d = new Date(now + etaSec * 1000 + 8 * 3600 * 1000)
-        return {
-          time: `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`,
-          etaSeconds: etaSec,
+    for (const b of live.buses) {
+      if (typeof b.order !== 'number') continue
+
+      // Station already passed: strictly exclude
+      if (b.order > targetOrder) continue
+
+      // Currently at station platform
+      if (b.order === targetOrder) {
+        arrivals.push({
+          time: '正在进站',
+          etaSeconds: 0,
+          stopsAway: 0,
+          isAtStation: true,
+          busId: b.id,
+        })
+        continue
+      }
+
+      // Bus is approaching: b.order < targetOrder
+      const stopsAway = targetOrder - b.order
+      let etaSeconds: number
+      let time: string
+
+      if (typeof b.travelTimeSec === 'number' && b.travelTimeSec > 0) {
+        etaSeconds = b.travelTimeSec
+        const d = new Date(now + etaSeconds * 1000 + 8 * 3600 * 1000)
+        time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      }
+      else if (isSubway) {
+        const progress = typeof b.progress === 'number' ? b.progress : 0
+        etaSeconds = Math.max(30, Math.round((stopsAway - progress) * 135))
+        const d = new Date(now + etaSeconds * 1000 + 8 * 3600 * 1000)
+        time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      }
+      else {
+        const sd = detail.stationDistances
+        const targetDist = sd ? sd[targetOrder - 1] : undefined
+        if (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number' && targetDist > b.distanceFromStart) {
+          const remainingMeters = targetDist - b.distanceFromStart
+          const speed = (typeof b.speed === 'number' && b.speed >= 3 && b.speed <= 18) ? b.speed : 6.0
+          etaSeconds = Math.max(30, Math.round(remainingMeters / speed + (stopsAway - 1) * 30))
         }
-      })
+        else {
+          etaSeconds = Math.max(60, stopsAway * 150)
+        }
+        const d = new Date(now + etaSeconds * 1000 + 8 * 3600 * 1000)
+        time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      }
 
-    return { isExact: false, arrivals }
+      arrivals.push({
+        time,
+        etaSeconds,
+        stopsAway,
+        distanceMeters: b.distanceToWaitStn,
+        busId: b.id,
+      })
+    }
+
+    arrivals.sort((a, b) => a.etaSeconds - b.etaSeconds)
+    return { isExact: false, arrivals: arrivals.slice(0, count) }
   }
 
   private static subKey(lineId: string, direction: number): string {

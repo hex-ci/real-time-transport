@@ -13,6 +13,37 @@ async function main() {
     app.log.error(err)
     process.exit(1)
   }
+
+  const closeGracefully = async () => {
+    try {
+      if (app.websocketServer) {
+        for (const client of app.websocketServer.clients) {
+          client.terminate()
+        }
+      }
+    }
+    catch {
+      // ignore
+    }
+
+    const forceExitTimer = setTimeout(() => {
+      process.exit(0)
+    }, 400)
+
+    try {
+      await app.close()
+    }
+    catch {
+      // ignore
+    }
+    finally {
+      clearTimeout(forceExitTimer)
+      process.exit(0)
+    }
+  }
+
+  process.once('SIGINT', closeGracefully)
+  process.once('SIGTERM', closeGracefully)
 }
 
 main()

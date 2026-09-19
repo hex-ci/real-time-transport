@@ -20,6 +20,6 @@ export interface ITransitProvider {
   readonly name: DataSourceType
   searchLines(keyword: string, cityCode?: string): Promise<LineSummary[]>
   getLineDetail(lineId: string, direction?: number, cityCode?: string): Promise<LineDetail | null>
-  getLiveStatus(lineId: string, direction?: number, cityCode?: string): Promise<LiveLineStatus | null>
+  getLiveStatus(lineId: string, direction?: number, cityCode?: string, options?: { targetOrder?: number }): Promise<LiveLineStatus | null>
   isAvailable(): Promise<boolean>
 }

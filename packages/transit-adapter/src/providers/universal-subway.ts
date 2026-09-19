@@ -152,7 +152,12 @@ export class UniversalSubwayEngine implements ITransitProvider {
     }
   }
 
-  async getLiveStatus(lineId: string, direction: number = 0, cityCode?: string): Promise<LiveLineStatus | null> {
+  async getLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+    options?: { targetOrder?: number },
+  ): Promise<LiveLineStatus | null> {
     if (!lineId.startsWith('subway_')) {
       return null
     }
@@ -234,7 +239,7 @@ export class UniversalSubwayEngine implements ITransitProvider {
         const progress = Math.min(Math.max(segElapsed / segDuration, 0), 0.99)
 
         const order = segmentIdx + 1
-        const remainingStops = totalStops - 1 - segmentIdx
+        const remainingStopsToTerminal = totalStops - 1 - segmentIdx
 
         // Continuous position on the real track geometry (meters from origin).
         const sd = detail.stationDistances
@@ -246,6 +251,28 @@ export class UniversalSubwayEngine implements ITransitProvider {
         }
         const routeLen = detail.routeLengthMeters
 
+        let distanceToWaitStn: number | undefined
+        let travelTimeSec: number | undefined
+
+        if (options?.targetOrder) {
+          if (order < options.targetOrder) {
+            const stopsToTarget = options.targetOrder - order - progress
+            travelTimeSec = Math.max(30, Math.round(stopsToTarget * STATION_RUN_SEC))
+            if (sd && typeof distanceFromStart === 'number' && sd[options.targetOrder - 1]) {
+              distanceToWaitStn = Math.max(0, sd[options.targetOrder - 1]! - distanceFromStart)
+            }
+            else {
+              distanceToWaitStn = Math.max(0, Math.round(stopsToTarget * 1200))
+            }
+          }
+        }
+        else {
+          distanceToWaitStn = (typeof routeLen === 'number' && distanceFromStart !== undefined)
+            ? Math.max(0, routeLen - distanceFromStart)
+            : remainingStopsToTerminal * 1200
+          travelTimeSec = Math.max(60, remainingStopsToTerminal * STATION_RUN_SEC)
+        }
+
         buses.push({
           id: `train_${lineId}_d${direction}_dep${i}`,
           order,
@@ -255,15 +282,9 @@ export class UniversalSubwayEngine implements ITransitProvider {
           lng: stops[segmentIdx]?.lng || 0,
           speed: CRUISE_SPEED,
           congestion: isPeak ? 'high' : 'low',
-          // The whole simulation is a declared schedule model (dataSource:
-          // 'subway_schedule', UI 标注「官方排班推演」): its numbers derive from
-          // the engine's own run-time assumptions, not from a fake upstream.
-          // Remaining distance uses the REAL station geometry when available.
-          distanceToWaitStn: (typeof routeLen === 'number' && distanceFromStart !== undefined)
-            ? Math.max(0, routeLen - distanceFromStart)
-            : remainingStops * 1200,
+          distanceToWaitStn,
           distanceFromStart,
-          travelTimeSec: Math.max(60, remainingStops * STATION_RUN_SEC),
+          travelTimeSec,
           updatedAt: now,
         })
       }

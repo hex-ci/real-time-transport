@@ -311,17 +311,26 @@ export class ChelaileProvider implements ITransitProvider {
     }
   }
 
-  async getLiveStatus(lineId: string, direction: number = 0, cityCode?: string): Promise<LiveLineStatus | null> {
+  async getLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+    options?: { targetOrder?: number },
+  ): Promise<LiveLineStatus | null> {
     if (lineId.startsWith('subway_')) {
       return null
     }
 
     const cityId = cityCode || '027'
     try {
-      const data = await this.request('/bus/line!encryptedLineDetail.action', {
+      const extraParams: Record<string, string> = {
         cityId,
         lineId,
-      })
+      }
+      if (options?.targetOrder) {
+        extraParams.targetOrder = String(options.targetOrder)
+      }
+      const data = await this.request('/bus/line!encryptedLineDetail.action', extraParams)
 
       const rawBuses = data.buses || []
       const rawStations = data.stations || []
@@ -332,6 +341,7 @@ export class ChelaileProvider implements ITransitProvider {
       // position). Cached after the first call, so this is free per poll.
       const geom = await this.fetchRouteGeometry(cityId, lineId, totalStations, data)
       const routeLen = geom?.routeLengthMeters
+      const sd = geom?.stationDistances
 
       const buses: LiveBus[] = rawBuses.map((b: any, idx: number) => {
         // Pass through only what the upstream actually reports; missing fields
@@ -348,13 +358,22 @@ export class ChelaileProvider implements ITransitProvider {
           ? orderNum + 1
           : undefined
 
-        // distanceToWaitStn is the real road distance to the terminal; the
-        // continuous from-start position is routeLength minus that. Only set it
-        // when BOTH the upstream distance and the route length are real.
         const hasDist = Number.isFinite(distNum) && distNum >= 0
-        const distanceFromStart = (hasDist && typeof routeLen === 'number' && routeLen > 0)
-          ? Math.max(0, Math.min(routeLen - distNum, routeLen))
+
+        // When targetOrder is requested, chelaile provides target-specific travel time & distance.
+        const travel = options?.targetOrder && Array.isArray(b.travels)
+          ? b.travels.find((t: any) => Number(t.order) === options.targetOrder)
           : undefined
+        const targetTravelTimeSec = travel && travel.travelTime > 0 ? Number(travel.travelTime) : undefined
+
+        let distanceFromStart: number | undefined
+        if (options?.targetOrder && sd && sd[options.targetOrder - 1] && hasDist && distNum > 0) {
+          const targetStationDist = sd[options.targetOrder - 1]!
+          distanceFromStart = Math.max(0, targetStationDist - distNum)
+        }
+        else if (hasDist && typeof routeLen === 'number' && routeLen > 0) {
+          distanceFromStart = Math.max(0, Math.min(routeLen - distNum, routeLen))
+        }
 
         return {
           id: String(b.busId || `bus_${idx + 1}`),
@@ -367,6 +386,7 @@ export class ChelaileProvider implements ITransitProvider {
           congestion: parseCongestion(b.busTagList),
           distanceToWaitStn: hasDist && distNum > 0 ? distNum : undefined,
           distanceFromStart,
+          travelTimeSec: targetTravelTimeSec,
           license: b.licence ? String(b.licence) : undefined,
           updatedAt: Date.now(),
         }

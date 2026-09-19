@@ -30,6 +30,11 @@ export const LiveBusSchema = z.object({
   lng: z.number().optional(),
   speed: z.number().min(0).optional(),
   congestion: CongestionLevelSchema.default('unknown'),
+  /**
+   * Distance to the vehicle's next wait station in meters. -1 is chelaile's
+   * sentinel meaning "already past the requested targetOrder" — callers use it
+   * to exclude passed buses instead of treating them as approaching.
+   */
   distanceToWaitStn: z.number().optional(),
   /**
    * Distance from the route START to the vehicle, in meters along the real

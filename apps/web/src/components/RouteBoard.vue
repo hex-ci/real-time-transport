@@ -158,12 +158,14 @@ interface AnimatedVehicle {
 
 const vehicleMap = new Map<string, AnimatedVehicle>()
 
-const CATCHUP_RATE = 0.55
+const MAX_BUS_SPEED_MS = 16.0 // 57.6 km/h physical speed limit for city transit
+const CATCHUP_CONVERGE_SEC = 3.5 // Smoothly close position gap over 3.5 seconds
 const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
-const MAX_FREERUN_MS = 45000
+const FREERUN_CRUISE_MS = 8000 // 8s at full cruise speed
+const MAX_FREERUN_MS = 20000 // 20s total with smooth dampening to 0
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -197,7 +199,7 @@ function busDistanceFromStart(b: LiveBus): number | null {
     return Math.max(0, Math.min(L, b.distanceFromStart))
   }
 
-  if (typeof b.distanceToWaitStn === 'number' && Number.isFinite(b.distanceToWaitStn)) {
+  if (typeof b.distanceToWaitStn === 'number' && b.distanceToWaitStn > 0 && Number.isFinite(b.distanceToWaitStn)) {
     const s = L - b.distanceToWaitStn
     if (s >= 0 && s <= L * 1.05) {
       return Math.max(0, Math.min(L, s))
@@ -498,30 +500,43 @@ function initAnimation(): void {
       }
 
       const sinceLastFix = time - v.lastFixAt
-      const canExtrapolate = sinceLastFix < MAX_FREERUN_MS
+      // Smooth extrapolation damping:
+      // 0 ~ 8s: full speed (100%)
+      // 8 ~ 20s: linear decay from 100% to 0% (simulating approaching intersections / signals)
+      // > 20s: 0% (gracefully hold position until new live fix arrives)
+      let extrapolationFactor = 0
+      if (sinceLastFix < FREERUN_CRUISE_MS) {
+        extrapolationFactor = 1.0
+      }
+      else if (sinceLastFix < MAX_FREERUN_MS) {
+        extrapolationFactor = Math.max(0, 1.0 - (sinceLastFix - FREERUN_CRUISE_MS) / (MAX_FREERUN_MS - FREERUN_CRUISE_MS))
+      }
 
       let effectiveSpeed: number
       if (v.mode === 'catchup') {
         const remaining = v.convergeTo - v.displayedDist
         if (remaining <= 0.5) {
           v.mode = 'cruise'
-          effectiveSpeed = canExtrapolate ? base : 0
+          effectiveSpeed = base * extrapolationFactor
         }
         else {
-          effectiveSpeed = Math.max(base, remaining * CATCHUP_RATE)
+          // Bounded smooth catchup: closes gap gently over 3.5s, strictly capped by MAX_BUS_SPEED_MS (16 m/s = 57.6 km/h)
+          const targetCatchup = Math.max(base, remaining / CATCHUP_CONVERGE_SEC)
+          effectiveSpeed = Math.min(MAX_BUS_SPEED_MS, targetCatchup)
         }
       }
       else if (v.mode === 'hold') {
+        // If real bus was held at a light/station, wait gently at 0 speed until real position advances
         if (v.fixDist !== null && v.displayedDist <= v.fixDist + 0.5) {
           v.mode = 'cruise'
-          effectiveSpeed = canExtrapolate ? base : 0
+          effectiveSpeed = base * extrapolationFactor
         }
         else {
           effectiveSpeed = 0
         }
       }
       else {
-        effectiveSpeed = canExtrapolate ? base : 0
+        effectiveSpeed = base * extrapolationFactor
       }
 
       if (effectiveSpeed > 0 && dt > 0) {
@@ -540,14 +555,20 @@ function initAnimation(): void {
         }
       }
 
-      v.displayedDist = Math.max(0, Math.min(L, v.displayedDist + effectiveSpeed * dt))
+      const prevDist = v.displayedDist
+      let nextDist = prevDist + effectiveSpeed * dt
 
       if (v.dwell) {
-        const plat = nearestPlatformDist(v.displayedDist)
-        if (plat !== null && Math.abs(v.displayedDist - plat) < DWELL_SNAP_M) {
-          v.displayedDist += (plat - v.displayedDist) * Math.min(1, dt * DWELL_SETTLE_MS)
+        const plat = nearestPlatformDist(nextDist)
+        // Forward-only dwell snap: only glide forward into the platform if approaching from behind.
+        // Never pull backwards!
+        if (plat !== null && plat > nextDist && (plat - nextDist) < DWELL_SNAP_M) {
+          nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
+
+      // Golden Rule: Strict Monotonic Non-Decreasing Invariant (0 backwards motion, ever)
+      v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
 
       const pos = layoutPosition(v.displayedDist)
       v.container.position({ x: pos.x, y: pos.y })

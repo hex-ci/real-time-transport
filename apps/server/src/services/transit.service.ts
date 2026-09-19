@@ -387,6 +387,7 @@ export class TransitService {
     direction: number = 0,
     count: number = 6,
     cityCode?: string,
+    targetOrderParam?: number,
   ): Promise<{
     isExact: boolean
     arrivals: Array<{
@@ -417,10 +418,12 @@ export class TransitService {
       }
     }
 
-    // 2) Station resolution
+    // 2) Station resolution: prefer exact order, then exact name, finally substring
     const detail = await this.getLineDetail(lineId, direction, cityCode)
     if (!detail) return null
-    const station = detail.stops.find(s => s.name === stationName || s.name.includes(stationName))
+    const station = (typeof targetOrderParam === 'number' && targetOrderParam > 0)
+      ? detail.stops.find(s => s.order === targetOrderParam)
+      : (detail.stops.find(s => s.name === stationName) || detail.stops.find(s => s.name.includes(stationName)))
     if (!station) return null
     const targetOrder = station.order
 
@@ -431,6 +434,9 @@ export class TransitService {
     }
 
     const isSubway = detail.type === 'subway' || lineId.startsWith('subway_')
+    const sd = detail.stationDistances
+    const targetDist = sd && sd[targetOrder - 1] !== undefined ? sd[targetOrder - 1]! : undefined
+
     const arrivals: Array<{
       time: string
       etaSeconds: number
@@ -443,11 +449,19 @@ export class TransitService {
     for (const b of live.buses) {
       if (typeof b.order !== 'number') continue
 
-      // Station already passed: strictly exclude
-      if (b.order > targetOrder) continue
+      // Upstream -1 sentinel (chelaile): this bus is already past the target station.
+      if (b.distanceToWaitStn === -1) continue
 
-      // Currently at station platform
-      if (b.order === targetOrder) {
+      // The vehicle's nose is heading to nextOrder; it has cleared order.
+      // A bus serves the target station only when nextOrder === targetOrder.
+      if (b.nextOrder !== undefined && b.nextOrder > targetOrder) continue
+      if (b.nextOrder === undefined && b.order >= targetOrder) continue
+
+      // Currently dwelling at station platform (within 35m of the stop line)
+      const isAtPlatform = typeof targetDist === 'number' && typeof b.distanceFromStart === 'number'
+        && Math.abs(b.distanceFromStart - targetDist) <= 35
+
+      if (isAtPlatform) {
         arrivals.push({
           time: '正在进站',
           etaSeconds: 0,
@@ -458,8 +472,8 @@ export class TransitService {
         continue
       }
 
-      // Bus is approaching: b.order < targetOrder
-      const stopsAway = targetOrder - b.order
+      // Bus is approaching: stopsAway counts full hops from nextOrder to target
+      const stopsAway = Math.max(1, targetOrder - (b.nextOrder ?? b.order))
       let etaSeconds: number
       let time: string
 
@@ -476,9 +490,9 @@ export class TransitService {
       }
       else {
         const sd = detail.stationDistances
-        const targetDist = sd ? sd[targetOrder - 1] : undefined
-        if (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number' && targetDist > b.distanceFromStart) {
-          const remainingMeters = targetDist - b.distanceFromStart
+        const fallbackTargetDist = sd ? sd[targetOrder - 1] : undefined
+        if (typeof fallbackTargetDist === 'number' && typeof b.distanceFromStart === 'number' && fallbackTargetDist > b.distanceFromStart) {
+          const remainingMeters = fallbackTargetDist - b.distanceFromStart
           const speed = (typeof b.speed === 'number' && b.speed >= 3 && b.speed <= 18) ? b.speed : 6.0
           etaSeconds = Math.max(30, Math.round(remainingMeters / speed + (stopsAway - 1) * 30))
         }
@@ -493,7 +507,7 @@ export class TransitService {
         time,
         etaSeconds,
         stopsAway,
-        distanceMeters: b.distanceToWaitStn,
+        distanceMeters: b.distanceToWaitStn && b.distanceToWaitStn > 0 ? b.distanceToWaitStn : undefined,
         busId: b.id,
       })
     }

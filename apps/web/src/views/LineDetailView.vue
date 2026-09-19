@@ -264,6 +264,7 @@ async function fetchStationArrivals(): Promise<void> {
       // or hand-typed URL whose direction param disagrees with the bus lineId
       // cannot query arrivals for the opposite way.
       direction: String(activeDirection.value),
+      order: String(st.order),
       count: '6',
       cityCode: currentCityCode.value,
     })
@@ -351,8 +352,13 @@ const selectedStationEta = computed(() => {
     if (allBuses.length === 0) {
       return '线路上暂无在途车辆 / 待发车'
     }
-    const passedBuses = allBuses.filter(b => typeof b.order === 'number' && b.order >= targetOrder)
-    if (passedBuses.some(b => b.order === targetOrder)) {
+    // A bus is "past" when its next stop is already beyond the target
+    const passedBuses = allBuses.filter((b) => {
+      const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
+      return next !== undefined && next > targetOrder
+    })
+    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    if (servingNow) {
       return '车辆正在本站 (即将发车)'
     }
     if (passedBuses.length > 0) {
@@ -367,12 +373,19 @@ const selectedStationEta = computed(() => {
   if (allBuses.length === 0) return '线路上暂无在途车辆 / 待发车'
 
   const upcoming = allBuses
-    .filter(b => typeof b.order === 'number' && (b.order as number) < targetOrder)
-    .sort((a, b) => (b.order as number) - (a.order as number))
+    .filter((b) => {
+      const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
+      return next !== undefined && next <= targetOrder
+    })
+    .sort((a, b) => ((a.nextOrder ?? a.order)!) - ((b.nextOrder ?? b.order)!))
 
   if (upcoming.length === 0) {
-    const passed = allBuses.filter(b => typeof b.order === 'number' && (b.order as number) >= targetOrder)
-    if (passed.some(b => b.order === targetOrder)) {
+    const passed = allBuses.filter((b) => {
+      const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
+      return next !== undefined && next > targetOrder
+    })
+    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    if (servingNow) {
       return '车辆正在本站 (即将发车)'
     }
     if (passed.length > 0) {
@@ -382,7 +395,7 @@ const selectedStationEta = computed(() => {
   }
 
   const bus = upcoming[0]!
-  const stops = targetOrder - (bus.order as number)
+  const stops = Math.max(1, targetOrder - (bus.nextOrder ?? (bus.order as number)))
   const stopsText = stops === 1 ? '即将进站 (1 站)' : `距本站 ${stops} 站`
 
   if (isSubway.value) {
@@ -404,8 +417,7 @@ const selectedStationEta = computed(() => {
     }
   }
 
-  const mins = Math.max(1, Math.round(stops * 2.5))
-  return `预计 ${mins} 分钟到达 (${stopsText})`
+  return `正在获取到站时间… (${stopsText})`
 })
 
 watch(

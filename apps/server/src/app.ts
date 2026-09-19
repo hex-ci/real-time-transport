@@ -170,12 +170,15 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     const direction = Number(q?.direction ?? 0)
     const count = Math.min(Number(q?.count ?? 6), 20)
 
+    const order = q?.order ? Number(q.order) : undefined
+
     const result = await transitService.getStationArrivals(
       decodeURIComponent(lineId),
       decodeURIComponent(stationName),
       direction,
       count,
       q?.cityCode || undefined,
+      order,
     )
     if (!result) {
       return reply.status(404).send({ success: false, error: 'Station not found on this line' })

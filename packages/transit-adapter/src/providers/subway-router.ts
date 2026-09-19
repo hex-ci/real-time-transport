@@ -91,11 +91,16 @@ export class SubwayRouterProvider implements ITransitProvider {
     return this.chelaile.getLineDetail(lineId, direction, cityCode)
   }
 
-  async getLiveStatus(lineId: string, direction: number = 0, cityCode?: string): Promise<LiveLineStatus | null> {
+  async getLiveStatus(
+    lineId: string,
+    direction: number = 0,
+    cityCode?: string,
+    options?: { targetOrder?: number },
+  ): Promise<LiveLineStatus | null> {
     if (lineId.startsWith('subway_')) {
-      return this.subwayEngine.getLiveStatus(lineId, direction, cityCode)
+      return this.subwayEngine.getLiveStatus(lineId, direction, cityCode, options)
     }
-    return this.chelaile.getLiveStatus(lineId, direction, cityCode)
+    return this.chelaile.getLiveStatus(lineId, direction, cityCode, options)
   }
 
   async isAvailable(): Promise<boolean> {

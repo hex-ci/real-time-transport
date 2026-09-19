@@ -353,12 +353,17 @@ export class ChelaileProvider implements ITransitProvider {
         const lngNum = Number(b.lng)
 
         const hasOrder = Number.isFinite(orderNum) && b.order !== undefined && orderNum > 0
-        const order = hasOrder ? orderNum : undefined
-        const nextOrder = hasOrder && totalStations > orderNum
-          ? orderNum + 1
-          : undefined
+        // In chelaile's wire protocol, b.order is the UPCOMING station the vehicle is heading towards.
+        // Therefore, the station the vehicle last passed is orderNum - 1.
+        const order = hasOrder ? Math.max(1, orderNum - 1) : undefined
+        const nextOrder = hasOrder ? Math.min(totalStations, orderNum) : undefined
 
         const hasDist = Number.isFinite(distNum) && distNum >= 0
+        // -1 is chelaile's sentinel for "already past the requested targetOrder";
+        // pass it through so the arrivals endpoint can exclude such buses.
+        const hasDistRaw = Number.isFinite(distNum)
+        const mileageNum = Number(b.mileage)
+        const hasMileage = Number.isFinite(mileageNum) && mileageNum > 0
 
         // When targetOrder is requested, chelaile provides target-specific travel time & distance.
         const travel = options?.targetOrder && Array.isArray(b.travels)
@@ -366,8 +371,14 @@ export class ChelaileProvider implements ITransitProvider {
           : undefined
         const targetTravelTimeSec = travel && travel.travelTime > 0 ? Number(travel.travelTime) : undefined
 
+        // Authoritative continuous distanceFromStart:
+        // 1) Prefer raw b.mileage (vehicle odometer from start in meters, provided by chelaile)
+        // 2) Fallback to targetStationDist - distNum or routeLen - distNum
         let distanceFromStart: number | undefined
-        if (options?.targetOrder && sd && sd[options.targetOrder - 1] && hasDist && distNum > 0) {
+        if (hasMileage) {
+          distanceFromStart = mileageNum
+        }
+        else if (options?.targetOrder && sd && sd[options.targetOrder - 1] && hasDist && distNum > 0) {
           const targetStationDist = sd[options.targetOrder - 1]!
           distanceFromStart = Math.max(0, targetStationDist - distNum)
         }
@@ -384,7 +395,9 @@ export class ChelaileProvider implements ITransitProvider {
           lng: Number.isFinite(lngNum) && b.lng !== undefined && lngNum !== 0 ? lngNum : undefined,
           speed: Number.isFinite(speedNum) && b.speed !== undefined && speedNum >= 0 ? speedNum : undefined,
           congestion: parseCongestion(b.busTagList),
-          distanceToWaitStn: hasDist && distNum > 0 ? distNum : undefined,
+          distanceToWaitStn: hasDistRaw && distNum > 0
+            ? distNum
+            : (hasDistRaw && distNum === -1 ? -1 : undefined),
           distanceFromStart,
           travelTimeSec: targetTravelTimeSec,
           license: b.licence ? String(b.licence) : undefined,

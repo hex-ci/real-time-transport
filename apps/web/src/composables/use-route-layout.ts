@@ -212,8 +212,8 @@ export function computeRouteLayout(
       centerX,
       centerY,
       radius: arcRadius,
-      startAngle: isRightSide ? -Math.PI / 2 : Math.PI / 2,
-      endAngle: isRightSide ? Math.PI / 2 : (Math.PI * 3) / 2,
+      startAngle: isRightSide ? -Math.PI / 2 : -Math.PI / 2,
+      endAngle: isRightSide ? Math.PI / 2 : -Math.PI * 1.5,
       isRightSide,
     })
   }

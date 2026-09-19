@@ -46,8 +46,25 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     await db.close()
   })
 
-  // Health check
-  app.get('/health', async () => ({ status: 'ok', timestamp: Date.now() }))
+  // Health check. `simulation` lets the web app label generated vehicles
+  // unmistakably, so a simulated board is never mistaken for live data.
+  app.get('/health', async () => ({
+    status: 'ok',
+    timestamp: Date.now(),
+    simulation: transitService.isSimulationEnabled(),
+  }))
+
+  /**
+   * Runtime feature flags the web app needs for honest UI labelling.
+   */
+  app.get('/api/transit/runtime-flags', async () => {
+    return {
+      success: true,
+      data: {
+        simulation: transitService.isSimulationEnabled(),
+      },
+    }
+  })
 
   // City dictionary (multi-city support)
   app.get('/api/transit/cities', async () => {

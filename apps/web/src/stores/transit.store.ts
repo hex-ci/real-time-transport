@@ -19,6 +19,24 @@ export const useTransitStore = defineStore('transit', () => {
   /** True while a station tap triggers a live-status refetch. */
   const isRefreshingLive = shallowRef(false)
   const loadError = shallowRef<string | null>(null)
+  /**
+   * Server-side simulation switch (`TRANSIT_SIMULATION`). When true the board
+   * renders generated vehicles, so every view must label them as such.
+   */
+  const simulationEnabled = shallowRef(false)
+
+  async function fetchRuntimeFlags(): Promise<void> {
+    try {
+      const res = await fetch('/api/transit/runtime-flags')
+      const json = await res.json()
+      if (json.success) {
+        simulationEnabled.value = Boolean(json.data?.simulation)
+      }
+    }
+    catch {
+      // Leave the flag off: a failed probe must not claim live data is simulated.
+    }
+  }
 
   let socket: WebSocket | null = null
   /** Line+direction currently subscribed, so a switch can unsubscribe cleanly. */
@@ -302,8 +320,10 @@ export const useTransitStore = defineStore('transit', () => {
     isLoading,
     isRefreshingLive,
     loadError,
+    simulationEnabled,
     fetchCommuteProfile,
     fetchFavorites,
+    fetchRuntimeFlags,
     searchLines,
     loadLine,
     refreshLive,

@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Bus, ChevronRight, Clock, Menu, Settings, Tv, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import CitySwitcher from '@/components/CitySwitcher.vue'
+import SimulationBanner from '@/components/SimulationBanner.vue'
 
 const transitStore = useTransitStore()
 const router = useRouter()
@@ -36,6 +37,9 @@ function onCityChange(): void {
 
 <template>
   <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+    <!-- Simulation strip inside the sticky header: always on screen on every
+         page, and it keeps the header's positioning context for the mobile menu. -->
+    <SimulationBanner />
     <div class="flex w-full items-center justify-between px-3 py-1.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-3">
       <!-- Brand -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">

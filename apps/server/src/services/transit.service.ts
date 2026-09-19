@@ -169,14 +169,22 @@ export class TransitService {
   ): Promise<LiveLineStatus | null> {
     const status = await this.aggregator.getLiveStatus(lineId, direction, cityCode, options)
     const isEmpty = !status || status.buses.length === 0
-    const shouldSimulate = forceSimulate
-      || process.env.TRANSIT_SIMULATION === 'true'
-      || process.env.DEMO_MODE === 'true'
+    const shouldSimulate = forceSimulate || this.isSimulationEnabled()
 
     if (shouldSimulate && isEmpty) {
       return this.generateSimulatedLiveStatus(lineId, direction, cityCode, options)
     }
     return status
+  }
+
+  /**
+   * True when the environment forces generated vehicles instead of upstream
+   * live data. Exposed to the web app so the UI can label simulated data
+   * unmistakably — a user must never mistake generated vehicles for real ones.
+   */
+  isSimulationEnabled(): boolean {
+    return process.env.TRANSIT_SIMULATION === 'true'
+      || process.env.DEMO_MODE === 'true'
   }
 
   /**

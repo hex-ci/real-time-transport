@@ -34,6 +34,8 @@ const {
   initialLayoutMode = undefined,
   lineDetail,
   buses,
+  morningStopName = null,
+  eveningStopName = null,
 } = defineProps<{
   lineDetail: LineDetail
   buses: LiveBus[]
@@ -42,6 +44,9 @@ const {
   selectedStation?: Station | null
   /** Optional initial layout mode ('folded' or 'linear'). Defaults to persisted preference or 'folded'. */
   initialLayoutMode?: RouteLayoutMode
+  /** Commute board stop names, marked on the diagram when they appear in this direction. */
+  morningStopName?: string | null
+  eveningStopName?: string | null
 }>()
 
 export interface StationAnchor {
@@ -844,6 +849,44 @@ function renderStaticBoard(): void {
       align: 'center',
       listening: false,
     }))
+
+    // Commute board-stop marker. A separate node rather than a prefix on the
+    // label text: station names already wrap to four lines at their worst
+    // (14-character names in the mobile column), and widening the label would
+    // break the row-height budget. Both board stops are marked whenever they
+    // appear in this direction's stop list — seeing them together is what makes
+    // the direction verdict legible, since the leg is derived from their order.
+    const boardStop = pt.station.name === morningStopName
+      ? { text: '上', fill: '#34d399' }
+      : pt.station.name === eveningStopName
+        ? { text: '下', fill: '#c084fc' }
+        : null
+    if (boardStop) {
+      const badgeR = m.stationRadius + 5
+      stationLayer.add(new Konva.Circle({
+        id: `board-stop-badge-${pt.station.id}`,
+        x: pt.x + badgeR + 1,
+        y: pt.y - badgeR + 1,
+        radius: 6,
+        fill: boardStop.fill,
+        stroke: '#020617',
+        strokeWidth: 1.5,
+        listening: false,
+      }))
+      stationLayer.add(new Konva.Text({
+        id: `board-stop-badge-text-${pt.station.id}`,
+        x: pt.x + badgeR - 4,
+        y: pt.y - badgeR - 4,
+        text: boardStop.text,
+        fontSize: 8,
+        fontFamily: 'system-ui, sans-serif',
+        fontStyle: 'bold',
+        fill: '#020617',
+        width: 10,
+        align: 'center',
+        listening: false,
+      }))
+    }
   }
 
   // Dedicated selection highlight ring
@@ -1395,8 +1438,26 @@ watch(
 watch(
   () => nearestStation,
   () => {
+    // The nearest-stop marker is applied in two places: the static render (which
+    // may run before a fix exists) and updateSelectionVisual. Refresh the fills
+    // here too, otherwise a fix arriving after the board laid out would move the
+    // ripple but leave the stop unmarked.
+    updateSelectionVisual()
     renderRipple()
     dynamicLayer?.batchDraw()
+  },
+  // The board's layout is built in renderStaticBoard, which runs after this
+  // watcher can first fire (the store already holds a fix when the view mounts),
+  // so defer to post-flush to observe the layout the render just produced.
+  { flush: 'post' },
+)
+
+// Board-stop markers live on the static layer and depend on which stops are
+// set, so a change (or a different direction's detail) needs a redraw.
+watch(
+  () => [morningStopName, eveningStopName, lineDetail.lineId, lineDetail.direction].join('|'),
+  () => {
+    renderStaticBoard()
   },
 )
 

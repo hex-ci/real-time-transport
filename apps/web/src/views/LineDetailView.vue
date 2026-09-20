@@ -34,7 +34,7 @@ import { useGis } from '@/composables/use-gis'
 import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
 import StationPopover from '@/components/StationPopover.vue'
 import type { Station } from '@real-time-transport/shared'
-import { resolvePinnedStation } from '@real-time-transport/shared/line-group'
+import { purposeFromDirection } from '@real-time-transport/shared/line-group'
 
 const {
   id: propId,
@@ -326,38 +326,51 @@ const matchingFavorite = computed(() => {
   }) ?? null
 })
 
-/** Whether the station currently open in the popover is this direction's pin. */
-const isSelectedStationPinned = computed(() => {
+/**
+ * Commute purpose of the direction currently on screen. Judged from this
+ * direction's own stop order, so it works without holding the other direction.
+ */
+const activePurpose = computed<'morning' | 'evening' | null>(() => {
   const fav = matchingFavorite.value
-  if (!fav || !selectedStation.value) return false
-  return resolvePinnedStation(fav, currentDirection.value as 0 | 1) === selectedStation.value.name
+  if (!fav) return null
+  return purposeFromDirection(fav, currentLineDetail.value)
 })
 
-const pinSaving = shallowRef(false)
-const pinError = shallowRef<string | null>(null)
+/** Board-stop states of the station currently open in the popover. */
+const stationPurpose = computed<'morning' | 'evening' | null>(() => {
+  const fav = matchingFavorite.value
+  if (!fav || !selectedStation.value) return null
+  if (fav.morningStopName === selectedStation.value.name) return 'morning'
+  if (fav.eveningStopName === selectedStation.value.name) return 'evening'
+  return null
+})
+
+const stopSaving = shallowRef(false)
+const stopError = shallowRef<string | null>(null)
 
 /**
- * Pin the open station for this direction, or unpin it when it already is.
+ * Bind or unbind the open station to a commute purpose.
  *
- * One pin per direction: setting a new stop replaces the old one, matching the
- * data model (a route's two directions each carry exactly one).
+ * Board stops are keyed by PURPOSE, not direction — a stop is "where I board in
+ * the morning", a fact independent of which direction is on screen. Setting a
+ * purpose replaces that purpose's stop; tapping the active purpose clears it.
  */
-async function togglePinnedStation(): Promise<void> {
+async function toggleBoardStop(purpose: 'morning' | 'evening'): Promise<void> {
   const fav = matchingFavorite.value
   const station = selectedStation.value
   if (!fav?.id || !station) return
 
-  pinSaving.value = true
-  pinError.value = null
+  stopSaving.value = true
+  stopError.value = null
   try {
-    const next = isSelectedStationPinned.value ? null : station.name
-    await transitStore.setPinnedStation(fav.id, currentDirection.value as 0 | 1, next)
+    const next = stationPurpose.value === purpose ? null : station.name
+    await transitStore.setBoardStop(fav.id, purpose, next)
   }
   catch (err) {
-    pinError.value = err instanceof Error ? err.message : '固定站点保存失败'
+    stopError.value = err instanceof Error ? err.message : '上车点保存失败'
   }
   finally {
-    pinSaving.value = false
+    stopSaving.value = false
   }
 }
 
@@ -486,26 +499,15 @@ watch(
   () => currentLineDetail.value?.stops,
   (stops) => {
     if (stops && stops.length > 0) {
+      // The nearest-stop pool feeds the board's own marker (yellow ring + ripple);
+      // it is deliberately NOT promoted to `selectedStation`, which would open
+      // the popover on arrival. Which station deserves a popover is a decision
+      // for the user, not a side effect of loading the line.
       locationStore.updateNearestStation(stops)
-      // Auto-select only the real GPS-nearest station; without a fix no default is chosen
-      selectedStation.value = nearestStation.value
-      void fetchStationArrivals()
     }
   },
   { immediate: true },
 )
-
-/**
- * The GPS fix arrives after the line detail does, so the nearest stop computed
- * above was empty on first paint. Adopt it once it resolves, but only while the
- * user has not picked a station themselves.
- */
-watch(nearestStation, (nearest) => {
-  if (nearest && !selectedStation.value) {
-    selectedStation.value = nearest
-    void fetchStationArrivals()
-  }
-})
 
 // Keep the exact-timetable countdown fresh (departures pass by every minute)
 useIntervalFn(() => {
@@ -638,6 +640,18 @@ onUnmounted(() => {
             {{ opt.label }}
           </button>
         </div>
+
+        <!-- Commute purpose badge: which leg this direction serves, derived from
+             the two board stops. Hidden when the pair cannot be resolved. -->
+        <span
+          v-if="activePurpose"
+          class="hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium sm:inline-block"
+          :class="activePurpose === 'morning'
+            ? 'bg-emerald-500/10 text-emerald-400'
+            : 'bg-violet-500/10 text-violet-400'"
+        >
+          {{ activePurpose === 'morning' ? '🏠 上班方向' : '🏢 下班方向' }}
+        </span>
       </div>
     </div>
 
@@ -721,6 +735,8 @@ onUnmounted(() => {
         :buses="currentLiveStatus?.buses || []"
         :nearest-station="nearestStation"
         :selected-station="selectedStation"
+        :morning-stop-name="matchingFavorite?.morningStopName ?? null"
+        :evening-stop-name="matchingFavorite?.eveningStopName ?? null"
         @select-station="onSelectStation"
         @close-station="onCloseStationPopover"
         @station-anchor-change="onStationAnchorChange"
@@ -738,12 +754,12 @@ onUnmounted(() => {
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
         :can-pin="Boolean(matchingFavorite)"
-        :is-pinned="isSelectedStationPinned"
-        :pin-saving="pinSaving"
-        :pin-error="pinError"
+        :station-purpose="stationPurpose"
+        :stop-saving="stopSaving"
+        :stop-error="stopError"
         @close="onCloseStationPopover"
         @compute-walk="computeWalkDecision"
-        @toggle-pin="togglePinnedStation"
+        @toggle-stop="toggleBoardStop"
       />
     </div>
   </div>

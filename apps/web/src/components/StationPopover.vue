@@ -7,7 +7,7 @@ import {
   PopoverPortal,
   PopoverRoot,
 } from 'reka-ui'
-import { Footprints, Star, X } from '@lucide/vue'
+import { Footprints, House, Building2, X } from '@lucide/vue'
 import type { Station, WalkDecision } from '@real-time-transport/shared'
 import type { StationAnchor } from '@/components/RouteBoard.vue'
 
@@ -30,17 +30,18 @@ const props = defineProps<{
   eta: string
   freshness: string
   isRefreshing?: boolean
-  /** False when this line+direction is not followed, so there is nowhere to store a pin. */
+  /** False when this line is not followed, so there is nowhere to store a board stop. */
   canPin?: boolean
-  isPinned?: boolean
-  pinSaving?: boolean
-  pinError?: string | null
+  /** Which commute purpose the open station is bound to, if any. */
+  stationPurpose?: 'morning' | 'evening' | null
+  stopSaving?: boolean
+  stopError?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'compute-walk'): void
-  (e: 'toggle-pin'): void
+  (e: 'toggle-stop', purpose: 'morning' | 'evening'): void
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
@@ -193,23 +194,36 @@ const decisionStyle = computed(() => {
 
           <!-- Pin control: makes this stop the route's target on the home cards
                for the direction being viewed. -->
+          <!-- Commute board stops: bind this station to a purpose. One station can
+               serve both legs; tapping the active purpose unbinds it. -->
           <div v-if="canPin" class="space-y-1">
-            <button
-              type="button"
-              class="flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
-              :class="isPinned
-                ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25'
-                : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300'"
-              :disabled="pinSaving"
-              @click="emit('toggle-pin')"
-            >
-              <Star v-if="isPinned" class="h-3.5 w-3.5 shrink-0 fill-current" />
-              <Star v-else class="h-3.5 w-3.5 shrink-0" />
-              <span>
-                {{ pinSaving ? '正在保存…' : isPinned ? '已固定为本站目标' : '固定为本站目标' }}
-              </span>
-            </button>
-            <p v-if="pinError" class="text-[11px] text-rose-400">{{ pinError }}</p>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
+                :class="stationPurpose === 'morning'
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+                  : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'"
+                :disabled="stopSaving"
+                @click="emit('toggle-stop', 'morning')"
+              >
+                <House class="h-3.5 w-3.5 shrink-0" :class="stationPurpose === 'morning' ? 'fill-current' : ''" />
+                <span>{{ stationPurpose === 'morning' ? '上班上车点 ✓' : '设为上班上车点' }}</span>
+              </button>
+              <button
+                type="button"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
+                :class="stationPurpose === 'evening'
+                  ? 'border-violet-500/50 bg-violet-500/15 text-violet-300'
+                  : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-violet-500/50 hover:text-violet-300'"
+                :disabled="stopSaving"
+                @click="emit('toggle-stop', 'evening')"
+              >
+                <Building2 class="h-3.5 w-3.5 shrink-0" :class="stationPurpose === 'evening' ? 'fill-current' : ''" />
+                <span>{{ stationPurpose === 'evening' ? '下班上车点 ✓' : '设为下班上车点' }}</span>
+              </button>
+            </div>
+            <p v-if="stopError" class="text-[11px] text-rose-400">{{ stopError }}</p>
           </div>
 
           <!-- Walk Decision -->

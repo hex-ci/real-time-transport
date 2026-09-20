@@ -36,33 +36,54 @@ export const UserFavoriteLineSchema = z.object({
    */
   reverseLineId: z.string().optional(),
   /**
-   * Station pinned for `preferredDirection`. Undefined means no pin, in which
-   * case the UI falls back to the GPS-nearest stop.
+   * Board stop for the morning (AM commute departure) leg. Backed by the
+   * pinned_station_name column. Undefined means not set — the commute card
+   * then shows an explicit "no morning board stop" state.
    */
-  pinnedStationName: z.string().optional(),
+  morningStopName: z.string().optional(),
   /**
-   * Station pinned for the OPPOSITE direction. Bus routes stop at opposite ends
-   * of the city depending on direction, so one pin cannot serve both; subway
-   * reuses one lineId for both directions, which is why pins are keyed by
-   * direction rather than by lineId.
+   * Board stop for the evening (PM commute departure) leg. Backed by the
+   * reverse_pinned_station_name column.
    */
-  reversePinnedStationName: z.string().optional(),
+  eveningStopName: z.string().optional(),
   displayOrder: z.number().int().default(0),
 })
 export type UserFavoriteLine = z.infer<typeof UserFavoriteLineSchema>
 
 /**
- * Payload for updating a favourite's pinned stations.
+ * Payload for updating a favourite's board stops.
  *
- * `null` clears the pin (falling back to GPS); `undefined` leaves it untouched.
- * Passing explicit nulls is required because a plain PATCH with optional fields
- * cannot express "remove the pin" — see the endpoint's handling.
+ * `null` clears the stop (falling back to manual selection / no-target state);
+ * `undefined` leaves it untouched. Passing explicit nulls is required because a
+ * plain PATCH with optional fields cannot express "remove the stop" — see the
+ * endpoint's handling.
  */
 export const UpdateFavoriteSchema = z.object({
-  pinnedStationName: z.string().nullable().optional(),
-  reversePinnedStationName: z.string().nullable().optional(),
+  morningStopName: z.string().nullable().optional(),
+  eveningStopName: z.string().nullable().optional(),
 })
 export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
+
+/** User-level global settings (single row keyed by user id). */
+export const UserSettingsSchema = z.object({
+  morningStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  morningEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  eveningStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  eveningEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+})
+export type UserSettings = z.infer<typeof UserSettingsSchema>
+
+/** PATCH payload: partial update, each field independently validated. */
+export const UpdateSettingsSchema = UserSettingsSchema.partial().refine(
+  (s) => {
+    const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+    if (s.morningStart && s.morningEnd && toMin(s.morningStart) >= toMin(s.morningEnd)) return false
+    if (s.eveningStart && s.eveningEnd && toMin(s.eveningStart) >= toMin(s.eveningEnd)) return false
+    return true
+  },
+  { message: '时段起点必须早于终点' },
+)
+export type UpdateSettings = z.infer<typeof UpdateSettingsSchema>
 
 export const CommuteProfileSchema = z.object({
   mode: z.enum(['work', 'home', 'auto']),

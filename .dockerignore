@@ -1,0 +1,43 @@
+# 依赖与产物
+node_modules
+**/node_modules
+**/dist
+**/.vite
+**/*.tsbuildinfo
+
+# 环境与私密文件（镜像内不携带任何 .env，运行时经 env_file 注入）
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# 版本控制与 IDE
+.git
+.gitignore
+.vscode
+.kilo
+.idea
+
+# Git hooks
+.husky
+
+# 文档与设计稿（运行时不需要）
+docs
+*.md
+!README.md
+
+# 测试与自动化工件
+coverage
+.playwright-cli
+.temp
+.tmp
+
+# 开发编排（避免递归进构建上下文）
+docker-compose.yml
+docker-compose.prod.yml
+Dockerfile.*
+
+# 杂项
+.DS_Store
+logs
+*.log

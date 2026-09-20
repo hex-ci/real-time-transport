@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { DEFAULT_COMMUTE_HOURS } from '@real-time-transport/shared'
 import type { LineDetail, UserFavoriteLine } from '@real-time-transport/shared'
 
 const { Pool } = pg
@@ -7,6 +8,12 @@ export class Database {
   private pool: pg.Pool | null = null
   private inMemoryFavorites = new Map<string, any>()
   private inMemoryLineCache = new Map<string, { detail: LineDetail, fetchedAt: number }>()
+  private inMemorySettings = new Map<string, {
+    morningStart: string
+    morningEnd: string
+    eveningStart: string
+    eveningEnd: string
+  }>()
 
   constructor(private readonly connectionString?: string) {
     if (this.connectionString) {
@@ -68,8 +75,8 @@ export class Database {
           lineName: row.line_name,
           preferredDirection: row.preferred_direction ?? 0,
           reverseLineId: row.reverse_line_id ?? undefined,
-          pinnedStationName: row.pinned_station_name ?? undefined,
-          reversePinnedStationName: row.reverse_pinned_station_name ?? undefined,
+          morningStopName: row.pinned_station_name ?? undefined,
+          eveningStopName: row.reverse_pinned_station_name ?? undefined,
           displayOrder: row.display_order ?? 0,
         }))
       }
@@ -87,8 +94,8 @@ export class Database {
         lineName: f.lineName,
         preferredDirection: f.preferredDirection ?? 0,
         reverseLineId: f.reverseLineId,
-        pinnedStationName: f.pinnedStationName ?? undefined,
-        reversePinnedStationName: f.reversePinnedStationName ?? undefined,
+        morningStopName: f.morningStopName ?? undefined,
+        eveningStopName: f.eveningStopName ?? undefined,
         displayOrder: f.displayOrder ?? 0,
       }))
   }
@@ -100,8 +107,8 @@ export class Database {
     lineName: string
     preferredDirection?: number
     reverseLineId?: string
-    pinnedStationName?: string
-    reversePinnedStationName?: string
+    morningStopName?: string
+    eveningStopName?: string
     displayOrder?: number
   }): Promise<UserFavoriteLine> {
     const id = crypto.randomUUID()
@@ -121,8 +128,8 @@ export class Database {
             item.lineName,
             item.preferredDirection ?? 0,
             item.reverseLineId || null,
-            item.pinnedStationName || null,
-            item.reversePinnedStationName || null,
+            item.morningStopName || null,
+            item.eveningStopName || null,
             item.displayOrder ?? 0,
           ],
         )
@@ -135,8 +142,8 @@ export class Database {
           lineName: row.line_name,
           preferredDirection: row.preferred_direction ?? 0,
           reverseLineId: row.reverse_line_id ?? undefined,
-          pinnedStationName: row.pinned_station_name ?? undefined,
-          reversePinnedStationName: row.reverse_pinned_station_name ?? undefined,
+          morningStopName: row.pinned_station_name ?? undefined,
+          eveningStopName: row.reverse_pinned_station_name ?? undefined,
           displayOrder: row.display_order ?? 0,
         }
       }
@@ -153,8 +160,8 @@ export class Database {
       lineName: item.lineName,
       preferredDirection: item.preferredDirection ?? 0,
       reverseLineId: item.reverseLineId,
-      pinnedStationName: item.pinnedStationName,
-      reversePinnedStationName: item.reversePinnedStationName,
+      morningStopName: item.morningStopName,
+      eveningStopName: item.eveningStopName,
       displayOrder: item.displayOrder ?? 0,
     }
     this.inMemoryFavorites.set(id, record)
@@ -167,7 +174,7 @@ export class Database {
     lineName?: string
     preferredDirection?: number
     reverseLineId?: string
-    pinnedStationName?: string
+    morningStopName?: string
     displayOrder?: number
   }): Promise<boolean> {
     if (this.pool) {
@@ -189,7 +196,7 @@ export class Database {
             item.lineName ?? null,
             item.preferredDirection ?? null,
             item.reverseLineId ?? null,
-            item.pinnedStationName ?? null,
+            item.morningStopName ?? null,
             item.displayOrder ?? null,
           ],
         )
@@ -208,15 +215,17 @@ export class Database {
   }
 
   /**
-   * Set or clear a favourite's pinned stations.
+   * Set or clear a favourite's commute board stops.
    *
    * Kept separate from `updateFavorite` because that method wraps every column
-   * in COALESCE, which can never write NULL — clearing a pin is exactly a NULL
+   * in COALESCE, which can never write NULL — clearing a stop is exactly a NULL
    * write. Here `undefined` leaves a field untouched and `null` clears it.
+   * Fields are keyed by PURPOSE (morning/evening), mapped onto the storage
+   * columns inside this method.
    */
-  async setPinnedStations(id: string, pins: {
-    pinnedStationName?: string | null
-    reversePinnedStationName?: string | null
+  async setBoardStops(id: string, stops: {
+    morningStopName?: string | null
+    eveningStopName?: string | null
   }): Promise<boolean> {
     const sets: string[] = []
     const values: (string | null)[] = [id]
@@ -225,8 +234,8 @@ export class Database {
       values.push(value)
       sets.push(`${column} = $${values.length}`)
     }
-    push('pinned_station_name', pins.pinnedStationName)
-    push('reverse_pinned_station_name', pins.reversePinnedStationName)
+    push('pinned_station_name', stops.morningStopName)
+    push('reverse_pinned_station_name', stops.eveningStopName)
 
     if (sets.length === 0) return false
 
@@ -246,9 +255,9 @@ export class Database {
 
     const rec = this.inMemoryFavorites.get(id)
     if (rec) {
-      if (pins.pinnedStationName !== undefined) rec.pinnedStationName = pins.pinnedStationName
-      if (pins.reversePinnedStationName !== undefined) {
-        rec.reversePinnedStationName = pins.reversePinnedStationName
+      if (stops.morningStopName !== undefined) rec.morningStopName = stops.morningStopName
+      if (stops.eveningStopName !== undefined) {
+        rec.eveningStopName = stops.eveningStopName
       }
       return true
     }
@@ -267,6 +276,70 @@ export class Database {
       }
     }
     return this.inMemoryFavorites.delete(id)
+  }
+
+  // ---------- User settings ----------
+
+  /** Commute hours stored in user_settings; null when never configured. */
+  async getUserSettings(userId: string = 'default_user'): Promise<{
+    morningStart: string
+    morningEnd: string
+    eveningStart: string
+    eveningEnd: string
+  } | null> {
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          'SELECT morning_start, morning_end, evening_start, evening_end FROM user_settings WHERE user_id = $1',
+          [userId],
+        )
+        const row = res.rows[0]
+        if (!row) return null
+        return {
+          // TIME columns come back as "HH:MM:SS" — trim to HH:MM for the API.
+          morningStart: String(row.morning_start).slice(0, 5),
+          morningEnd: String(row.morning_end).slice(0, 5),
+          eveningStart: String(row.evening_start).slice(0, 5),
+          eveningEnd: String(row.evening_end).slice(0, 5),
+        }
+      }
+      catch {
+        // Table missing (migration not applied) or transient failure: defaults
+        // are a safe answer, so swallow and let the caller use its fallback.
+      }
+    }
+    return null
+  }
+
+  async saveUserSettings(userId: string, settings: {
+    morningStart?: string
+    morningEnd?: string
+    eveningStart?: string
+    eveningEnd?: string
+  }): Promise<{
+    morningStart: string
+    morningEnd: string
+    eveningStart: string
+    eveningEnd: string
+  }> {
+    const merged = { ...DEFAULT_COMMUTE_HOURS, ...settings }
+    if (this.pool) {
+      await this.pool.query(
+        `INSERT INTO user_settings (user_id, morning_start, morning_end, evening_start, evening_end, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET
+           morning_start = EXCLUDED.morning_start,
+           morning_end = EXCLUDED.morning_end,
+           evening_start = EXCLUDED.evening_start,
+           evening_end = EXCLUDED.evening_end,
+           updated_at = NOW()`,
+        [userId, merged.morningStart, merged.morningEnd, merged.eveningStart, merged.eveningEnd],
+      )
+    }
+    else {
+      this.inMemorySettings.set(userId, merged)
+    }
+    return merged
   }
 
   // ---------- Static line cache ----------

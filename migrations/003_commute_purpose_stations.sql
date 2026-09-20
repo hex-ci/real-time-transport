@@ -1,0 +1,13 @@
+-- 通勤用途化重构：固定站语义从「按方向」改为「按用途」。
+--
+-- 零 DDL：两个既有列直接按用途键控复用，存量大 pin 的语义对齐情况
+-- 需部署方自查（旧值语义与用途的对应关系取决于各自库中的实际配置）。
+--
+--   pinned_station_name          → 上班上车点（morning board stop）
+--   reverse_pinned_station_name  → 下班上车点（evening board stop）
+--
+-- 方向不再存储，由共享层 deriveCommuteDirections 从两个上车点的
+-- 站序推导；推导失败退回 preferredDirection，不猜测。
+
+-- migrate:down
+-- 本迁移只承载语义变更说明，无任何 schema 改动，回滚为空操作。

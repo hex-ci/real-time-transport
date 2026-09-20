@@ -5,6 +5,7 @@
   "description": "移动端优先实时公交与地铁可视化系统：纯粹拓扑线路、折返与直线报站屏、航位推算平滑动效",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@12.4.2",
   "engines": {
     "node": ">=22"
   },

@@ -10,11 +10,12 @@ import {
   type LineGroup,
   type Station,
   type UserFavoriteLine,
+  type UserSettings,
 } from '@real-time-transport/shared'
 import {
   isBidirectional,
+  resolveBoardStop,
   resolveFavoriteLineId,
-  resolvePinnedStation,
 } from '@real-time-transport/shared/line-group'
 
 const transitStore = useTransitStore()
@@ -42,23 +43,27 @@ function pinKey(favoriteId: string, direction: number): string {
   return `${favoriteId}_${direction}`
 }
 
-/** The two directions of a favourite, each with its resolved lineId. */
+/** The two commute legs of a favourite, each bound to its own direction lineId. */
 function favoriteDirections(fav: UserFavoriteLine): Array<{
   direction: 0 | 1
+  purpose: 'morning' | 'evening'
   label: string
   lineId: string | null
 }> {
   const primary = (fav.preferredDirection === 1 ? 1 : 0) as 0 | 1
   const other = (1 - primary) as 0 | 1
-  const entries: Array<{ direction: 0 | 1, label: string, lineId: string | null }> = [
-    { direction: primary, label: primary === 0 ? '去程（上行）' : '返程（下行）', lineId: fav.lineId },
+  // The AM picker binds to the primary direction's lineId and the PM picker to
+  // the reverse one; which direction "is" the commute is derived from the pair.
+  const entries: Array<{ direction: 0 | 1, purpose: 'morning' | 'evening', label: string, lineId: string | null }> = [
+    { direction: primary, purpose: 'morning', label: '上班上车点', lineId: fav.lineId },
   ]
-  // Only offer the second direction when it resolves to a real lineId — never
+  // Only offer the second picker when it resolves to a real lineId — never
   // invent one, which would show another route's stops.
   if (fav.reverseLineId) {
     entries.push({
       direction: other,
-      label: other === 0 ? '去程（上行）' : '返程（下行）',
+      purpose: 'evening',
+      label: '下班上车点',
       lineId: resolveFavoriteLineId(fav, other),
     })
   }
@@ -103,15 +108,15 @@ async function ensureAllStations(): Promise<void> {
 
 async function onPinChange(
   fav: UserFavoriteLine,
-  direction: 0 | 1,
+  purpose: 'morning' | 'evening',
   name: string | null,
 ): Promise<void> {
   pinError.value = null
   try {
-    await transitStore.setPinnedStation(fav.id!, direction, name)
+    await transitStore.setBoardStop(fav.id!, purpose, name)
   }
   catch (err) {
-    pinError.value = err instanceof Error ? err.message : '固定站点保存失败'
+    pinError.value = err instanceof Error ? err.message : '上车点保存失败'
   }
 }
 
@@ -187,6 +192,56 @@ watch(() => cityStore.currentCode, () => {
   searchKeyword.value = ''
   searched.value = false
 })
+
+// ---------- Commute hours ----------
+
+const settingsDraft = shallowRef<UserSettings>({
+  morningStart: '06:30',
+  morningEnd: '11:30',
+  eveningStart: '17:00',
+  eveningEnd: '22:00',
+})
+const settingsSaving = shallowRef(false)
+const settingsError = shallowRef<string | null>(null)
+const settingsSaved = shallowRef(false)
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/transit/settings')
+    const json = await res.json()
+    if (json.success && json.data) {
+      settingsDraft.value = json.data as UserSettings
+    }
+  }
+  catch {
+    // Keep defaults: a failed load must not fabricate a different schedule
+  }
+})
+
+async function saveSettings(): Promise<void> {
+  settingsSaving.value = true
+  settingsError.value = null
+  settingsSaved.value = false
+  try {
+    const res = await fetch('/api/transit/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settingsDraft.value),
+    })
+    const json = await res.json()
+    if (!json.success) {
+      throw new Error(json.error || '保存失败')
+    }
+    settingsDraft.value = json.data as UserSettings
+    settingsSaved.value = true
+  }
+  catch (err) {
+    settingsError.value = err instanceof Error ? err.message : '保存失败'
+  }
+  finally {
+    settingsSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -276,6 +331,68 @@ watch(() => cityStore.currentCode, () => {
         </p>
       </div>
 
+      <!-- Commute hours: drive the default home-tab view (morning/evening/nearby) -->
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl space-y-3">
+        <h3 class="text-sm font-semibold text-slate-200">
+          通勤时段
+        </h3>
+        <p class="text-xs text-slate-500">
+          用于自动切换「上班 / 下班 / 附近」视图，不参与方向判定
+        </p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
+            <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
+              <span>🏠</span><span>早高峰</span>
+            </span>
+            <span class="flex items-center gap-1">
+              <input
+                v-model="settingsDraft.morningStart"
+                type="time"
+                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+              >
+              <span class="text-xs text-slate-500">—</span>
+              <input
+                v-model="settingsDraft.morningEnd"
+                type="time"
+                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+              >
+            </span>
+          </label>
+          <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
+            <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
+              <span>🏢</span><span>晚高峰</span>
+            </span>
+            <span class="flex items-center gap-1">
+              <input
+                v-model="settingsDraft.eveningStart"
+                type="time"
+                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+              >
+              <span class="text-xs text-slate-500">—</span>
+              <input
+                v-model="settingsDraft.eveningEnd"
+                type="time"
+                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+              >
+            </span>
+          </label>
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="settingsSaving"
+            @click="saveSettings"
+          >
+            {{ settingsSaving ? '保存中…' : '保存时段' }}
+          </button>
+          <span v-if="settingsSaved" class="text-xs text-emerald-400">已保存</span>
+          <span v-if="settingsError" class="flex items-center gap-1.5 text-xs text-rose-400">
+            <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
+            <span>{{ settingsError }}</span>
+          </span>
+        </div>
+      </div>
+
       <!-- Pinned Lines Management -->
       <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl space-y-4">
         <div class="flex items-center justify-between">
@@ -312,17 +429,17 @@ watch(() => cityStore.currentCode, () => {
               </button>
             </div>
 
-            <!-- Pinned stop per direction. Home cards read the pin first and only
-                 fall back to GPS when it is unset. -->
+            <!-- Board stop per commute purpose. Home cards derive the direction
+                 from the stop pair and read the stop for the active purpose. -->
             <div class="mt-2.5 space-y-2 border-t border-slate-800/60 pt-2.5">
               <div
                 v-for="entry in favoriteDirections(item)"
-                :key="`${item.id}_${entry.direction}`"
+                :key="`${item.id}_${entry.purpose}`"
                 class="space-y-1"
               >
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-slate-400">
-                    固定站点 · {{ entry.label }}
+                    {{ entry.purpose === 'morning' ? '🏠' : '🏢' }} {{ entry.label }}
                   </span>
                   <span
                     v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
@@ -333,15 +450,18 @@ watch(() => cityStore.currentCode, () => {
                 </div>
                 <StationPinPicker
                   v-if="entry.lineId"
-                  :model-value="resolvePinnedStation(item, entry.direction) ?? null"
+                  :model-value="resolveBoardStop(item, entry.purpose) ?? null"
                   :stations="stationLists[pinKey(item.id!, entry.direction)] || []"
                   :direction-label="entry.label"
-                  @update:model-value="(name) => onPinChange(item, entry.direction, name)"
+                  @update:model-value="(name) => onPinChange(item, entry.purpose, name)"
                 />
                 <p v-else class="text-xs text-slate-500">
-                  该方向上游未提供，无法固定站点
+                  该方向上游未提供，无法设置上车点
                 </p>
               </div>
+              <p class="text-xs text-slate-500">
+                ⓘ 两个上车点设置后，上班/下班方向自动判定
+              </p>
               <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400">
                 <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
                 <span>{{ pinError }}</span>

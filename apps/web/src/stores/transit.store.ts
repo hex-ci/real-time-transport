@@ -298,15 +298,19 @@ export const useTransitStore = defineStore('transit', () => {
    * because a route's two directions serve opposite ends of the city — one pin
    * cannot answer "when does my bus come" for both.
    */
-  async function setPinnedStation(
+  /**
+   * Set or clear one commute board stop. Stops are keyed by PURPOSE
+   * (morning = AM leg, evening = PM leg), matching the API contract; the
+   * direction each purpose rides is derived from the stop pair, never stored.
+   */
+  async function setBoardStop(
     favoriteId: string,
-    direction: 0 | 1,
+    purpose: 'morning' | 'evening',
     stationName: string | null,
   ): Promise<void> {
     const target = favorites.value.find(f => f.id === favoriteId)
     if (!target) return
-    const primary = target.preferredDirection === 1 ? 1 : 0
-    const field = direction === primary ? 'pinnedStationName' : 'reversePinnedStationName'
+    const field = purpose === 'morning' ? 'morningStopName' : 'eveningStopName'
 
     const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
       method: 'PATCH',
@@ -315,7 +319,7 @@ export const useTransitStore = defineStore('transit', () => {
     })
     const json = await res.json()
     if (!json.success || !json.data) {
-      throw new Error(json.error || '固定站点保存失败')
+      throw new Error(json.error || '上车点保存失败')
     }
     const saved: UserFavoriteLine = json.data
     // Reassign rather than mutate in place: `favorites` is a shallowRef.
@@ -361,7 +365,7 @@ export const useTransitStore = defineStore('transit', () => {
     resetLineData,
     initWs,
     addFavorite,
-    setPinnedStation,
+    setBoardStop,
     removeFavorite,
   }
 })

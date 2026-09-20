@@ -91,7 +91,7 @@
   - 倒计时到达（按耗时最短由小到大排序：**2 分钟** > **5 分钟** > **11 分钟**）。
   - 剩余站数、距离、车辆拥挤度。
 
-### 2.4 玄关 / 桌面 Always-On 看板模式（Kiosk Mode）
+### 2.4 玄关 / 桌面看板模式（Kiosk Mode）
 - 面向淘汰手机、iPad、横屏副屏挂载。
 - 调用 Web Wake Lock API（`navigator.wakeLock.request('screen')`）保持屏幕常亮。
 - 多线路纵向平铺并行渲染，整屏尽览。

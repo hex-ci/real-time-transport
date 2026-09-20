@@ -6,6 +6,7 @@ import {
   SearchLineQuerySchema,
   UserFavoriteLineSchema,
   UpdateFavoriteSchema,
+  UpdateSettingsSchema,
   DEFAULT_COMMUTE_HOURS,
   groupLineSummaries,
   type CommuteProfile,
@@ -260,10 +261,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       return reply.status(404).send({ success: false, error: 'favorite not found' })
     }
 
-    // null clears the pin, undefined leaves it alone — see Database.setPinnedStations.
-    const updated = await db.setPinnedStations(id, {
-      pinnedStationName: body.data.pinnedStationName,
-      reversePinnedStationName: body.data.reversePinnedStationName,
+    // null clears the stop, undefined leaves it alone — see Database.setBoardStops.
+    const updated = await db.setBoardStops(id, {
+      morningStopName: body.data.morningStopName,
+      eveningStopName: body.data.eveningStopName,
     })
 
     if (!updated) {
@@ -281,25 +282,43 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     return { success: true, data: { removed } }
   })
 
-  // Commute profile & smart context
+  // User settings (commute hours). Single row keyed by user id; GET returns
+  // the stored row or the built-in defaults when never configured.
+  app.get('/api/transit/settings', async (req) => {
+    const userId = (req.query as Record<string, string>)?.userId || 'default_user'
+    const stored = await db.getUserSettings(userId)
+    return { success: true, data: stored ?? { ...DEFAULT_COMMUTE_HOURS } }
+  })
+
+  app.patch('/api/transit/settings', async (req, reply) => {
+    const body = UpdateSettingsSchema.safeParse(req.body)
+    if (!body.success) {
+      return reply.status(400).send({ success: false, error: body.error.issues[0]?.message })
+    }
+    const saved = await db.saveUserSettings('default_user', body.data)
+    return { success: true, data: saved }
+  })
+
+  // Commute profile & smart context. Reads the user's configured hours first
+  // and only falls back to the built-in defaults when they never saved any.
   app.get('/api/transit/commute-profile', async () => {
     const now = new Date()
     const hours = now.getHours()
     const minutes = now.getMinutes()
     const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 
+    const settings = (await db.getUserSettings('default_user')) ?? DEFAULT_COMMUTE_HOURS
+
     let mode: CommuteProfile['mode'] = 'auto'
-    let activeDirection = 0
+    const activeDirection = 0
     let description = '常规出行监测模式'
 
-    if (timeStr >= DEFAULT_COMMUTE_HOURS.morningStart && timeStr <= DEFAULT_COMMUTE_HOURS.morningEnd) {
+    if (timeStr >= settings.morningStart && timeStr <= settings.morningEnd) {
       mode = 'work'
-      activeDirection = 1 // 上班方向
       description = '早高峰通勤 · 开往工作地'
     }
-    else if (timeStr >= DEFAULT_COMMUTE_HOURS.eveningStart && timeStr <= DEFAULT_COMMUTE_HOURS.eveningEnd) {
+    else if (timeStr >= settings.eveningStart && timeStr <= settings.eveningEnd) {
       mode = 'home'
-      activeDirection = 0 // 下班方向
       description = '晚高峰通勤 · 踏上归途'
     }
 

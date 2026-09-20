@@ -1,0 +1,85 @@
+# 实时交通 生产编排（一键部署）
+#
+# 用法：cp .env.prod.example .env.prod  →  填上游 Key  → 
+#       docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# 生产环境变量放 .env.prod（非根 .env）：根 .env 是 dev 权威源，其 DATABASE_URL 指向
+# 宿主机的 dev 数据库、PORT 也是 dev 端口，与容器内网络不兼容。两者互相独立，勿混用。
+# 与 dev 的 docker-compose.yml（仅 postgres）同样相互独立：独立项目名 + 容器名/卷名
+# -prod 后缀，可在同机共存，dev 的数据库与端口不受影响。
+name: real-time-transport-prod
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: real-time-transport-prod-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-transit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transit_password}
+      POSTGRES_DB: ${POSTGRES_DB:-transit}
+    # PostgreSQL 18+ 官方镜像的数据目录须挂在 /var/lib/postgresql（挂到 .../data 会启动即退出）
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-transit}']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # 一次性迁移：跑完即退出（Exited 0），server 依赖其成功完成才启动。
+  # 迁移不在服务启动时自动执行，避免多副本并发改表。
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: real-time-transport-server:latest
+    container_name: real-time-transport-prod-migrate
+    command:
+      ['pnpm', '--filter', '@real-time-transport/server', 'exec', 'tsx', 'src/db/migrate.ts', 'up']
+    env_file: .env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: real-time-transport-server:latest
+    container_name: real-time-transport-prod-server
+    env_file: .env.prod
+    environment:
+      # 容器默认 UTC，而通勤时段（user_settings）按本地钟点比较，不设时区会让
+      # 早/晚高峰判断整体偏移。固定为 Asia/Shanghai，与上游数据源的本地时间一致。
+      TZ: Asia/Shanghai
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # node:24-slim 无 curl/wget，用自带的 node fetch 探活。
+      # 探的是容器内端口，固定 3000，不随宿主机映射端口变化。
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: real-time-transport-web:latest
+    container_name: real-time-transport-prod-web
+    ports:
+      - '${WEB_PORT:-80}:80'
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: real-time-transport-prod-pgdata

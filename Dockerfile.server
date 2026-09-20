@@ -1,0 +1,36 @@
+# 实时交通 后端镜像
+#
+# 说明：后端以 tsx 直接运行 TS 源码（与 dev/migrate 一致，无编译产物）。原因是源码
+# 内部一律以 `.js` 扩展名 import 实际的 `.ts` 文件（TS NodeNext 约定），只有 tsx 能
+# 解析；packages/shared 与 packages/transit-adapter 也是 src-only 包（main 直指
+# ./src/index.ts），故镜像内需包含完整 workspace 源码与依赖。
+FROM node:24-slim AS base
+
+# pnpm 经 corepack 激活，版本由根 package.json 的 packageManager 字段锁定。
+# 指向国内镜像：corepack 默认走 registry.npmjs.org，容器内直连较慢。
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+RUN corepack enable
+
+WORKDIR /app
+
+# 仅先拷依赖清单，最大化利用安装层缓存。
+# 不含 apps/web/package.json：后端不需要前端依赖树（vue/konva/vite 等），
+# 省下约 300MB 镜像体积；pnpm 容忍 workspace 内项目缺席。
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/transit-adapter/package.json packages/transit-adapter/
+COPY apps/server/package.json apps/server/
+
+# 本项目无原生模块（pg 为纯 JS），无需编译工具链
+RUN pnpm install --frozen-lockfile
+
+# 拷入后端与其依赖包的全部源码，以及迁移文件（migrate.ts 相对定位 ../../../../migrations）
+COPY packages/shared/ packages/shared/
+COPY packages/transit-adapter/ packages/transit-adapter/
+COPY apps/server/ apps/server/
+COPY migrations/ migrations/
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["pnpm", "--filter", "@real-time-transport/server", "exec", "tsx", "src/index.ts"]

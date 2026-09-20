@@ -3,10 +3,13 @@ import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ChevronRight } from '@lucide/vue'
 import { useIntervalFn, useWakeLock } from '@vueuse/core'
-import type { LineDetail, LiveBus } from '@real-time-transport/shared'
-import { resolvePinnedStation } from '@real-time-transport/shared/line-group'
+import type { LineDetail } from '@real-time-transport/shared'
+import {
+  deriveCommuteDirections,
+  resolveBoardStop,
+  resolveFavoriteLineId,
+} from '@real-time-transport/shared/line-group'
 import { useTransitStore } from '@/stores/transit.store'
-import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 
 interface KioskCard {
@@ -18,11 +21,11 @@ interface KioskCard {
   targetStationName: string | null
   targetOrder: number | null
   etaMinutes: number | null
-  vehicleCount: number
+  etaTime: string | null
+  arrivalCount: number
 }
 
 const transitStore = useTransitStore()
-const locationStore = useLocationStore()
 const cityStore = useCityStore()
 const { favorites } = storeToRefs(transitStore)
 
@@ -32,7 +35,7 @@ const loading = shallowRef(false)
 const { isActive: isWakeLocked, request: requestWakeLock } = useWakeLock()
 
 const lineDetails = shallowRef<Record<string, LineDetail>>({})
-const liveMap = shallowRef<Record<string, LiveBus[]>>({})
+const arrivalsMap = shallowRef<Record<string, { arrivals: Array<{ time: string, etaSeconds: number, isAtStation?: boolean }> } | null>>({})
 
 const cityFavorites = computed(() =>
   favorites.value.filter(f => f.cityCode === cityStore.currentCode),
@@ -46,20 +49,22 @@ async function loadDetails(): Promise<void> {
   const nextDetails = { ...lineDetails.value }
   let hasNew = false
   const tasks = cityFavorites.value.map(async (f) => {
-    const dir = f.preferredDirection ?? 0
-    const key = detailKey(f.lineId, dir)
-    if (nextDetails[key]) return
-    try {
-      const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-      const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
-      const json = await res.json()
-      if (json.success && json.data) {
-        nextDetails[key] = json.data as LineDetail
-        hasNew = true
+    for (const dir of [f.preferredDirection ?? 0, f.reverseLineId ? (f.preferredDirection === 1 ? 0 : 1) : null] as Array<number | null>) {
+      if (dir === null) continue
+      const key = detailKey(f.lineId, dir)
+      if (nextDetails[key]) continue
+      try {
+        const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
+        const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
+        const json = await res.json()
+        if (json.success && json.data) {
+          nextDetails[key] = json.data as LineDetail
+          hasNew = true
+        }
       }
-    }
-    catch {
-      // skip
+      catch {
+        // skip
+      }
     }
   })
   await Promise.allSettled(tasks)
@@ -68,54 +73,55 @@ async function loadDetails(): Promise<void> {
   }
 }
 
-function pickTarget(detail: LineDetail | undefined, pinnedName?: string): { name: string, order: number } | null {
-  // No fabricated default target: without a real basis (pinned / GPS) there is none
-  if (!detail || detail.stops.length === 0) return null
-  if (pinnedName) {
-    const st = detail.stops.find(s => s.name === pinnedName)
-    if (st) return { name: st.name, order: st.order }
+/**
+ * Direction derivation per favourite (same rule as the overview). Null =
+ * underivable — the card then rides preferredDirection.
+ */
+const derivedDirections = computed<Record<string, { morning: 0 | 1, evening: 0 | 1 } | null>>(() => {
+  const map: Record<string, { morning: 0 | 1, evening: 0 | 1 } | null> = {}
+  for (const f of cityFavorites.value) {
+    const d0 = lineDetails.value[`${f.lineId}_${f.preferredDirection === 1 ? 1 : 0}`]
+    const d1 = f.reverseLineId
+      ? lineDetails.value[`${f.reverseLineId}_${f.preferredDirection === 1 ? 0 : 1}`]
+      : undefined
+    map[f.id!] = d0 && d1 ? deriveCommuteDirections(f, { 0: d0, 1: d1 }) : null
   }
-  if (locationStore.nearestStation) {
-    const st = detail.stops.find(s => s.name === locationStore.nearestStation!.name)
-    if (st) return { name: st.name, order: st.order }
-  }
-  return null
-}
+  return map
+})
+
+/** The kiosk board always shows the CURRENT commute leg by configured hours. */
+const activePurpose = computed<'morning' | 'evening'>(() => {
+  const mode = transitStore.commuteProfile?.mode
+  return mode === 'home' ? 'evening' : 'morning'
+})
 
 const kioskCards = computed<KioskCard[]>(() => {
   return cityFavorites.value.map((f) => {
-    const dir = f.preferredDirection ?? 0
-    const key = detailKey(f.lineId, dir)
+    const purpose = activePurpose.value
+    const derived = derivedDirections.value[f.id!]
+    const dir: 0 | 1 = derived ? derived[purpose] : ((f.preferredDirection === 1 ? 1 : 0) as 0 | 1)
+    const lineId = resolveFavoriteLineId(f, dir) ?? f.lineId
+    const key = detailKey(lineId, dir)
     const detail = lineDetails.value[key]
-    const buses = liveMap.value[key] || []
-    const target = pickTarget(detail, resolvePinnedStation(f, dir as 0 | 1))
+    const feed = arrivalsMap.value[key] ?? null
+    const next = feed?.arrivals?.[0] ?? null
     const isSubway = detail?.type === 'subway' || f.lineId.startsWith('subway_')
 
-    let etaMinutes: number | null = null
-    if (target) {
-      const upcoming = buses
-        .filter(b => typeof b.order === 'number' && (b.order as number) <= target.order)
-        .sort((a, b) => (b.order as number) - (a.order as number))
-
-      if (upcoming.length > 0) {
-        const b = upcoming[0]!
-        // ETA strictly from upstream travel time; no per-stop guessing
-        etaMinutes = b.travelTimeSec
-          ? Math.max(1, Math.round(b.travelTimeSec / 60))
-          : null
-      }
-    }
+    // Board stop is the purpose-keyed pin; no GPS guessing on the kiosk board
+    const stopName = resolveBoardStop(f, purpose)
+    const stop = stopName ? detail?.stops.find(s => s.name === stopName) : undefined
 
     return {
-      lineId: f.lineId,
+      lineId,
       lineName: f.lineName,
       direction: dir,
       directionName: detail?.directionName || '',
       isSubway,
-      targetStationName: target?.name ?? null,
-      targetOrder: target?.order ?? null,
-      etaMinutes,
-      vehicleCount: buses.length,
+      targetStationName: stop?.name ?? null,
+      targetOrder: stop?.order ?? null,
+      etaMinutes: next ? (next.isAtStation ? 0 : Math.max(1, Math.round(next.etaSeconds / 60))) : null,
+      etaTime: next?.time ?? null,
+      arrivalCount: feed?.arrivals?.length ?? 0,
     }
   })
 })
@@ -124,23 +130,38 @@ async function refreshKiosk(): Promise<void> {
   loading.value = Object.keys(lineDetails.value).length === 0
   await loadDetails()
 
-  // fetch live for all in a single batch
-  const nextLiveMap: Record<string, LiveBus[]> = {}
-  const liveTasks = cityFavorites.value.map(async (f) => {
-    const dir = f.preferredDirection ?? 0
-    const key = detailKey(f.lineId, dir)
+  // Arrivals for every favourite's board stop (per derived direction)
+  const nextMap: Record<string, { arrivals: Array<{ time: string, etaSeconds: number, isAtStation?: boolean }> } | null> = {}
+  const tasks = cityFavorites.value.map(async (f) => {
+    const purpose = activePurpose.value
+    const derived = derivedDirections.value[f.id!]
+    const dir: 0 | 1 = derived ? derived[purpose] : ((f.preferredDirection === 1 ? 1 : 0) as 0 | 1)
+    const lineId = resolveFavoriteLineId(f, dir) ?? f.lineId
+    const key = detailKey(lineId, dir)
+    const detail = lineDetails.value[key]
+    const stopName = resolveBoardStop(f, purpose)
+    const stop = stopName ? detail?.stops.find(s => s.name === stopName) : undefined
+    if (!stop) {
+      nextMap[key] = null
+      return
+    }
     try {
-      const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-      const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}/live?${qs.toString()}`)
+      const qs = new URLSearchParams({
+        direction: String(dir),
+        order: String(stop.order),
+        count: '3',
+        cityCode: cityStore.currentCode,
+      })
+      const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}/stations/${encodeURIComponent(stop.name)}/arrivals?${qs.toString()}`)
       const json = await res.json()
-      nextLiveMap[key] = (json.success && json.data?.buses) ? json.data.buses : []
+      nextMap[key] = json.success ? json.data : null
     }
     catch {
-      nextLiveMap[key] = []
+      nextMap[key] = null
     }
   })
-  await Promise.allSettled(liveTasks)
-  liveMap.value = nextLiveMap
+  await Promise.allSettled(tasks)
+  arrivalsMap.value = nextMap
   loading.value = false
 }
 
@@ -162,7 +183,7 @@ watch(
   () => cityStore.currentCode,
   () => {
     lineDetails.value = {}
-    liveMap.value = {}
+    arrivalsMap.value = {}
     void reloadForCurrentCity()
   },
 )
@@ -171,7 +192,6 @@ onMounted(() => {
   updateClock()
   void cityStore.fetchCities()
   void reloadForCurrentCity()
-  locationStore.requestLocation()
   void requestWakeLock('screen')
 })
 </script>
@@ -182,7 +202,7 @@ onMounted(() => {
     <div class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:p-4 md:p-5 md:flex-row md:items-center md:justify-between">
       <div>
         <h2 class="flex flex-wrap items-center gap-2 text-base font-bold text-white sm:text-lg">
-          <span>玄关 Always-On 看板</span>
+          <span>玄关看板</span>
           <span class="rounded-full border border-cyan-500/30 bg-cyan-500/20 px-2 py-0.5 text-xs font-normal text-cyan-400">
             {{ isWakeLocked ? '屏幕常亮保持中' : '常亮待激活' }}
           </span>
@@ -247,7 +267,7 @@ onMounted(() => {
         <div class="flex items-center justify-between gap-3 py-3.5 sm:py-4">
           <div class="min-w-0 flex-1">
             <span class="block truncate text-xs text-slate-400">
-              {{ card.targetStationName ? `${card.targetStationName} 进站倒计时` : '目标站（未确定：需固定站或定位）' }}
+              {{ card.targetStationName ? `${card.targetStationName} 进站倒计时` : '目标站（未设置上车点）' }}
             </span>
             <div
               class="truncate font-mono text-2xl font-black sm:text-3xl"
@@ -255,20 +275,21 @@ onMounted(() => {
             >
               <template v-if="card.etaMinutes !== null">
                 {{ card.etaMinutes }} <span class="text-sm font-normal text-slate-400">分钟</span>
+                <span v-if="card.etaTime" class="ml-1 text-xs font-normal text-slate-500">{{ card.etaTime }}</span>
               </template>
-              <template v-else-if="card.vehicleCount > 0">
-                <span class="font-sans text-base font-normal text-slate-400 sm:text-lg">无法估算（上游未提供耗时）</span>
+              <template v-else-if="card.targetStationName">
+                <span class="font-sans text-base font-normal text-slate-400 sm:text-lg">暂无来车 / 待发车</span>
               </template>
               <template v-else>
-                <span class="font-sans text-base font-normal text-slate-400 sm:text-lg">暂无来车 / 待发车</span>
+                <span class="font-sans text-base font-normal text-slate-400 sm:text-lg">未设置上车点</span>
               </template>
             </div>
           </div>
           <div class="shrink-0 text-right">
-            <span class="block text-xs text-slate-400">在途车辆</span>
+            <span class="block text-xs text-slate-400">前方来车</span>
             <div class="flex items-baseline justify-end gap-1 font-mono text-xl font-bold whitespace-nowrap text-emerald-400">
-              <span>{{ card.vehicleCount }}</span>
-              <span class="text-xs font-normal text-slate-400">辆运行中</span>
+              <span>{{ card.arrivalCount }}</span>
+              <span class="text-xs font-normal text-slate-400">班</span>
             </div>
           </div>
         </div>

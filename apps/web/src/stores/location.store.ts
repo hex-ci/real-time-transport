@@ -5,6 +5,29 @@ import type { Station } from '@real-time-transport/shared'
 import { haversineMeters } from '@real-time-transport/shared/geo'
 
 /**
+ * Development-only GPS override.
+ *
+ * `VITE_GPS_SIMULATION=true` pins the position to fixed coordinates so the
+ * location-driven views (nearby mode, nearest-stop anchor, walk decisions) can
+ * be exercised without physically moving or granting a browser permission.
+ *
+ * The coordinates are read inside a `import.meta.env.DEV` branch: Vite replaces
+ * that flag with a literal at build time, so a production bundle drops the whole
+ * block — including the numbers — instead of shipping a dormant override.
+ */
+const SIMULATION_ENABLED = import.meta.env.DEV
+  && import.meta.env.VITE_GPS_SIMULATION === 'true'
+
+const SIMULATION_COORDS: { lat: number, lng: number } | null = (() => {
+  if (!SIMULATION_ENABLED) return null
+  const lat = Number(import.meta.env.VITE_GPS_SIM_LAT)
+  const lng = Number(import.meta.env.VITE_GPS_SIM_LNG)
+  // A half-configured pair would silently place the user at (0, 0), so require both.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { lat, lng }
+})()
+
+/**
  * Reactive geolocation built on vueuse's `useGeolocation`, which wraps
  * `watchPosition` — a single fix goes stale as soon as the user walks to another
  * stop, so the nearest-stop computation must follow a live position stream.
@@ -25,12 +48,16 @@ export const useLocationStore = defineStore('location', () => {
   /** True once tracking has been requested and not yet stopped. */
   const tracking = shallowRef(false)
 
+  /** True while the fixed development position stands in for a real fix. */
+  const isSimulated = computed(() => SIMULATION_COORDS !== null)
+
   /**
    * The current fix, or null. `useGeolocation` seeds its coords with
    * `POSITIVE_INFINITY` sentinels until the first position arrives — treating
    * those as real would poison every haversine result with NaN.
    */
   const userCoords = computed<{ lat: number, lng: number } | null>(() => {
+    if (SIMULATION_COORDS) return SIMULATION_COORDS
     const { latitude, longitude } = geo.coords.value
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
     return { lat: latitude, lng: longitude }
@@ -38,6 +65,8 @@ export const useLocationStore = defineStore('location', () => {
 
   /** Horizontal accuracy of the current fix in metres, when reported. */
   const accuracyM = computed<number | null>(() => {
+    // The fixed development position has no measured accuracy to report.
+    if (SIMULATION_COORDS) return null
     const acc = geo.coords.value.accuracy
     return Number.isFinite(acc) && acc > 0 ? Math.round(acc) : null
   })
@@ -46,6 +75,8 @@ export const useLocationStore = defineStore('location', () => {
   const isLocating = computed(() => tracking.value && userCoords.value === null)
 
   const locationError = computed<string | null>(() => {
+    // A fixed position cannot fail, so no permission or device error applies.
+    if (SIMULATION_COORDS) return null
     if (!geo.isSupported.value) return '当前浏览器不支持定位'
     if (permissionState.value === 'denied') return '定位权限被拒绝，无法确定您的位置'
     const err = geo.error.value
@@ -65,6 +96,7 @@ export const useLocationStore = defineStore('location', () => {
    * once denied and only an explicit user tap retries.
    */
   function requestLocation(options?: { userInitiated?: boolean }): void {
+    if (SIMULATION_COORDS) return
     if (!geo.isSupported.value) return
     if (permissionState.value === 'denied' && !options?.userInitiated) return
     tracking.value = true
@@ -154,6 +186,7 @@ export const useLocationStore = defineStore('location', () => {
     accuracyM,
     permissionState,
     locationError,
+    isSimulated,
     nearestStation,
     nearestDistanceM,
     landmark,

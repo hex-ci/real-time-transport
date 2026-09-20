@@ -78,5 +78,3 @@ export function getCityAdcode(cityCode: string): string {
 export function getCuratedCityName(cityCode: string): string | undefined {
   return CODE_NAME_MAP[cityCode]
 }
-
-export const DEFAULT_CITY_CODE = '027'

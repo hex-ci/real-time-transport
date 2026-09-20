@@ -34,7 +34,7 @@ import { useGis } from '@/composables/use-gis'
 import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
 import StationPopover from '@/components/StationPopover.vue'
 import type { Station } from '@real-time-transport/shared'
-import { resolvePinnedStation } from '@real-time-transport/shared'
+import { resolvePinnedStation } from '@real-time-transport/shared/line-group'
 
 const {
   id: propId,

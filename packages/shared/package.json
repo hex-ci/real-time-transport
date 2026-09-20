@@ -5,10 +5,14 @@
   "description": "实时交通大屏共享契约层：Zod schema + TS 类型 + DTO",
   "license": "MIT",
   "type": "module",
+  "sideEffects": false,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./geo": "./src/geo.ts",
+    "./line-group": "./src/line-group.ts",
+    "./constants": "./src/constants.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

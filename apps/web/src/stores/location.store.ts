@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef, watch } from 'vue'
 import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
-import { haversineMeters } from '@real-time-transport/shared'
+import { haversineMeters } from '@real-time-transport/shared/geo'
 
 /**
  * Reactive geolocation built on vueuse's `useGeolocation`, which wraps

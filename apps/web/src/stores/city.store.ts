@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import type { TransitCity } from '@real-time-transport/shared'
-import { DEFAULT_CITY_CODE } from '@real-time-transport/shared'
+import { DEFAULT_CITY_CODE } from '@real-time-transport/shared/constants'
 
 const STORAGE_KEY = 'rt-transit-city'
 

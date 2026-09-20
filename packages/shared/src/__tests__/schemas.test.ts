@@ -55,7 +55,8 @@ describe('Shared Schemas', () => {
   })
 
   it('serves the generated city dictionary with Beijing as default hot city', async () => {
-    const { CITY_DICTIONARY, HOT_CITY_META, getCityAdcode, DEFAULT_CITY_CODE } = await import('../cities.js')
+    const { CITY_DICTIONARY, HOT_CITY_META, getCityAdcode } = await import('../cities.js')
+    const { DEFAULT_CITY_CODE } = await import('../constants.js')
     expect(CITY_DICTIONARY.length).toBeGreaterThan(400)
     expect(DEFAULT_CITY_CODE).toBe('027')
     const beijing = CITY_DICTIONARY.find(c => c.code === '027')

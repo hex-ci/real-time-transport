@@ -9,12 +9,12 @@ import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import LineMiniCard from '@/components/LineMiniCard.vue'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
+import { haversineMeters } from '@real-time-transport/shared/geo'
 import {
   favoriteIsBidirectional,
-  haversineMeters,
   resolveFavoriteLineId,
   resolvePinnedStation,
-} from '@real-time-transport/shared'
+} from '@real-time-transport/shared/line-group'
 
 const router = useRouter()
 const transitStore = useTransitStore()

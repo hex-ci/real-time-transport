@@ -20,7 +20,7 @@ import {
 } from '@lucide/vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import type { LineDetail, LiveBus, Station } from '@real-time-transport/shared'
-import { distanceToSegment } from '@real-time-transport/shared'
+import { distanceToSegment } from '@real-time-transport/shared/geo'
 import {
   computeRouteLayout,
   type RouteLayoutMode,

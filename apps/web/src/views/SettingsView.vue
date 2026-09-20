@@ -6,14 +6,16 @@ import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 import StationPinPicker from '@/components/StationPinPicker.vue'
 import {
-  isBidirectional,
-  resolveFavoriteLineId,
-  resolvePinnedStation,
   type LineDetail,
   type LineGroup,
   type Station,
   type UserFavoriteLine,
 } from '@real-time-transport/shared'
+import {
+  isBidirectional,
+  resolveFavoriteLineId,
+  resolvePinnedStation,
+} from '@real-time-transport/shared/line-group'
 
 const transitStore = useTransitStore()
 const cityStore = useCityStore()

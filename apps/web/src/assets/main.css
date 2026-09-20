@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* The whole app is dark-only (see <html class="dark">), but without this the
+   browser still renders NATIVE widgets — the clock icon in <input type="time">,
+   scrollbars, form autofill, the caret — in their light-theme colours, which are
+   near-black on our dark surfaces. Declaring the scheme lets the browser draw
+   those parts in dark mode instead of us recolouring them with filters. */
+:root {
+  color-scheme: dark;
+}
+
 /* Lock text size adjustment on mobile: prevents WebKit Font Boosting and
    accidental zoom jumps on iOS / WeChat webview.
    touch-action: manipulation disables double-tap to zoom while preserving
@@ -49,4 +58,21 @@ html, body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #06b6d4;
+}
+
+/* Respect the OS "reduce motion" preference (WCAG 2.3.3).
+   Collapse/disclosure animations in reka-ui are driven by CSS custom
+   properties, so zeroing the durations here disables them everywhere without
+   each component opting in. Kept as an !important override because the
+   component-level transitions are utility classes, which would otherwise win on
+   specificity. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

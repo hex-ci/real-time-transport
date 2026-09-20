@@ -1,10 +1,30 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { MapPin, TriangleAlert } from '@lucide/vue'
+import { useMediaQuery } from '@vueuse/core'
+import {
+  AccordionContent,
+  AccordionHeader,
+  AccordionItem,
+  AccordionRoot,
+  AccordionTrigger,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogOverlay,
+  AlertDialogPortal,
+  AlertDialogRoot,
+  AlertDialogTitle,
+  CollapsibleContent,
+  CollapsibleRoot,
+  CollapsibleTrigger,
+} from 'reka-ui'
+import { ChevronDown, Clock, MapPin, TriangleAlert, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 import StationPinPicker from '@/components/StationPinPicker.vue'
+import CommuteHoursForm from '@/components/CommuteHoursForm.vue'
 import {
   type LineDetail,
   type LineGroup,
@@ -180,12 +200,6 @@ function addFavorite(item: LineGroup): void {
   searched.value = false
 }
 
-function removeFavorite(idx: number): void {
-  const target = cityFavorites.value[idx]
-  if (!target) return
-  void transitStore.removeFavorite(target.id || target.lineId)
-}
-
 // Clear search state when the city changes
 watch(() => cityStore.currentCode, () => {
   searchResults.value = []
@@ -195,22 +209,23 @@ watch(() => cityStore.currentCode, () => {
 
 // ---------- Commute hours ----------
 
-const settingsDraft = shallowRef<UserSettings>({
+/**
+ * Saved hours, kept only for the collapsed summary line. The form itself lives
+ * in CommuteHoursForm, which owns its own draft and save cycle.
+ */
+const savedHours = shallowRef<UserSettings>({
   morningStart: '06:30',
   morningEnd: '11:30',
   eveningStart: '17:00',
   eveningEnd: '22:00',
 })
-const settingsSaving = shallowRef(false)
-const settingsError = shallowRef<string | null>(null)
-const settingsSaved = shallowRef(false)
 
 onMounted(async () => {
   try {
     const res = await fetch('/api/transit/settings')
     const json = await res.json()
     if (json.success && json.data) {
-      settingsDraft.value = json.data as UserSettings
+      savedHours.value = json.data as UserSettings
     }
   }
   catch {
@@ -218,57 +233,107 @@ onMounted(async () => {
   }
 })
 
-async function saveSettings(): Promise<void> {
-  settingsSaving.value = true
-  settingsError.value = null
-  settingsSaved.value = false
+// ---------- Disclosure state ----------
+
+/**
+ * Which favourite's stop editors are open, as a one-element array because
+ * AccordionRoot's single mode reports its value that way. One at a time: each
+ * expanded row carries two comboboxes, and letting several open at once
+ * rebuilds the very wall of controls the compact rows exist to avoid.
+ */
+const expandedFavorite = shallowRef<string[]>([])
+
+/**
+ * Commute hours: expanded whenever the card sits in the xl side rail (where
+ * there is room beside the list and collapsing would only add a click), and
+ * collapsed below that (where it stacks under the list and the height matters).
+ */
+const hoursExpanded = shallowRef(false)
+const isSideRail = useMediaQuery('(min-width: 1280px)')
+
+watch(isSideRail, (wide) => {
+  // Only the automatic value follows the breakpoint; a manual toggle within a
+  // layout is respected until the layout itself changes.
+  hoursExpanded.value = wide
+}, { immediate: true })
+
+/** "06:30–11:30 · 17:00–22:00" — the collapsed summary of the saved hours. */
+const hoursSummary = computed(() =>
+  `${savedHours.value.morningStart}–${savedHours.value.morningEnd} · ${savedHours.value.eveningStart}–${savedHours.value.eveningEnd}`)
+
+/** The favourite queued for removal, pending confirmation. Null when none. */
+const pendingRemoval = shallowRef<UserFavoriteLine | null>(null)
+const removingFavorite = shallowRef(false)
+
+function requestRemoval(fav: UserFavoriteLine): void {
+  pendingRemoval.value = fav
+}
+
+async function confirmRemoval(): Promise<void> {
+  const target = pendingRemoval.value
+  if (!target) return
+  removingFavorite.value = true
   try {
-    const res = await fetch('/api/transit/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settingsDraft.value),
-    })
-    const json = await res.json()
-    if (!json.success) {
-      throw new Error(json.error || '保存失败')
-    }
-    settingsDraft.value = json.data as UserSettings
-    settingsSaved.value = true
+    await transitStore.removeFavorite(target.id || target.lineId)
+    pendingRemoval.value = null
   }
   catch (err) {
-    settingsError.value = err instanceof Error ? err.message : '保存失败'
+    pinError.value = err instanceof Error ? err.message : '取消关注失败'
   }
   finally {
-    settingsSaving.value = false
+    removingFavorite.value = false
   }
+}
+
+/**
+ * One-line stop summary per favourite, so a collapsed row still answers the
+ * question it exists for: which stops will the home cards report on.
+ */
+function stopSummary(fav: UserFavoriteLine): string {
+  const morning = resolveBoardStop(fav, 'morning')
+  const evening = resolveBoardStop(fav, 'evening')
+  const parts: string[] = []
+  if (morning) parts.push(`🏠 ${morning}`)
+  if (evening) parts.push(`🏢 ${evening}`)
+  return parts.length > 0 ? parts.join(' · ') : '未设置上车点'
 }
 </script>
 
 <template>
   <div class="space-y-6 pb-12">
-    <!-- Centered Content Column: ergonomic reading and input width (max-w-3xl) -->
-    <div class="mx-auto max-w-3xl space-y-6">
-      <!-- Title -->
-      <div>
-        <h2 class="text-xl font-bold text-white md:text-2xl">
-          设置与管理
-        </h2>
-        <p class="mt-1 text-xs text-slate-400">
-          管理日常通勤关注的公交和地铁线路
-        </p>
-      </div>
+    <!-- Title -->
+    <div class="mx-auto max-w-6xl">
+      <h2 class="text-xl font-bold text-white md:text-2xl">
+        设置与管理
+      </h2>
+      <p class="mt-1 text-xs text-slate-400">
+        管理日常通勤关注的公交和地铁线路
+      </p>
+    </div>
 
-      <!-- Search & Add Lines -->
-      <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl">
-        <div class="flex items-center justify-between">
+    <!--
+      Two regions: the followed-lines work (search + list — one task that must not
+      be interrupted) and the commute-hours preference (set once, rarely touched).
+      Below xl they stack with hours last; from xl the preference moves to a side
+      column so the list keeps the full left width and no settings card is wedged
+      into the middle of the list.
+    -->
+    <div class="mx-auto grid max-w-6xl grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <!-- ============ Followed lines: search + list in one card ============ -->
+      <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-sm font-semibold text-slate-200">
-            搜索添加线路
+            关注线路
+            <span class="ml-1 font-normal text-slate-400">({{ cityFavorites.length }})</span>
           </h3>
           <span class="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
             <MapPin class="h-3 w-3 shrink-0" />
             <span>{{ cityStore.currentCityName }}</span>
           </span>
         </div>
+
+        <!-- Search sits inside the list card: adding and managing lines are the
+             same task, so nothing unrelated may sit between them. -->
         <form action="" class="mt-3 flex gap-2" @submit.prevent="performSearch">
           <!-- min-h-[44px] keeps both controls inside the Apple HIG touch-target
                size; 16px input text stops iOS Safari from zoom-jumping on focus on mobile/small-foldable. -->
@@ -287,8 +352,8 @@ async function saveSettings(): Promise<void> {
           </button>
         </form>
 
-        <!-- Search Results: ONE row per route, both directions bundled -->
-        <div v-if="searchResults.length > 0" class="mt-4 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950">
+        <!-- Search results: ONE row per route, both directions bundled -->
+        <div v-if="searchResults.length > 0" class="mt-3 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950">
           <div
             v-for="item in searchResults"
             :key="item.groupKey"
@@ -326,154 +391,172 @@ async function saveSettings(): Promise<void> {
             </button>
           </div>
         </div>
-        <p v-else-if="searched && searchResults.length === 0" class="mt-4 text-center text-xs text-slate-400">
+        <p v-else-if="searched && searchResults.length === 0" class="mt-3 text-center text-xs text-slate-400">
           在 {{ cityStore.currentCityName }} 未找到匹配「{{ lastKeyword }}」的线路
         </p>
-      </div>
 
-      <!-- Commute hours: drive the default home-tab view (morning/evening/nearby) -->
-      <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl space-y-3">
-        <h3 class="text-sm font-semibold text-slate-200">
-          通勤时段
-        </h3>
-        <p class="text-xs text-slate-500">
-          用于自动切换「上班 / 下班 / 附近」视图，不参与方向判定
-        </p>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
-            <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
-              <span>🏠</span><span>早高峰</span>
-            </span>
-            <span class="flex items-center gap-1">
-              <input
-                v-model="settingsDraft.morningStart"
-                type="time"
-                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
-              >
-              <span class="text-xs text-slate-500">—</span>
-              <input
-                v-model="settingsDraft.morningEnd"
-                type="time"
-                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
-              >
-            </span>
-          </label>
-          <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
-            <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
-              <span>🏢</span><span>晚高峰</span>
-            </span>
-            <span class="flex items-center gap-1">
-              <input
-                v-model="settingsDraft.eveningStart"
-                type="time"
-                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
-              >
-              <span class="text-xs text-slate-500">—</span>
-              <input
-                v-model="settingsDraft.eveningEnd"
-                type="time"
-                class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
-              >
-            </span>
-          </label>
-        </div>
-        <div class="flex items-center gap-3">
-          <button
-            class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="settingsSaving"
-            @click="saveSettings"
-          >
-            {{ settingsSaving ? '保存中…' : '保存时段' }}
-          </button>
-          <span v-if="settingsSaved" class="text-xs text-emerald-400">已保存</span>
-          <span v-if="settingsError" class="flex items-center gap-1.5 text-xs text-rose-400">
-            <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-            <span>{{ settingsError }}</span>
-          </span>
-        </div>
-      </div>
-
-      <!-- Pinned Lines Management -->
-      <div class="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-semibold text-slate-200">
-            已关注线路列表 ({{ cityFavorites.length }})
-          </h3>
-          <span class="text-xs text-slate-400">仅显示 {{ cityStore.currentCityName }}</span>
-        </div>
-
-        <div v-if="cityFavorites.length > 0" class="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950">
-          <div
-            v-for="(item, idx) in cityFavorites"
+        <!-- Followed list: compact rows, one expanded at a time. AccordionRoot
+             (single) owns the disclosure state and the trigger/content ARIA
+             wiring, so only one row's editors can be open. -->
+        <AccordionRoot
+          v-if="cityFavorites.length > 0"
+          v-model="expandedFavorite"
+          type="single"
+          collapsible
+          class="mt-3 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950"
+        >
+          <AccordionItem
+            v-for="item in cityFavorites"
             :key="item.id || item.lineId"
-            class="p-3 text-xs"
+            :value="item.id || item.lineId"
           >
-            <div class="flex min-h-[40px] items-center justify-between">
-              <div class="flex min-w-0 items-center gap-2.5">
+            <AccordionHeader as-child>
+              <AccordionTrigger
+                class="group flex w-full items-center gap-2.5 p-3 text-left transition hover:bg-slate-900/60"
+              >
                 <span
                   class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
                   :class="(item.lineName || '').length > 4 ? 'text-xs min-w-[54px]' : 'text-xs min-w-[36px]'"
                 >
                   {{ item.lineName || '线路' }}
                 </span>
-                <span class="text-xs text-slate-400">
-                  {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-xs text-slate-300">{{ stopSummary(item) }}</span>
+                  <span class="mt-0.5 block text-xs text-slate-500">
+                    {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
+                  </span>
                 </span>
-              </div>
-              <!-- min-h-40 + px-3: comfortable touch target with balanced vertical baseline -->
-              <button
-                class="min-h-[40px] shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95"
-                @click="removeFavorite(idx)"
-              >
-                取消关注
-              </button>
-            </div>
-
-            <!-- Board stop per commute purpose. Home cards derive the direction
-                 from the stop pair and read the stop for the active purpose. -->
-            <div class="mt-2.5 space-y-2 border-t border-slate-800/60 pt-2.5">
-              <div
-                v-for="entry in favoriteDirections(item)"
-                :key="`${item.id}_${entry.purpose}`"
-                class="space-y-1"
-              >
-                <div class="flex items-center justify-between">
-                  <span class="text-xs text-slate-400">
-                    {{ entry.purpose === 'morning' ? '🏠' : '🏢' }} {{ entry.label }}
-                  </span>
-                  <span
-                    v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
-                    class="text-xs text-slate-500"
-                  >
-                    展开后加载站点
-                  </span>
-                </div>
-                <StationPinPicker
-                  v-if="entry.lineId"
-                  :model-value="resolveBoardStop(item, entry.purpose) ?? null"
-                  :stations="stationLists[pinKey(item.id!, entry.direction)] || []"
-                  :direction-label="entry.label"
-                  @update:model-value="(name) => onPinChange(item, entry.purpose, name)"
+                <!-- data-state comes from reka-ui, so the chevron needs no local
+                     state binding. -->
+                <ChevronDown
+                  class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-data-[state=open]:rotate-180"
                 />
-                <p v-else class="text-xs text-slate-500">
-                  该方向上游未提供，无法设置上车点
+              </AccordionTrigger>
+            </AccordionHeader>
+
+            <AccordionContent class="border-t border-slate-800/60">
+              <div class="space-y-3 px-3 pt-3 pb-3">
+                <div
+                  v-for="entry in favoriteDirections(item)"
+                  :key="`${item.id}_${entry.purpose}`"
+                  class="space-y-1"
+                >
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs text-slate-400">
+                      {{ entry.purpose === 'morning' ? '🏠' : '🏢' }} {{ entry.label }}
+                    </span>
+                    <span
+                      v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
+                      class="text-xs text-slate-500"
+                    >
+                      展开后加载站点
+                    </span>
+                  </div>
+                  <StationPinPicker
+                    v-if="entry.lineId"
+                    :model-value="resolveBoardStop(item, entry.purpose) ?? null"
+                    :stations="stationLists[pinKey(item.id!, entry.direction)] || []"
+                    :direction-label="entry.label"
+                    @update:model-value="(name) => onPinChange(item, entry.purpose, name)"
+                  />
+                  <p v-else class="text-xs text-slate-500">
+                    该方向上游未提供，无法设置上车点
+                  </p>
+                </div>
+
+                <p class="text-xs text-slate-500">
+                  ⓘ 两个上车点设置后，上班/下班方向自动判定
                 </p>
+                <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400">
+                  <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
+                  <span>{{ pinError }}</span>
+                </p>
+
+                <button
+                  class="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95"
+                  @click="requestRemoval(item)"
+                >
+                  <X class="h-3.5 w-3.5 shrink-0" />
+                  <span>取消关注</span>
+                </button>
               </div>
-              <p class="text-xs text-slate-500">
-                ⓘ 两个上车点设置后，上班/下班方向自动判定
-              </p>
-              <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400">
-                <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-                <span>{{ pinError }}</span>
-              </p>
-            </div>
-          </div>
+            </AccordionContent>
+          </AccordionItem>
+        </AccordionRoot>
+
+        <p v-else class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-6 text-center text-xs text-slate-400">
+          暂无关注线路，请在上方搜索框中搜索并添加线路
+        </p>
+      </section>
+
+      <!-- ============ Commute hours: a preference, not a per-line setting ===== -->
+      <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5">
+        <!-- Side rail (xl+): the form is always visible. It sits beside the list,
+             so collapsing would save no scrolling and only add a click.
+             Stacked below the list (<xl): collapsible, because there the card
+             does add height to the page. -->
+        <div v-if="isSideRail" class="space-y-4">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-200">
+            <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
+            <span>通勤时段</span>
+          </h3>
+          <CommuteHoursForm />
         </div>
 
-        <div v-else class="p-6 text-center text-xs text-slate-400">
-          暂无关注线路，请在上方的搜索框中搜索并添加线路。
-        </div>
-      </div>
+        <CollapsibleRoot v-else v-model:open="hoursExpanded">
+          <CollapsibleTrigger
+            class="group flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span class="flex min-w-0 items-center gap-2">
+              <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
+              <span class="min-w-0">
+                <span class="block text-sm font-semibold text-slate-200">通勤时段</span>
+                <span class="mt-0.5 block truncate font-mono text-xs text-slate-400">{{ hoursSummary }}</span>
+              </span>
+            </span>
+            <ChevronDown
+              class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-data-[state=open]:rotate-180"
+            />
+          </CollapsibleTrigger>
+
+          <CollapsibleContent class="mt-4 border-t border-slate-800/60 pt-4">
+            <CommuteHoursForm />
+          </CollapsibleContent>
+        </CollapsibleRoot>
+      </section>
     </div>
+
+    <!-- Removal confirmation. Unfollowing is irreversible from the UI (the line
+         must be searched for again), so it takes an explicit confirm rather than
+         firing on a single tap inside the expanded row. -->
+    <AlertDialogRoot :open="pendingRemoval !== null" @update:open="(v) => { if (!v) pendingRemoval = null }">
+      <AlertDialogPortal>
+        <AlertDialogOverlay class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm" />
+        <AlertDialogContent
+          class="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+        >
+          <AlertDialogTitle class="text-sm font-semibold text-white">
+            取消关注 {{ pendingRemoval?.lineName || '该线路' }}？
+          </AlertDialogTitle>
+          <AlertDialogDescription class="mt-2 text-xs text-slate-400">
+            取消后首页不再显示这条线路的实时车辆与到站信息，上车点设置也会一并移除。需要重新搜索才能再次关注。
+          </AlertDialogDescription>
+          <div class="mt-5 flex justify-end gap-2">
+            <AlertDialogCancel
+              class="min-h-[40px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95"
+            >
+              保留
+            </AlertDialogCancel>
+            <AlertDialogAction
+              class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="removingFavorite"
+              @click="confirmRemoval"
+            >
+              {{ removingFavorite ? '处理中…' : '确认取消关注' }}
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialogPortal>
+    </AlertDialogRoot>
   </div>
 </template>

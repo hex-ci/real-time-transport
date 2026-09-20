@@ -61,6 +61,25 @@ const emit = defineEmits<{
 
 const containerRef = useTemplateRef('containerEl')
 
+/**
+ * Floating mobile controls. They are absolutely positioned overlays, so the
+ * canvas box starts underneath them and a fit has to inset by their real
+ * height. Desktop's HUD sits in normal flow and is already excluded from the
+ * canvas box; these elements are `display: none` there, which measures as a
+ * zero-size rect — so one measurement covers both cases, with no breakpoint
+ * check that could drift from the `md:` visibility classes.
+ */
+const mobileModePillRef = useTemplateRef('mobileModePillEl')
+/**
+ * The FAB trigger only, not its container: the container grows when the tool
+ * list expands, and insetting by that transient stack would push the board
+ * down for chrome the user just opened deliberately.
+ */
+const mobileFabTriggerRef = useTemplateRef('mobileFabTriggerEl')
+
+/** Clearance kept between the toolbar's lower edge and the first row of stops. */
+const TOOLBAR_GAP = 8
+
 // Layout mode: 'folded' (compact multi-row) vs 'linear' (continuous straight line)
 function loadPersistedMode(): RouteLayoutMode {
   if (initialLayoutMode) return initialLayoutMode
@@ -614,7 +633,12 @@ function boardMetrics(): BoardMetrics {
     return {
       paddingX: 20,
       paddingY: 24,
-      rowHeight: 64,
+      // Sized for the worst real label: a 14-character name
+      // (江场村（鲜活农产品流通中心）) wraps to 4 lines in a 54px column, which at
+      // lineHeight 1.4 needs ~62px. The row must clear stationRadius + 4 label
+      // offset + those 4 lines + a gap + the next row's dot radius — the original
+      // 64px did not, leaving that label overlapping the row below by 8px.
+      rowHeight: 86,
       labelFontSize: 11,
       labelWidth: 54,
       stationRadius: 6.5,
@@ -802,6 +826,11 @@ function renderStaticBoard(): void {
     stationLayer.add(hit)
 
     // Station Label
+    // lineHeight 1.4: CJK glyphs fill nearly the whole em box, so the default
+    // lineHeight of 1 leaves two-line names touching (measured clear ink between
+    // lines: 0px). 1.4 measures 2-4px, the value chosen visually. Antialiasing
+    // eats most of the nominal leading, so this is not the CSS intuition of 1.4.
+    // Taller labels need a taller row — see the rowHeight budget in boardMetrics().
     stationLayer.add(new Konva.Text({
       id: `station-label-${pt.station.id}`,
       x: pt.x - m.labelWidth / 2,
@@ -809,6 +838,7 @@ function renderStaticBoard(): void {
       text: pt.station.name,
       fontSize: m.labelFontSize,
       fontFamily: 'system-ui, sans-serif',
+      lineHeight: 1.4,
       fill: isNearest ? '#fde047' : isSelected ? '#67e8f9' : '#94a3b8',
       width: m.labelWidth,
       align: 'center',
@@ -1085,10 +1115,15 @@ function fitWidth(): void {
   const m = boardMetrics()
   const scale = clampScale((viewW - m.fitPadding * 2) / box.w)
 
+  // Push the first row below the floating toolbar. max() keeps this from
+  // shrinking the inset on desktop, where the controls are hidden (0).
+  // fitWidth is folded-only: linear mode returns early via focusKeyStation.
+  const topInset = Math.max(m.fitTopMargin, toolbarInsetTop())
+
   stage.scale({ x: scale, y: scale })
   stage.position({
     x: (viewW - box.w * scale) / 2 - box.minX * scale,
-    y: m.fitTopMargin - box.minY * scale,
+    y: topInset - box.minY * scale,
   })
   stage.batchDraw()
 }
@@ -1105,10 +1140,17 @@ function fitToViewport(): void {
   const viewH = Math.max(1, stage.height())
   const m = boardMetrics()
 
+  // The floating toolbar only overlaps the top of a folded (serpentine) board.
+  // Linear mode's single row is centred vertically, well clear of it, so it
+  // keeps the plain margin and its behaviour is untouched.
+  const topInset = layoutMode.value === 'folded'
+    ? Math.max(m.fitTopMargin, toolbarInsetTop())
+    : m.fitTopMargin
+
   const scale = clampScale(
     Math.min(
       (viewW - m.fitPadding * 2) / box.w,
-      (viewH - m.fitTopMargin - m.fitPadding) / box.h,
+      (viewH - topInset - m.fitPadding) / box.h,
     ),
   )
 
@@ -1117,7 +1159,7 @@ function fitToViewport(): void {
     x: (viewW - box.w * scale) / 2 - box.minX * scale,
     y: layoutMode.value === 'linear'
       ? (viewH - box.h * scale) / 2 - box.minY * scale
-      : m.fitTopMargin - box.minY * scale,
+      : topInset - box.minY * scale,
   })
   stage.batchDraw()
 }
@@ -1135,6 +1177,25 @@ function contentBounds(): { minX: number, minY: number, w: number, h: number } |
   const h = Math.max(1, maxY - minY)
   if (!Number.isFinite(w) || !Number.isFinite(h)) return null
   return { minX, minY, w, h }
+}
+
+/**
+ * Vertical space the floating mobile controls occupy inside the canvas box, or
+ * 0 when they are hidden (desktop). Measured from the live DOM rather than
+ * hardcoded, so the inset cannot drift from the `md:` visibility classes.
+ */
+function toolbarInsetTop(): number {
+  const els = [mobileModePillRef.value, mobileFabTriggerRef.value].filter(Boolean) as HTMLElement[]
+  if (els.length === 0) return 0
+  const containerTop = containerRef.value?.getBoundingClientRect().top ?? 0
+  let inset = 0
+  for (const el of els) {
+    const rect = el.getBoundingClientRect()
+    if (rect.height <= 0) continue // display:none on desktop
+    // Distance from the canvas top down to this overlay's lower edge.
+    inset = Math.max(inset, rect.bottom - containerTop)
+  }
+  return inset > 0 ? inset + TOOLBAR_GAP : 0
 }
 
 function handleFitWidth(): void {
@@ -1451,7 +1512,10 @@ function handleResize(): void {
 
     <!-- Mobile Floating Controls (screens < md) -->
     <!-- Mode pill badge: tap to toggle layout instantly on mobile -->
-    <div class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md">
+    <div
+      ref="mobileModePillEl"
+      class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md"
+    >
       <button
         type="button"
         class="flex items-center gap-1 text-slate-300 active:scale-95"
@@ -1471,6 +1535,7 @@ function handleResize(): void {
     <div class="md:hidden absolute right-2.5 top-2.5 z-10 flex flex-col items-end gap-1.5">
       <!-- Toggle Trigger Button -->
       <button
+        ref="mobileFabTriggerEl"
         type="button"
         class="flex h-9 w-9 items-center justify-center rounded-xl border text-xs shadow-lg backdrop-blur-md transition active:scale-95"
         :class="mobileToolsOpen

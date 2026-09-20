@@ -20,45 +20,26 @@ export class Database {
     }
   }
 
+  /**
+   * Verify the schema is present. Table ownership belongs to migrations/
+   * (run `pnpm migrate:up`); this only reports readiness so a missing migration
+   * fails loudly instead of silently degrading to the in-memory store.
+   */
   async init(): Promise<void> {
     if (!this.pool) return
     try {
       const client = await this.pool.connect()
       try {
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS user_favorite_lines (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id VARCHAR(64) NOT NULL DEFAULT 'default_user',
-            city_code VARCHAR(16) NOT NULL DEFAULT '027',
-            line_id VARCHAR(64) NOT NULL,
-            line_name VARCHAR(64) NOT NULL,
-            preferred_direction INT NOT NULL DEFAULT 0,
-            pinned_station_name VARCHAR(64),
-            display_order INT NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
+        const res = await client.query(`
+          SELECT to_regclass('public.user_favorite_lines') AS favorites,
+                 to_regclass('public.cached_transit_lines') AS cache
         `)
-        // Idempotent migrations for pre-existing tables (older schema versions)
-        await client.query(`
-          ALTER TABLE user_favorite_lines ADD COLUMN IF NOT EXISTS city_code VARCHAR(16) NOT NULL DEFAULT '027';
-        `)
-        await client.query(`
-          ALTER TABLE user_favorite_lines ADD COLUMN IF NOT EXISTS pinned_station_name VARCHAR(64);
-        `)
-        await client.query(`
-          ALTER TABLE user_favorite_lines ADD COLUMN IF NOT EXISTS reverse_line_id VARCHAR(64);
-        `)
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS cached_transit_lines (
-            line_id VARCHAR(64) NOT NULL,
-            direction INT NOT NULL DEFAULT 0,
-            city_code VARCHAR(16) NOT NULL DEFAULT '027',
-            detail_json JSONB NOT NULL,
-            source VARCHAR(32) NOT NULL DEFAULT 'amap',
-            last_fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (line_id, direction)
-          );
-        `)
+        const row = res.rows[0]
+        if (!row?.favorites || !row?.cache) {
+          console.warn(
+            'Database schema missing. Run `pnpm migrate:up` to create/upgrade tables.',
+          )
+        }
       }
       finally {
         client.release()
@@ -88,6 +69,7 @@ export class Database {
           preferredDirection: row.preferred_direction ?? 0,
           reverseLineId: row.reverse_line_id ?? undefined,
           pinnedStationName: row.pinned_station_name ?? undefined,
+          reversePinnedStationName: row.reverse_pinned_station_name ?? undefined,
           displayOrder: row.display_order ?? 0,
         }))
       }
@@ -106,6 +88,7 @@ export class Database {
         preferredDirection: f.preferredDirection ?? 0,
         reverseLineId: f.reverseLineId,
         pinnedStationName: f.pinnedStationName ?? undefined,
+        reversePinnedStationName: f.reversePinnedStationName ?? undefined,
         displayOrder: f.displayOrder ?? 0,
       }))
   }
@@ -118,6 +101,7 @@ export class Database {
     preferredDirection?: number
     reverseLineId?: string
     pinnedStationName?: string
+    reversePinnedStationName?: string
     displayOrder?: number
   }): Promise<UserFavoriteLine> {
     const id = crypto.randomUUID()
@@ -127,8 +111,8 @@ export class Database {
     if (this.pool) {
       try {
         const res = await this.pool.query(
-          `INSERT INTO user_favorite_lines (id, user_id, city_code, line_id, line_name, preferred_direction, reverse_line_id, pinned_station_name, display_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+          `INSERT INTO user_favorite_lines (id, user_id, city_code, line_id, line_name, preferred_direction, reverse_line_id, pinned_station_name, reverse_pinned_station_name, display_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
           [
             id,
             userId,
@@ -138,6 +122,7 @@ export class Database {
             item.preferredDirection ?? 0,
             item.reverseLineId || null,
             item.pinnedStationName || null,
+            item.reversePinnedStationName || null,
             item.displayOrder ?? 0,
           ],
         )
@@ -151,6 +136,7 @@ export class Database {
           preferredDirection: row.preferred_direction ?? 0,
           reverseLineId: row.reverse_line_id ?? undefined,
           pinnedStationName: row.pinned_station_name ?? undefined,
+          reversePinnedStationName: row.reverse_pinned_station_name ?? undefined,
           displayOrder: row.display_order ?? 0,
         }
       }
@@ -168,6 +154,7 @@ export class Database {
       preferredDirection: item.preferredDirection ?? 0,
       reverseLineId: item.reverseLineId,
       pinnedStationName: item.pinnedStationName,
+      reversePinnedStationName: item.reversePinnedStationName,
       displayOrder: item.displayOrder ?? 0,
     }
     this.inMemoryFavorites.set(id, record)
@@ -215,6 +202,54 @@ export class Database {
     const rec = this.inMemoryFavorites.get(id)
     if (rec) {
       Object.assign(rec, item)
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Set or clear a favourite's pinned stations.
+   *
+   * Kept separate from `updateFavorite` because that method wraps every column
+   * in COALESCE, which can never write NULL — clearing a pin is exactly a NULL
+   * write. Here `undefined` leaves a field untouched and `null` clears it.
+   */
+  async setPinnedStations(id: string, pins: {
+    pinnedStationName?: string | null
+    reversePinnedStationName?: string | null
+  }): Promise<boolean> {
+    const sets: string[] = []
+    const values: (string | null)[] = [id]
+    const push = (column: string, value: string | null | undefined) => {
+      if (value === undefined) return
+      values.push(value)
+      sets.push(`${column} = $${values.length}`)
+    }
+    push('pinned_station_name', pins.pinnedStationName)
+    push('reverse_pinned_station_name', pins.reversePinnedStationName)
+
+    if (sets.length === 0) return false
+
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `UPDATE user_favorite_lines SET ${sets.join(', ')} WHERE id = $1`,
+          values,
+        )
+        if ((res.rowCount ?? 0) > 0) return true
+        return this.inMemoryFavorites.has(id)
+      }
+      catch {
+        // Fall through to memory
+      }
+    }
+
+    const rec = this.inMemoryFavorites.get(id)
+    if (rec) {
+      if (pins.pinnedStationName !== undefined) rec.pinnedStationName = pins.pinnedStationName
+      if (pins.reversePinnedStationName !== undefined) {
+        rec.reversePinnedStationName = pins.reversePinnedStationName
+      }
       return true
     }
     return false

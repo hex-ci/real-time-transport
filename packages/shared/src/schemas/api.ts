@@ -35,10 +35,34 @@ export const UserFavoriteLineSchema = z.object({
    * that route rather than resolving to a wrong lineId.
    */
   reverseLineId: z.string().optional(),
+  /**
+   * Station pinned for `preferredDirection`. Undefined means no pin, in which
+   * case the UI falls back to the GPS-nearest stop.
+   */
   pinnedStationName: z.string().optional(),
+  /**
+   * Station pinned for the OPPOSITE direction. Bus routes stop at opposite ends
+   * of the city depending on direction, so one pin cannot serve both; subway
+   * reuses one lineId for both directions, which is why pins are keyed by
+   * direction rather than by lineId.
+   */
+  reversePinnedStationName: z.string().optional(),
   displayOrder: z.number().int().default(0),
 })
 export type UserFavoriteLine = z.infer<typeof UserFavoriteLineSchema>
+
+/**
+ * Payload for updating a favourite's pinned stations.
+ *
+ * `null` clears the pin (falling back to GPS); `undefined` leaves it untouched.
+ * Passing explicit nulls is required because a plain PATCH with optional fields
+ * cannot express "remove the pin" — see the endpoint's handling.
+ */
+export const UpdateFavoriteSchema = z.object({
+  pinnedStationName: z.string().nullable().optional(),
+  reversePinnedStationName: z.string().nullable().optional(),
+})
+export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
 
 export const CommuteProfileSchema = z.object({
   mode: z.enum(['work', 'home', 'auto']),

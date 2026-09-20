@@ -184,7 +184,7 @@ const congestionText = computed(() => {
         </div>
       </div>
       <div v-else class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 text-center">
-        未指定目标站（关注时固定站点或开启定位后可显示车辆位置）
+        未固定目标站 · 在「管理关注」中固定站点或开启定位后显示车辆位置
       </div>
 
       <!-- Core ETA Metrics -->
@@ -200,7 +200,7 @@ const congestionText = computed(() => {
         </div>
         <div v-else-if="vehicleCount > 0" class="flex items-center gap-2">
           <span class="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
-            {{ hasTarget ? '上游未提供到站耗时，无法估算' : '未指定目标站，无法计算到站时间' }}
+            {{ hasTarget ? '上游未提供到站耗时，无法估算' : '未固定目标站，无法计算到站时间' }}
           </span>
         </div>
         <div v-else>

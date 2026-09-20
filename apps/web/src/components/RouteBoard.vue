@@ -308,6 +308,12 @@ function initStage(): void {
     fitWidth()
   }
 
+  // A station may already be selected by the time the stage finishes initialising
+  // (the GPS-nearest stop is chosen as soon as the fix and line detail exist).
+  // The selection watchers ran before this layout existed, so their
+  // notifyAnchorChange was a no-op — emit now that the anchor can be measured.
+  notifyAnchorChange()
+
   initAnimation()
 }
 
@@ -1301,6 +1307,11 @@ watch(
     else {
       fitWidth()
     }
+    // A station can be selected before the board lays out (the GPS-nearest stop
+    // is set as soon as the fix and the line detail both exist, either order).
+    // Re-emit now that currentLayout exists, otherwise the popover anchor stays
+    // null and the popover never opens.
+    if (selectedStation) notifyAnchorChange()
   },
 )
 

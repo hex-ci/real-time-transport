@@ -18,6 +18,8 @@
     "dev": "node scripts/dev.js",
     "dev:web": "pnpm --filter @real-time-transport/web dev",
     "dev:server": "pnpm --filter @real-time-transport/server dev",
+    "migrate:up": "pnpm --filter @real-time-transport/server migrate:up",
+    "migrate:down": "pnpm --filter @real-time-transport/server migrate:down",
     "code-check": "run-p typecheck lint"
   },
   "devDependencies": {

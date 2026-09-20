@@ -44,6 +44,8 @@ const stationOptions = shallowRef<string[]>([])
 const landmarkHint = shallowRef('多线聚合')
 const loading = shallowRef(false)
 const detecting = shallowRef(false)
+/** A locate was requested and is waiting for the first GPS fix to arrive. */
+const awaitingFix = shallowRef(false)
 const departureItems = shallowRef<DepartureItem[]>([])
 
 /** line details for all favorited lines in the current city (both directions resolved lazily) */
@@ -214,16 +216,20 @@ async function loadPlatformDepartures(): Promise<void> {
  * the matching stop name across favorited lines.
  */
 async function detectNearbyPlatform(): Promise<void> {
+  const coords = locationStore.userCoords
+  if (!coords) {
+    // Start tracking and let the coords watcher re-run this once a fix lands,
+    // rather than sleeping a guessed interval and hoping it arrived in time.
+    awaitingFix.value = true
+    detecting.value = true
+    locationStore.requestLocation({ userInitiated: true })
+    landmarkHint.value = '正在获取定位…'
+    return
+  }
+
+  awaitingFix.value = false
   detecting.value = true
   try {
-    if (!locationStore.userCoords) {
-      locationStore.requestLocation()
-      // wait briefly for the fallback/permission path to settle
-      await new Promise(r => setTimeout(r, 1200))
-    }
-    const coords = locationStore.userCoords
-    if (!coords) return
-
     const nearby = await fetchNearbyStations(coords.lng, coords.lat, 800)
     if (nearby.length === 0) {
       landmarkHint.value = '周边 800m 未检索到站台'
@@ -288,19 +294,36 @@ async function bootstrap(): Promise<void> {
   await loadPlatformDepartures()
 }
 
+/** Reload everything for the active city: favourites first, then the board. */
+async function reloadForCurrentCity(): Promise<void> {
+  await transitStore.fetchFavorites()
+  await bootstrap()
+}
+
 watch(
   () => cityStore.currentCode,
   () => {
     lineDetails.value = {}
     currentStationName.value = ''
     departureItems.value = []
-    void transitStore.fetchFavorites().then(bootstrap)
+    void reloadForCurrentCity()
+  },
+)
+
+/**
+ * A GPS fix requested by `detectNearbyPlatform` arrives asynchronously; resume
+ * the detection once coords land instead of leaving the board waiting.
+ */
+watch(
+  () => locationStore.userCoords,
+  (coords) => {
+    if (coords && awaitingFix.value) void detectNearbyPlatform()
   },
 )
 
 onMounted(() => {
   void cityStore.fetchCities()
-  void transitStore.fetchFavorites().then(bootstrap)
+  void reloadForCurrentCity()
 })
 </script>
 

@@ -31,6 +31,15 @@ export default defineConfigWithVueTs(
       },
     },
     rules: {
+      /**
+       * Callback-style promise chaining is banned in favour of async/await.
+       * `await x.catch(...)` stays allowed: it is awaited, not a callback chain.
+       */
+      'no-restricted-syntax': [2, {
+        selector: 'CallExpression[callee.property.name=\'then\']',
+        message: 'Use async/await instead of .then() chaining.',
+      }],
+
       '@typescript-eslint/no-redeclare': 2,
       '@typescript-eslint/no-explicit-any': 0,
       '@typescript-eslint/no-unused-expressions': [2, {

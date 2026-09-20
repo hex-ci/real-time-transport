@@ -13,6 +13,7 @@ import {
   favoriteIsBidirectional,
   haversineMeters,
   resolveFavoriteLineId,
+  resolvePinnedStation,
 } from '@real-time-transport/shared'
 
 const router = useRouter()
@@ -95,7 +96,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
       directionName: detail?.directionName || '',
       startStop: detail?.stops[0]?.name || '',
       endStop: detail?.stops[detail.stops.length - 1]?.name || '',
-      targetOrder: resolveTargetOrder(detail, f.pinnedStationName),
+      targetOrder: resolveTargetOrder(detail, resolvePinnedStation(f, direction)),
       totalStops: detail?.stops.length || 0,
       detailLoaded: Boolean(detail),
       canSwitch: bidirectional,
@@ -215,13 +216,20 @@ function goToDetail(lineId: string, direction: number): void {
   })
 }
 
+/** Reload everything for the active city: favourites, then static detail, then live. */
+async function reloadForCurrentCity(): Promise<void> {
+  await transitStore.fetchFavorites()
+  await ensureDetails()
+  await refreshAllLive()
+}
+
 // City changed -> drop caches and reload for the new city
 watch(
   () => cityStore.currentCode,
   () => {
     detailCache.value = {}
     liveBusesMap.value = {}
-    void transitStore.fetchFavorites().then(() => ensureDetails().then(refreshAllLive))
+    void reloadForCurrentCity()
   },
 )
 
@@ -236,8 +244,9 @@ watch(
 // Favorites changed (added/removed in settings) -> prime details for new lines
 watch(
   () => cityFavorites.value.map(f => `${f.lineId}_${f.cityCode}`).join('|'),
-  () => {
-    void ensureDetails().then(refreshAllLive)
+  async () => {
+    await ensureDetails()
+    await refreshAllLive()
   },
 )
 
@@ -245,7 +254,7 @@ onMounted(() => {
   updateTime()
   void cityStore.fetchCities()
   transitStore.fetchCommuteProfile()
-  void transitStore.fetchFavorites().then(() => ensureDetails().then(refreshAllLive))
+  void reloadForCurrentCity()
   locationStore.requestLocation()
 })
 </script>

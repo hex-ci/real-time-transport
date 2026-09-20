@@ -7,7 +7,7 @@ import {
   PopoverPortal,
   PopoverRoot,
 } from 'reka-ui'
-import { Footprints, X } from '@lucide/vue'
+import { Footprints, Star, X } from '@lucide/vue'
 import type { Station, WalkDecision } from '@real-time-transport/shared'
 import type { StationAnchor } from '@/components/RouteBoard.vue'
 
@@ -30,11 +30,17 @@ const props = defineProps<{
   eta: string
   freshness: string
   isRefreshing?: boolean
+  /** False when this line+direction is not followed, so there is nowhere to store a pin. */
+  canPin?: boolean
+  isPinned?: boolean
+  pinSaving?: boolean
+  pinError?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'compute-walk'): void
+  (e: 'toggle-pin'): void
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
@@ -183,6 +189,27 @@ const decisionStyle = computed(() => {
                 <span v-if="a.stopsAway" class="ml-1 text-[10px] text-slate-500">({{ a.stopsAway }}站)</span>
               </span>
             </div>
+          </div>
+
+          <!-- Pin control: makes this stop the route's target on the home cards
+               for the direction being viewed. -->
+          <div v-if="canPin" class="space-y-1">
+            <button
+              type="button"
+              class="flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
+              :class="isPinned
+                ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25'
+                : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300'"
+              :disabled="pinSaving"
+              @click="emit('toggle-pin')"
+            >
+              <Star v-if="isPinned" class="h-3.5 w-3.5 shrink-0 fill-current" />
+              <Star v-else class="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {{ pinSaving ? '正在保存…' : isPinned ? '已固定为本站目标' : '固定为本站目标' }}
+              </span>
+            </button>
+            <p v-if="pinError" class="text-[11px] text-rose-400">{{ pinError }}</p>
           </div>
 
           <!-- Walk Decision -->

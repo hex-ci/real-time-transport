@@ -144,9 +144,10 @@ export const useTransitStore = defineStore('transit', () => {
       if (cityCode) qs.set('cityCode', cityCode)
       const query = qs.toString()
 
+      const fetchJson = async (url: string) => (await fetch(url)).json()
       const [detailRes, liveRes] = await Promise.allSettled([
-        fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${query}`).then(r => r.json()),
-        fetch(`/api/transit/lines/${encodeURIComponent(lineId)}/live?${query}`).then(r => r.json()),
+        fetchJson(`/api/transit/lines/${encodeURIComponent(lineId)}?${query}`),
+        fetchJson(`/api/transit/lines/${encodeURIComponent(lineId)}/live?${query}`),
       ])
 
       if (detailRes.status === 'fulfilled' && detailRes.value.success) {
@@ -279,16 +280,46 @@ export const useTransitStore = defineStore('transit', () => {
       const saved: UserFavoriteLine = json.data
       // The server merges a re-followed route into the existing row, so
       // replace it in place instead of appending a duplicate card.
+      // Reassign the array: `favorites` is a shallowRef, so mutating an element
+      // or pushing in place would not trigger any subscriber.
       const idx = favorites.value.findIndex(f => f.id === saved.id)
-      if (idx >= 0) {
-        favorites.value[idx] = saved
-      }
-      else {
-        favorites.value.push(saved)
-      }
+      favorites.value = idx >= 0
+        ? favorites.value.map((f, i) => (i === idx ? saved : f))
+        : [...favorites.value, saved]
       return
     }
     throw new Error(json.error || '关注失败')
+  }
+
+  /**
+   * Set or clear a favourite's pinned station for one direction.
+   *
+   * `null` clears the pin so the card falls back to GPS. Pins are per direction
+   * because a route's two directions serve opposite ends of the city — one pin
+   * cannot answer "when does my bus come" for both.
+   */
+  async function setPinnedStation(
+    favoriteId: string,
+    direction: 0 | 1,
+    stationName: string | null,
+  ): Promise<void> {
+    const target = favorites.value.find(f => f.id === favoriteId)
+    if (!target) return
+    const primary = target.preferredDirection === 1 ? 1 : 0
+    const field = direction === primary ? 'pinnedStationName' : 'reversePinnedStationName'
+
+    const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: stationName }),
+    })
+    const json = await res.json()
+    if (!json.success || !json.data) {
+      throw new Error(json.error || '固定站点保存失败')
+    }
+    const saved: UserFavoriteLine = json.data
+    // Reassign rather than mutate in place: `favorites` is a shallowRef.
+    favorites.value = favorites.value.map(f => (f.id === saved.id ? saved : f))
   }
 
   async function removeFavorite(idOrIndex: string | number): Promise<void> {
@@ -330,6 +361,7 @@ export const useTransitStore = defineStore('transit', () => {
     resetLineData,
     initWs,
     addFavorite,
+    setPinnedStation,
     removeFavorite,
   }
 })

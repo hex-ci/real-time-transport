@@ -542,7 +542,9 @@ export class TransitService {
     sub.clients.add(ws)
 
     // Immediately push current status
-    void this.getLiveStatus(lineId, direction, cityCode).then((status) => {
+    void (async () => {
+      const status = await this.getLiveStatus(lineId, direction, cityCode)
+
       if (status && ws.readyState === ws.OPEN) {
         const msg: WsServerMessage = {
           type: 'line_update',
@@ -552,7 +554,7 @@ export class TransitService {
         }
         ws.send(JSON.stringify(msg))
       }
-    })
+    })()
   }
 
   /**

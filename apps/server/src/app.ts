@@ -5,6 +5,7 @@ import {
   WsClientMessageSchema,
   SearchLineQuerySchema,
   UserFavoriteLineSchema,
+  UpdateFavoriteSchema,
   DEFAULT_COMMUTE_HOURS,
   groupLineSummaries,
   type CommuteProfile,
@@ -242,6 +243,35 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     }
 
     const item = await db.addFavorite(body.data)
+    return { success: true, data: item }
+  })
+
+  app.patch('/api/transit/favorites/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const body = UpdateFavoriteSchema.safeParse(req.body)
+
+    if (!body.success) {
+      return reply.status(400).send({ success: false, error: body.error.message })
+    }
+
+    const existing = (await db.getFavorites()).find(f => f.id === id)
+
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'favorite not found' })
+    }
+
+    // null clears the pin, undefined leaves it alone — see Database.setPinnedStations.
+    const updated = await db.setPinnedStations(id, {
+      pinnedStationName: body.data.pinnedStationName,
+      reversePinnedStationName: body.data.reversePinnedStationName,
+    })
+
+    if (!updated) {
+      return reply.status(404).send({ success: false, error: 'favorite not found' })
+    }
+
+    const item = (await db.getFavorites()).find(f => f.id === id) ?? existing
+
     return { success: true, data: item }
   })
 

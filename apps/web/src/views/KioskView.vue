@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { ChevronRight } from '@lucide/vue'
 import { useIntervalFn, useWakeLock } from '@vueuse/core'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
+import { resolvePinnedStation } from '@real-time-transport/shared'
 import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
@@ -87,7 +88,7 @@ const kioskCards = computed<KioskCard[]>(() => {
     const key = detailKey(f.lineId, dir)
     const detail = lineDetails.value[key]
     const buses = liveMap.value[key] || []
-    const target = pickTarget(detail, f.pinnedStationName)
+    const target = pickTarget(detail, resolvePinnedStation(f, dir as 0 | 1))
     const isSubway = detail?.type === 'subway' || f.lineId.startsWith('subway_')
 
     let etaMinutes: number | null = null
@@ -151,19 +152,25 @@ function updateClock(): void {
 useIntervalFn(updateClock, 1000)
 useIntervalFn(refreshKiosk, 15000)
 
+/** Reload everything for the active city: favourites first, then the board data. */
+async function reloadForCurrentCity(): Promise<void> {
+  await transitStore.fetchFavorites()
+  await refreshKiosk()
+}
+
 watch(
   () => cityStore.currentCode,
   () => {
     lineDetails.value = {}
     liveMap.value = {}
-    void transitStore.fetchFavorites().then(() => refreshKiosk())
+    void reloadForCurrentCity()
   },
 )
 
 onMounted(() => {
   updateClock()
   void cityStore.fetchCities()
-  void transitStore.fetchFavorites().then(() => refreshKiosk())
+  void reloadForCurrentCity()
   locationStore.requestLocation()
   void requestWakeLock('screen')
 })

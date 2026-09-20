@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { MapPin } from '@lucide/vue'
+import { MapPin, TriangleAlert } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
-import { isBidirectional, type LineGroup } from '@real-time-transport/shared'
+import StationPinPicker from '@/components/StationPinPicker.vue'
+import {
+  isBidirectional,
+  resolveFavoriteLineId,
+  resolvePinnedStation,
+  type LineDetail,
+  type LineGroup,
+  type Station,
+  type UserFavoriteLine,
+} from '@real-time-transport/shared'
 
 const transitStore = useTransitStore()
 const cityStore = useCityStore()
@@ -15,13 +24,108 @@ const searchResults = shallowRef<LineGroup[]>([])
 const searched = shallowRef(false)
 const lastKeyword = shallowRef('')
 
+/**
+ * Stops per favourite direction, keyed `${favoriteId}_${direction}`. Loaded
+ * lazily when the user opens a pin picker — a favourite can cover both
+ * directions, each needing its own stop list from its own upstream lineId.
+ */
+const stationLists = shallowRef<Record<string, Station[]>>({})
+const pinError = shallowRef<string | null>(null)
+
 onMounted(() => {
   void transitStore.fetchFavorites()
 })
 
+function pinKey(favoriteId: string, direction: number): string {
+  return `${favoriteId}_${direction}`
+}
+
+/** The two directions of a favourite, each with its resolved lineId. */
+function favoriteDirections(fav: UserFavoriteLine): Array<{
+  direction: 0 | 1
+  label: string
+  lineId: string | null
+}> {
+  const primary = (fav.preferredDirection === 1 ? 1 : 0) as 0 | 1
+  const other = (1 - primary) as 0 | 1
+  const entries: Array<{ direction: 0 | 1, label: string, lineId: string | null }> = [
+    { direction: primary, label: primary === 0 ? '去程（上行）' : '返程（下行）', lineId: fav.lineId },
+  ]
+  // Only offer the second direction when it resolves to a real lineId — never
+  // invent one, which would show another route's stops.
+  if (fav.reverseLineId) {
+    entries.push({
+      direction: other,
+      label: other === 0 ? '去程（上行）' : '返程（下行）',
+      lineId: resolveFavoriteLineId(fav, other),
+    })
+  }
+  return entries
+}
+
+async function ensureStations(fav: UserFavoriteLine, direction: 0 | 1, lineId: string): Promise<void> {
+  const key = pinKey(fav.id!, direction)
+  if (stationLists.value[key]) return
+  try {
+    const qs = new URLSearchParams({
+      direction: String(direction),
+      cityCode: fav.cityCode || cityStore.currentCode,
+    })
+    const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
+    const json = await res.json()
+    if (json.success && json.data) {
+      stationLists.value = { ...stationLists.value, [key]: (json.data as LineDetail).stops }
+    }
+  }
+  catch {
+    // Leave unloaded: the picker shows an empty list rather than wrong stops
+  }
+}
+
+/**
+ * Load stop lists for every followed direction of the current city, so a picker
+ * never opens onto an empty list. Driven by a watcher (not a one-shot call in
+ * `onMounted`) because following a new line later in the session must load its
+ * stops too — otherwise its picker stays empty until the page is reloaded.
+ */
+async function ensureAllStations(): Promise<void> {
+  const tasks: Array<Promise<void>> = []
+  for (const fav of cityFavorites.value) {
+    if (!fav.id) continue
+    for (const entry of favoriteDirections(fav)) {
+      if (entry.lineId) tasks.push(ensureStations(fav, entry.direction, entry.lineId))
+    }
+  }
+  await Promise.allSettled(tasks)
+}
+
+async function onPinChange(
+  fav: UserFavoriteLine,
+  direction: 0 | 1,
+  name: string | null,
+): Promise<void> {
+  pinError.value = null
+  try {
+    await transitStore.setPinnedStation(fav.id!, direction, name)
+  }
+  catch (err) {
+    pinError.value = err instanceof Error ? err.message : '固定站点保存失败'
+  }
+}
+
 /** Only show favorites belonging to the currently selected city. */
 const cityFavorites = computed(() =>
   favorites.value.filter(f => f.cityCode === cityStore.currentCode),
+)
+
+// Followed set or active city changed -> load any stops not yet cached.
+// ensureStations skips what it already holds, so this stays a no-op on reruns.
+watch(
+  () => cityFavorites.value
+    .map(f => `${f.id}_${f.lineId}_${f.reverseLineId ?? ''}`)
+    .join('|'),
+  () => void ensureAllStations(),
+  { immediate: true },
 )
 
 async function performSearch(): Promise<void> {
@@ -183,26 +287,64 @@ watch(() => cityStore.currentCode, () => {
           <div
             v-for="(item, idx) in cityFavorites"
             :key="item.id || item.lineId"
-            class="flex min-h-[52px] items-center justify-between p-3 text-xs"
+            class="p-3 text-xs"
           >
-            <div class="flex min-w-0 items-center gap-2.5">
-              <span
-                class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
-                :class="(item.lineName || '').length > 4 ? 'text-xs min-w-[54px]' : 'text-xs min-w-[36px]'"
+            <div class="flex min-h-[40px] items-center justify-between">
+              <div class="flex min-w-0 items-center gap-2.5">
+                <span
+                  class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
+                  :class="(item.lineName || '').length > 4 ? 'text-xs min-w-[54px]' : 'text-xs min-w-[36px]'"
+                >
+                  {{ item.lineName || '线路' }}
+                </span>
+                <span class="text-xs text-slate-400">
+                  {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
+                </span>
+              </div>
+              <!-- min-h-40 + px-3: comfortable touch target with balanced vertical baseline -->
+              <button
+                class="min-h-[40px] shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95"
+                @click="removeFavorite(idx)"
               >
-                {{ item.lineName || '线路' }}
-              </span>
-              <span class="text-xs text-slate-400">
-                {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
-              </span>
+                取消关注
+              </button>
             </div>
-            <!-- min-h-40 + px-3: comfortable touch target with balanced vertical baseline -->
-            <button
-              class="min-h-[40px] shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95"
-              @click="removeFavorite(idx)"
-            >
-              取消关注
-            </button>
+
+            <!-- Pinned stop per direction. Home cards read the pin first and only
+                 fall back to GPS when it is unset. -->
+            <div class="mt-2.5 space-y-2 border-t border-slate-800/60 pt-2.5">
+              <div
+                v-for="entry in favoriteDirections(item)"
+                :key="`${item.id}_${entry.direction}`"
+                class="space-y-1"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-slate-400">
+                    固定站点 · {{ entry.label }}
+                  </span>
+                  <span
+                    v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
+                    class="text-xs text-slate-500"
+                  >
+                    展开后加载站点
+                  </span>
+                </div>
+                <StationPinPicker
+                  v-if="entry.lineId"
+                  :model-value="resolvePinnedStation(item, entry.direction) ?? null"
+                  :stations="stationLists[pinKey(item.id!, entry.direction)] || []"
+                  :direction-label="entry.label"
+                  @update:model-value="(name) => onPinChange(item, entry.direction, name)"
+                />
+                <p v-else class="text-xs text-slate-500">
+                  该方向上游未提供，无法固定站点
+                </p>
+              </div>
+              <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400">
+                <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
+                <span>{{ pinError }}</span>
+              </p>
+            </div>
           </div>
         </div>
 

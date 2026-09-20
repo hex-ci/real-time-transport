@@ -34,6 +34,7 @@ import { useGis } from '@/composables/use-gis'
 import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
 import StationPopover from '@/components/StationPopover.vue'
 import type { Station } from '@real-time-transport/shared'
+import { resolvePinnedStation } from '@real-time-transport/shared'
 
 const {
   id: propId,
@@ -309,6 +310,57 @@ function onCloseStationPopover(): void {
   clearDecision()
 }
 
+/**
+ * The favourite covering this line+direction, when one exists. Pinning is only
+ * meaningful for a followed route — the home cards read pins off favourites, so
+ * an unfollowed line has nowhere to store one.
+ */
+const matchingFavorite = computed(() => {
+  const line = lineId.value
+  const dir = currentDirection.value
+  return transitStore.favorites.find((f) => {
+    if (f.cityCode !== currentCityCode.value) return false
+    const primary = f.preferredDirection === 1 ? 1 : 0
+    const resolved = dir === primary ? f.lineId : f.reverseLineId
+    return resolved === line
+  }) ?? null
+})
+
+/** Whether the station currently open in the popover is this direction's pin. */
+const isSelectedStationPinned = computed(() => {
+  const fav = matchingFavorite.value
+  if (!fav || !selectedStation.value) return false
+  return resolvePinnedStation(fav, currentDirection.value as 0 | 1) === selectedStation.value.name
+})
+
+const pinSaving = shallowRef(false)
+const pinError = shallowRef<string | null>(null)
+
+/**
+ * Pin the open station for this direction, or unpin it when it already is.
+ *
+ * One pin per direction: setting a new stop replaces the old one, matching the
+ * data model (a route's two directions each carry exactly one).
+ */
+async function togglePinnedStation(): Promise<void> {
+  const fav = matchingFavorite.value
+  const station = selectedStation.value
+  if (!fav?.id || !station) return
+
+  pinSaving.value = true
+  pinError.value = null
+  try {
+    const next = isSelectedStationPinned.value ? null : station.name
+    await transitStore.setPinnedStation(fav.id, currentDirection.value as 0 | 1, next)
+  }
+  catch (err) {
+    pinError.value = err instanceof Error ? err.message : '固定站点保存失败'
+  }
+  finally {
+    pinSaving.value = false
+  }
+}
+
 async function computeWalkDecision(): Promise<void> {
   const coords = locationStore.userCoords
   if (!coords || !selectedStation.value) return
@@ -443,6 +495,18 @@ watch(
   { immediate: true },
 )
 
+/**
+ * The GPS fix arrives after the line detail does, so the nearest stop computed
+ * above was empty on first paint. Adopt it once it resolves, but only while the
+ * user has not picked a station themselves.
+ */
+watch(nearestStation, (nearest) => {
+  if (nearest && !selectedStation.value) {
+    selectedStation.value = nearest
+    void fetchStationArrivals()
+  }
+})
+
 // Keep the exact-timetable countdown fresh (departures pass by every minute)
 useIntervalFn(() => {
   if (selectedStation.value) void fetchStationArrivals()
@@ -452,6 +516,12 @@ useEventListener(window, 'resize', updatePageHeight)
 
 onMounted(() => {
   transitStore.initWs()
+  // Favourites drive the pin control: without them we cannot tell whether this
+  // line is followed, and a pin would have nowhere to be stored.
+  void transitStore.fetchFavorites()
+  // Start tracking so the board can mark the stop nearest to the user. Denied
+  // permission is a no-op here (see requestLocation), so this never prompts twice.
+  locationStore.requestLocation()
   if (lineId.value) {
     void transitStore.loadLine(lineId.value, currentDirection.value, currentCityCode.value)
   }
@@ -667,8 +737,13 @@ onUnmounted(() => {
         :eta="selectedStationEta"
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
+        :can-pin="Boolean(matchingFavorite)"
+        :is-pinned="isSelectedStationPinned"
+        :pin-saving="pinSaving"
+        :pin-error="pinError"
         @close="onCloseStationPopover"
         @compute-walk="computeWalkDecision"
+        @toggle-pin="togglePinnedStation"
       />
     </div>
   </div>

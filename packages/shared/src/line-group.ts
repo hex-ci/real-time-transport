@@ -132,3 +132,24 @@ export function favoriteIsBidirectional(fav: {
 }): boolean {
   return Boolean(fav.reverseLineId)
 }
+
+/**
+ * Read the pinned station for one direction of a favourite.
+ *
+ * Pins are stored per direction: `pinnedStationName` belongs to
+ * `preferredDirection` and `reversePinnedStationName` to the other one. Returns
+ * undefined when that direction has no pin, leaving the caller to fall back to
+ * GPS — never substitutes the other direction's pin, which would point at a
+ * stop the vehicle in view never serves.
+ */
+export function resolvePinnedStation(
+  fav: {
+    preferredDirection?: number
+    pinnedStationName?: string
+    reversePinnedStationName?: string
+  },
+  direction: 0 | 1,
+): string | undefined {
+  const primary = fav.preferredDirection === 1 ? 1 : 0
+  return direction === primary ? fav.pinnedStationName : fav.reversePinnedStationName
+}

@@ -1,70 +1,89 @@
 import { defineStore } from 'pinia'
-import { shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
+import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
 import { haversineMeters } from '@real-time-transport/shared'
 
+/**
+ * Reactive geolocation built on vueuse's `useGeolocation`, which wraps
+ * `watchPosition` — a single fix goes stale as soon as the user walks to another
+ * stop, so the nearest-stop computation must follow a live position stream.
+ */
 export const useLocationStore = defineStore('location', () => {
-  const userCoords = shallowRef<{ lat: number, lng: number } | null>(null)
-  const isLocating = shallowRef(false)
-  const locationError = shallowRef<string | null>(null)
-  const nearestStation = shallowRef<Station | null>(null)
-  const nearestDistanceM = shallowRef<number | null>(null)
-  const landmark = shallowRef<string>('')
+  const geo = useGeolocation({
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 30000,
+    // Do not prompt on store creation: permission is requested only once a view
+    // actually needs a position, or the user taps the locate button.
+    immediate: false,
+  })
+
+  /** Reactive browser permission state, so the UI can explain a denial. */
+  const permissionState = usePermission('geolocation')
+
+  /** True once tracking has been requested and not yet stopped. */
+  const tracking = shallowRef(false)
 
   /**
-   * True once the user (or the browser) has denied geolocation in this session.
-   * Repeated permission prompts / console warnings on every page load are noise;
-   * after a denial we only retry when the user explicitly taps the locate button.
+   * The current fix, or null. `useGeolocation` seeds its coords with
+   * `POSITIVE_INFINITY` sentinels until the first position arrives — treating
+   * those as real would poison every haversine result with NaN.
    */
-  let permissionDenied = false
+  const userCoords = computed<{ lat: number, lng: number } | null>(() => {
+    const { latitude, longitude } = geo.coords.value
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+    return { lat: latitude, lng: longitude }
+  })
 
+  /** Horizontal accuracy of the current fix in metres, when reported. */
+  const accuracyM = computed<number | null>(() => {
+    const acc = geo.coords.value.accuracy
+    return Number.isFinite(acc) && acc > 0 ? Math.round(acc) : null
+  })
+
+  /** Acquiring a position (tracking requested, no fix yet). */
+  const isLocating = computed(() => tracking.value && userCoords.value === null)
+
+  const locationError = computed<string | null>(() => {
+    if (!geo.isSupported.value) return '当前浏览器不支持定位'
+    if (permissionState.value === 'denied') return '定位权限被拒绝，无法确定您的位置'
+    const err = geo.error.value
+    if (!err) return null
+    if (err.code === err.PERMISSION_DENIED) return '定位权限被拒绝，无法确定您的位置'
+    if (err.code === err.TIMEOUT) return '定位超时，请检查设备定位服务后重试'
+    return '定位失败，请检查设备定位服务后重试'
+  })
+
+  const landmark = shallowRef('')
+
+  /**
+   * Start continuous tracking.
+   *
+   * A denied permission stays denied — re-requesting only spams the console (and
+   * on iOS cannot re-open the prompt anyway), so automatic callers are ignored
+   * once denied and only an explicit user tap retries.
+   */
   function requestLocation(options?: { userInitiated?: boolean }): void {
-    if (!('geolocation' in navigator)) {
-      locationError.value = '当前浏览器不支持定位'
-      return
-    }
-    // A denied session stays denied: auto-retries would just spam the console
-    // warning (and on iOS cannot re-open the prompt anyway). Only an explicit
-    // user tap gets another attempt.
-    if (permissionDenied && !options?.userInitiated) {
-      return
-    }
-
-    isLocating.value = true
-    locationError.value = null
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        permissionDenied = false
-        userCoords.value = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        }
-        isLocating.value = false
-        void resolveLandmark()
-      },
-      (err) => {
-        // No fabricated fallback: stay honestly un-located
-        userCoords.value = null
-        isLocating.value = false
-        if (err.code === err.PERMISSION_DENIED) {
-          permissionDenied = true
-          locationError.value = '定位权限被拒绝，无法确定您的位置'
-        }
-        else {
-          locationError.value = '定位失败，请检查设备定位服务后重试'
-        }
-      },
-      { timeout: 8000, enableHighAccuracy: true },
-    )
+    if (!geo.isSupported.value) return
+    if (permissionState.value === 'denied' && !options?.userInitiated) return
+    tracking.value = true
+    geo.resume()
   }
 
-  /** Reverse-geocode current GPS into a human landmark via backend (Amap). */
+  function stopLocation(): void {
+    tracking.value = false
+    geo.pause()
+  }
+
+  /** Reverse-geocode the current fix into a human landmark via the backend. */
   async function resolveLandmark(): Promise<void> {
-    if (!userCoords.value) return
+    const coords = userCoords.value
+    if (!coords) return
     try {
       const qs = new URLSearchParams({
-        lng: String(userCoords.value.lng),
-        lat: String(userCoords.value.lat),
+        lng: String(coords.lng),
+        lat: String(coords.lat),
       })
       const res = await fetch(`/api/transit/gis/regeo?${qs.toString()}`)
       const json = await res.json()
@@ -77,45 +96,69 @@ export const useLocationStore = defineStore('location', () => {
     }
   }
 
-  function updateNearestStation(stations: Station[]): void {
-    if (!stations || stations.length === 0) {
-      nearestStation.value = null
-      nearestDistanceM.value = null
-      return
-    }
+  /**
+   * Landmark lookups hit a rate-limited upstream, and continuous tracking emits
+   * a fix per second while moving — debounce so a walk does not fire a request
+   * per GPS tick.
+   */
+  const refreshLandmark = useDebounceFn(resolveLandmark, 2000)
 
-    // No GPS -> no distance-based nearest station; leave unset rather than guess
-    if (!userCoords.value) {
-      nearestStation.value = null
-      nearestDistanceM.value = null
-      return
-    }
+  watch(userCoords, (coords) => {
+    if (coords) void refreshLandmark()
+  })
+
+  /**
+   * Stops of the line currently on screen. Kept as state so `nearestStation`
+   * recomputes whenever either the stop list or the GPS fix changes — the
+   * previous imperative version only recalculated when a view happened to call
+   * it, so a moved user kept seeing the stale nearest stop.
+   */
+  const stationPool = shallowRef<Station[]>([])
+
+  function updateNearestStation(stations: Station[]): void {
+    stationPool.value = stations
+  }
+
+  const nearestStation = computed<Station | null>(() => {
+    const coords = userCoords.value
+    const stations = stationPool.value
+    if (!coords || stations.length === 0) return null
 
     let minD = Infinity
     let closest: Station | null = null
-
     for (const st of stations) {
-      if (st.lat && st.lng) {
-        const d = haversineMeters(userCoords.value.lat, userCoords.value.lng, st.lat, st.lng)
-        if (d < minD) {
-          minD = d
-          closest = st
-        }
+      if (!st.lat || !st.lng) continue
+      const d = haversineMeters(coords.lat, coords.lng, st.lat, st.lng)
+      if (d < minD) {
+        minD = d
+        closest = st
       }
     }
+    // No stop carries coordinates: report none rather than defaulting to the
+    // first stop, which would present an arbitrary stop as "nearest".
+    return closest
+  })
 
-    nearestStation.value = closest || stations[0] || null
-    nearestDistanceM.value = closest ? Math.round(minD) : null
-  }
+  const nearestDistanceM = computed<number | null>(() => {
+    const coords = userCoords.value
+    const nearest = nearestStation.value
+    if (!coords || !nearest?.lat || !nearest.lng) return null
+    return Math.round(haversineMeters(coords.lat, coords.lng, nearest.lat, nearest.lng))
+  })
 
   return {
     userCoords,
+    isSupported: geo.isSupported,
     isLocating,
+    tracking,
+    accuracyM,
+    permissionState,
     locationError,
     nearestStation,
     nearestDistanceM,
     landmark,
     requestLocation,
+    stopLocation,
     resolveLandmark,
     updateNearestStation,
   }

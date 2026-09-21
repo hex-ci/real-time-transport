@@ -1,5 +1,11 @@
 import type { StationTimetable, DayType } from '../station-timetable.js'
-import { queryStationArrivals, dayTypeForDate, type StationArrivalsResult } from '../station-timetable.js'
+import {
+  queryStationArrivals,
+  dayTypeForDate,
+  operatingDateOf,
+  operatingDaySeconds,
+  type StationArrivalsResult,
+} from '../station-timetable.js'
 import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
 
 /**
@@ -67,9 +73,8 @@ export class StationTimetableService {
 
   /**
    * All departures of the current "operating day" at a station, in seconds.
-   * After-midnight tail entries (hour < 4) are shifted +24h so the timeline is
-   * continuous for a 00:00~28:00 operating day. dayType is resolved from the
-   * operating date (Beijing time minus 4h, so 0~4am belongs to the previous day).
+   * After-midnight tail entries are shifted +24h so the timeline is continuous
+   * for a 00:00~28:00 operating day.
    */
   allDeparturesToday(
     lineId: string,
@@ -83,20 +88,8 @@ export class StationTimetableService {
     if (!dir) return null
 
     const bjNow = new Date((now ? now.getTime() : Date.now()) + 8 * 3600 * 1000)
-    const operatingDate = new Date(bjNow.getTime() - 4 * 3600 * 1000)
-    const dayType = dayTypeForDate(operatingDate)
-    const day = dir[dayType]
-
-    const departures: number[] = []
-    for (const [hStr, mins] of Object.entries(day.departures)) {
-      const h = Number(hStr)
-      for (const m of mins) {
-        const sec = h * 3600 + m * 60
-        departures.push(h < 4 ? sec + 24 * 3600 : sec)
-      }
-    }
-    departures.sort((a, b) => a - b)
-    return { dayType, departures }
+    const dayType = dayTypeForDate(operatingDateOf(bjNow))
+    return { dayType, departures: operatingDaySeconds(dir[dayType]) }
   }
 
   getRaw(lineId: string, stationName: string): StationTimetable | undefined {

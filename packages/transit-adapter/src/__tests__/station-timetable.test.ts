@@ -3,6 +3,7 @@ import {
   StationTimetableService,
   normalizeStationName,
   dayTypeForDate,
+  nextDepartureEtaSeconds,
 } from '../index.js'
 
 describe('StationTimetableService (precise timetable overlay)', () => {
@@ -46,6 +47,40 @@ describe('StationTimetableService (precise timetable overlay)', () => {
     expect(r!.dayType).toBe('weekend')
     // Official weekend to_west_railway hour 8: [2,12,20,29,39,47,56]
     expect(r!.arrivals[0]!.time).toBe('08:39')
+  })
+
+  it('reports nothing once the last departure of the day has gone', () => {
+    // 23:59 CST Monday: dir 0's last departure is 23:06, so nothing is left
+    // today. Returning tomorrow's first train would show as a ~300 minute ETA
+    // and read as a live train when the line is closed.
+    const monday = new Date('2026-01-19T15:59:00Z')
+    const r = svc.query('subway_027_7', '群芳站', 0, 23 * 3600 + 59 * 60, { now: monday })
+    expect(r).not.toBeNull()
+    expect(r!.isExact).toBe(true)
+    expect(r!.arrivals).toEqual([])
+    expect(nextDepartureEtaSeconds(r)).toBeNull()
+  })
+
+  it('reports nothing before the first departure either', () => {
+    // 04:00 CST Tuesday: still Monday's operating day, whose first departure is
+    // 05:16. Showing it would be a 76 minute countdown while the metro is shut.
+    const tue = new Date('2026-01-19T20:00:00Z') // 04:00 CST Tue
+    const r = svc.query('subway_027_7', '群芳站', 0, 4 * 3600, { now: tue })
+    expect(r).not.toBeNull()
+    expect(r!.arrivals).toEqual([])
+    expect(nextDepartureEtaSeconds(r)).toBeNull()
+  })
+
+  it('still lists the after-midnight tail during the same operating day', () => {
+    // 00:10 CST Tuesday belongs to Monday's operating day: dir 1 has 0:01, 0:08,
+    // 0:16 entries, so 00:16 is still ahead.
+    const tue = new Date('2026-01-19T16:10:00Z') // 00:10 CST Tue
+    const nowSec = 24 * 3600 + 10 * 60
+    const r = svc.query('subway_027_7', '群芳站', 1, nowSec, { count: 3, now: tue })
+    expect(r).not.toBeNull()
+    // Monday is the operating day, so the workday table applies.
+    expect(r!.dayType).toBe('workday')
+    expect(r!.arrivals.map(a => a.time)).toEqual(['00:16'])
   })
 
   it('allDeparturesToday shifts after-midnight entries to +24h', () => {

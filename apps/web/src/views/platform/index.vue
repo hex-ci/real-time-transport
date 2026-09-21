@@ -6,7 +6,6 @@ import {
   watch,
 } from 'vue'
 import { storeToRefs } from 'pinia'
-import { LocateFixed } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
 import { favoriteDirections } from '@real-time-transport/shared'
@@ -14,24 +13,8 @@ import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { useGis } from '@/composables/use-gis'
-
-interface PlatformLineRule {
-  lineId: string
-  lineName: string
-  direction: number
-  terminal: string
-  stationOrder: number
-}
-
-interface DepartureItem {
-  id: string
-  lineName: string
-  terminal: string
-  etaMinutes: number | null
-  stopsAway: number | null
-  congestion: string
-  statusText: string
-}
+import { DepartureBoard, PlatformHeader } from './components'
+import type { DepartureItem, PlatformLineRule } from './types'
 
 const transitStore = useTransitStore()
 const locationStore = useLocationStore()
@@ -321,116 +304,16 @@ onMounted(() => {
 
 <template>
   <div class="space-y-5 pb-12">
-    <!-- Header -->
-    <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 shadow-xl backdrop-blur-md sm:rounded-3xl sm:p-5 md:p-6">
-      <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
-        <div>
-          <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
-            虚拟候车亭 · 多线聚合起降牌
-          </span>
-          <h2 class="mt-0.5 flex items-center gap-2 text-lg font-bold text-white sm:mt-1 md:text-2xl">
-            当前站台：<span class="max-w-[260px] truncate text-cyan-300">{{ currentStationName || '选择中...' }}</span>
-          </h2>
-          <p class="text-xs text-slate-400">
-            {{ landmarkHint }} · 按上游实际在途车推演到达时间升序排列
-          </p>
-        </div>
-
-        <div class="flex w-full items-center gap-2 md:w-auto">
-          <button
-            class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:px-3.5 lg:py-2.5 lg:text-base"
-            :disabled="detecting"
-            @click="detectNearbyPlatform"
-          >
-            <span class="inline-flex items-center gap-1.5 sm:hidden lg:gap-2">
-              <LocateFixed class="h-3.5 w-3.5 shrink-0" />
-              <span>{{ detecting ? '扫描中...' : '定位' }}</span>
-            </span>
-            <span class="hidden items-center gap-1.5 sm:inline-flex lg:gap-2">
-              <LocateFixed class="h-3.5 w-3.5 shrink-0" />
-              <span>{{ detecting ? '雷达扫描中...' : 'GPS 感知最近站台' }}</span>
-            </span>
-          </button>
-          <select
-            v-model="currentStationName"
-            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-base font-medium text-slate-200 outline-none transition focus:border-cyan-500 md:flex-none md:text-xs lg:px-3.5 lg:py-2.5 lg:text-base"
-            @change="loadPlatformDepartures"
-          >
-            <option v-for="st in stationOptions" :key="st" :value="st">
-              {{ st }}
-            </option>
-          </select>
-        </div>
-      </div>
-    </div>
+    <PlatformHeader
+      v-model="currentStationName"
+      :station-options="stationOptions"
+      :landmark-hint="landmarkHint"
+      :detecting="detecting"
+      @detect="detectNearbyPlatform"
+      @change="loadPlatformDepartures"
+    />
 
     <!-- Departure Board Table -->
-    <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-      <!-- Desktop header: hidden on mobile, where the two-row card layout needs no headings -->
-      <div class="hidden grid-cols-12 border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider md:grid">
-        <div class="col-span-3">线路 / 始发</div>
-        <div class="col-span-4">开往方向</div>
-        <div class="col-span-3 text-right">预计到站</div>
-        <div class="col-span-2 text-right">车况 / 状态</div>
-      </div>
-
-      <div v-if="loading" class="p-8 text-center text-xs text-slate-400 lg:p-8.5 lg:text-base">
-        正在拉取上游实时车况数据...
-      </div>
-
-      <div v-else-if="departureItems.length === 0" class="p-8 text-center text-xs text-slate-400 lg:p-8.5 lg:text-base">
-        该站台暂无已关注线路途经，请在「设置」中关注经过此站的线路
-      </div>
-
-      <div v-else class="divide-y divide-slate-800/60">
-        <div
-          v-for="item in departureItems"
-          :key="item.id"
-          class="px-3 py-3 transition hover:bg-slate-900/50 md:grid md:grid-cols-12 md:items-center md:px-4 md:py-3.5"
-        >
-          <!-- Row 1 (mobile): line badge + direction -->
-          <div class="flex items-center gap-2.5 md:col-span-4 md:col-start-1 md:row-start-1">
-            <span
-              class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2 font-mono font-bold text-cyan-400 whitespace-nowrap"
-              :class="item.lineName.length > 4 ? 'text-xs min-w-[58px]' : 'text-xs min-w-[44px]'"
-            >
-              {{ item.lineName }}
-            </span>
-            <span class="min-w-0 truncate text-xs font-medium text-slate-200 lg:text-base">{{ item.terminal }}</span>
-          </div>
-
-          <!-- Row 2 (mobile): ETA + status, right-aligned against row 1's badge column -->
-          <div class="mt-2 flex items-end justify-between md:col-span-6 md:col-start-7 md:row-start-1 md:mt-0 md:justify-end md:gap-4">
-            <div class="font-mono">
-              <template v-if="item.etaMinutes !== null">
-                <span class="text-base font-bold text-cyan-400">{{ item.etaMinutes }}</span>
-                <span class="text-xs text-slate-400"> 分钟</span>
-                <span v-if="item.stopsAway !== null" class="block text-xs text-slate-400">距 {{ item.stopsAway }} 站</span>
-              </template>
-              <template v-else-if="item.statusText === '暂无来车'">
-                <span class="text-xs font-normal text-slate-400">暂无来车</span>
-                <span class="block text-xs text-slate-400">待发车/停运</span>
-              </template>
-              <template v-else-if="item.statusText === '离线'">
-                <span class="text-xs font-normal text-slate-400">接口离线</span>
-                <span class="block text-xs text-slate-400">数据暂不可用</span>
-              </template>
-              <template v-else>
-                <!-- Vehicle en route but upstream provides no ETA -->
-                <span class="text-xs font-normal text-slate-400">无法估算</span>
-                <span class="block text-xs text-slate-400">上游未提供到站耗时</span>
-              </template>
-            </div>
-
-            <span
-              class="inline-block rounded px-1.5 py-0.5 text-xs font-medium"
-              :class="item.etaMinutes !== null ? (item.congestion === 'high' ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300') : 'bg-slate-800 text-slate-400'"
-            >
-              {{ item.statusText }}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <DepartureBoard :items="departureItems" :loading="loading" />
   </div>
 </template>

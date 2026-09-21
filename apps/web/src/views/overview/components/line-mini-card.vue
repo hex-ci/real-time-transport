@@ -1,34 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ArrowLeftRight } from '@lucide/vue'
-
-/** Which home-tab view this card renders for. */
-type OverviewMode = 'morning' | 'evening' | 'nearby'
-
-/** Arrival feed shape returned by the station-arrivals endpoint. */
-interface ArrivalsFeed {
-  isExact: boolean
-  arrivals: Array<{
-    time: string
-    etaSeconds: number
-    stopsAway?: number
-    distanceMeters?: number
-    isAtStation?: boolean
-  }>
-}
-
-/**
- * One direction row. Each row carries its OWN stop order for the displayed
- * stop, because the two directions number the same named stop differently.
- */
-interface CardRow {
-  lineId: string
-  direction: 0 | 1
-  stopOrder: number | null
-  /** Destination-board label for this direction (「开往 X」). */
-  directionName: string
-  arrivals: ArrivalsFeed | null
-}
+import type { ArrivalsFeed, CardRowWithArrivals, OverviewMode } from '../types'
 
 const props = defineProps<{
   lineName: string
@@ -42,7 +15,7 @@ const props = defineProps<{
   stopName: string | null
   /** GPS distance to that stop, metres — nearby mode only. */
   stopDistanceMeters: number | null
-  rows: CardRow[]
+  rows: CardRowWithArrivals[]
   mode: OverviewMode
   detailLoaded: boolean
   /** Subway routes are tinted amber, buses cyan — same rule as the kiosk board. */
@@ -121,7 +94,7 @@ function subsequentOf(feed: ArrivalsFeed | null) {
  * headline then reads "本站暂无来车", which is the honest answer for the
  * direction the user is actually waiting for.
  */
-const primaryRow = computed<CardRow | null>(() => {
+const primaryRow = computed<CardRowWithArrivals | null>(() => {
   const rows = props.rows
   if (rows.length === 0) return null
   if (rows.length === 1) return rows[0] ?? null
@@ -142,7 +115,7 @@ const primarySubsequent = computed(() => subsequentOf(primaryArrivals.value))
  * The other direction, shown compactly. Kept even when it has no arrivals, so
  * the user can still see (and switch to) the opposite kerb.
  */
-const secondaryRow = computed<CardRow | null>(() =>
+const secondaryRow = computed<CardRowWithArrivals | null>(() =>
   props.rows.find(r => r !== primaryRow.value) ?? null)
 
 /** Only a two-row card can be switched; a single-row card has nothing to trade. */

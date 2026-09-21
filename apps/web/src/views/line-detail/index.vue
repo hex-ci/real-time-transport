@@ -11,9 +11,6 @@ import {
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import {
-  ArrowLeft,
-  ArrowLeftRight,
-  Info,
   RefreshCw,
   X,
 } from '@lucide/vue'
@@ -31,8 +28,16 @@ import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { useGis } from '@/composables/use-gis'
-import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
-import StationPopover from '@/components/StationPopover.vue'
+import {
+  DesktopActionBar,
+  LineHero,
+  LineLoadState,
+  MobileLineHeader,
+  RouteBoard,
+  StationPopover,
+  type StationAnchor,
+} from './components'
+import type { DirectionOption } from './types'
 import type { Station } from '@real-time-transport/shared'
 import { effectiveCommuteDirection } from '@real-time-transport/shared/line-group'
 
@@ -167,12 +172,6 @@ const oppositeLineId = computed<string | null>(() => {
 })
 
 const canSwitchDirection = computed(() => oppositeLineId.value !== null)
-
-interface DirectionOption {
-  direction: number
-  lineId: string
-  label: string
-}
 
 /**
  * Build the two direction tabs with REAL terminal names, in a FIXED order
@@ -574,179 +573,35 @@ onUnmounted(() => {
     :style="{ height: `${pageHeight}px` }"
   >
     <!-- Mobile Compact Single-Line Header: ~44px height, leaves 80%+ of screen for canvas (screens < md) -->
-    <div
+    <MobileLineHeader
       v-if="currentLineDetail"
-      class="flex md:hidden shrink-0 items-center justify-between gap-1.5 rounded-xl border border-slate-800 bg-slate-900/90 px-2 py-1.5 shadow-md"
-    >
-      <div class="flex min-w-0 items-center gap-1.5">
-        <RouterLink
-          to="/"
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 text-slate-300 active:scale-95"
-          aria-label="返回总览"
-        >
-          <ArrowLeft class="h-3.5 w-3.5" />
-        </RouterLink>
-
-        <!-- Clickable Line Badge: triggers full line details sheet -->
-        <button
-          class="flex h-8 shrink-0 items-center justify-center rounded-lg border px-2 font-mono text-xs font-bold whitespace-nowrap active:scale-95"
-          :class="badgeAccent.lineName"
-          title="点击查看线路详情"
-          @click="showLineInfo = true"
-        >
-          {{ currentLineDetail.lineName }}
-        </button>
-
-        <!-- Direction with quick toggle -->
-        <div class="flex min-w-0 items-center gap-1">
-          <span class="min-w-0 truncate text-xs font-bold text-white">
-            {{ currentLineDetail.directionName }}
-          </span>
-          <button
-            v-if="canSwitchDirection"
-            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-800 text-cyan-400 active:scale-95"
-            title="切换反向"
-            aria-label="切换反向"
-            @click="toggleDirectionQuick"
-          >
-            <ArrowLeftRight class="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Right: Live bus count chip + info trigger -->
-      <button
-        class="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 px-2 text-xs font-mono active:scale-95"
-        title="在途车辆与线路详情"
-        @click="showLineInfo = true"
-      >
-        <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-        <span class="font-bold text-emerald-400">{{ currentLiveStatus?.buses.length || 0 }}</span>
-        <span class="text-xs text-slate-400">车</span>
-        <Info class="h-3.5 w-3.5 text-slate-400" />
-      </button>
-    </div>
+      :detail="currentLineDetail"
+      :live-status="currentLiveStatus"
+      :can-switch-direction="canSwitchDirection"
+      :accent="badgeAccent"
+      @switch-direction="toggleDirectionQuick"
+      @show-info="showLineInfo = true"
+    />
 
     <!-- Desktop Top Action Bar (screens >= md) -->
-    <div class="hidden md:flex shrink-0 items-center justify-between">
-      <RouterLink
-        to="/"
-        class="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white lg:gap-2 lg:px-3.5 lg:py-2 lg:text-base"
-      >
-        <ArrowLeft class="h-3.5 w-3.5" />
-        <span>返回总览</span>
-      </RouterLink>
-
-      <div class="flex items-center gap-2">
-        <!-- Up/down direction switch, rendered as a real TAB BAR: a fixed
-             left/right slot per direction so only the highlight moves between
-             switches (never the labels). Swaps BOTH lineId and direction,
-             because bus routes use a distinct upstream lineId per direction
-             while subway reuses one. Only offered when the opposite way really
-             resolves — never a "reverse driving" toggle on the same data. -->
-        <div
-          v-if="canSwitchDirection"
-          role="tablist"
-          aria-label="选择行驶方向"
-          class="flex items-center rounded-xl border border-slate-700 bg-slate-800/80 p-0.5"
-        >
-          <button
-            v-for="opt in directionOptions"
-            :key="opt.direction"
-            role="tab"
-            :aria-selected="isActiveTab(opt)"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium transition lg:px-3.5 lg:py-2 lg:text-base"
-            :class="isActiveTab(opt)
-              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-              : 'text-slate-400 border border-transparent hover:text-slate-200'"
-            @click="switchDirection(opt)"
-          >
-            {{ opt.label }}
-          </button>
-        </div>
-
-        <!-- Commute purpose badge: which leg this direction serves, read from the
-             user's stored choice. Hidden when they have not chosen. -->
-        <span
-          v-if="activePurpose"
-          class="hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium sm:inline-block"
-          :class="activePurpose === 'morning'
-            ? 'bg-emerald-500/10 text-emerald-400'
-            : 'bg-violet-500/10 text-violet-400'"
-        >
-          {{ activePurpose === 'morning' ? '🏠 上班方向' : '🏢 下班方向' }}
-        </span>
-      </div>
-    </div>
+    <DesktopActionBar
+      :can-switch-direction="canSwitchDirection"
+      :direction-options="directionOptions"
+      :is-active-tab="isActiveTab"
+      :active-purpose="activePurpose"
+      @switch-direction="switchDirection"
+    />
 
     <!-- Desktop Line Hero Banner (screens >= md) -->
-    <div
+    <LineHero
       v-if="currentLineDetail"
-      class="hidden md:block shrink-0 overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-5 shadow-xl"
-    >
-      <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
-        <div class="flex items-center gap-2.5 sm:gap-3.5">
-          <div
-            class="flex h-11 shrink-0 items-center justify-center rounded-xl border px-3 font-mono font-black whitespace-nowrap sm:h-14 sm:rounded-2xl sm:px-3.5"
-            :class="[
-              badgeAccent.lineName,
-              currentLineDetail.lineName.length > 4 ? 'text-base min-w-[74px] sm:text-lg sm:min-w-[88px]' : currentLineDetail.lineName.length > 3 ? 'text-lg min-w-[62px] sm:text-xl sm:min-w-[76px]' : 'text-xl min-w-[54px] sm:text-2xl sm:min-w-[64px]',
-            ]"
-          >
-            {{ currentLineDetail.lineName }}
-          </div>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <h2 class="min-w-0 truncate text-base font-bold text-white sm:text-2xl">
-                {{ currentLineDetail.directionName }}
-              </h2>
-              <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold border" :class="badgeAccent.stops">
-                {{ currentLineDetail.stops.length }} 站
-              </span>
-            </div>
-            <p class="mt-0.5 text-xs text-slate-400 font-mono">
-              首末班：{{ currentLineDetail.firstBusTime || '--:--' }} - {{ currentLineDetail.lastBusTime || '--:--' }}
-              <span class="ml-2 text-slate-400">· {{ currentLineDetail.type === 'subway' ? '官方排班推演' : '实时上游数据' }}</span>
-            </p>
-          </div>
-        </div>
-
-        <!-- Metric Badges -->
-        <div class="flex shrink-0 items-center gap-2 text-xs">
-          <div class="flex flex-1 flex-col items-center rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-1.5 sm:block sm:flex-none sm:px-3.5 sm:py-2">
-            <span class="text-slate-400 block text-center text-xs leading-tight">当前在途</span>
-            <span class="font-mono text-sm font-bold text-emerald-400 sm:text-base">
-              {{ currentLiveStatus?.buses.length || 0 }}
-            </span>
-            <span class="text-slate-400 text-xs leading-none"> 辆</span>
-          </div>
-
-          <div class="flex flex-1 flex-col items-center rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-1.5 sm:block sm:flex-none sm:px-3.5 sm:py-2">
-            <span class="text-slate-400 block text-center text-xs leading-tight">营运状态</span>
-            <span
-              class="font-mono text-xs font-semibold"
-              :class="(currentLiveStatus?.buses.length || 0) > 0 ? 'text-emerald-400' : 'text-slate-400'"
-            >
-              {{ (currentLiveStatus?.buses.length || 0) > 0 ? '营运中' : '待发车/停运' }}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+      :detail="currentLineDetail"
+      :live-status="currentLiveStatus"
+      :accent="badgeAccent"
+    />
 
     <!-- Loading / Error honest states -->
-    <div
-      v-if="!currentLineDetail"
-      class="shrink-0 rounded-3xl border border-slate-800 bg-slate-900/60 p-12 text-center"
-    >
-      <template v-if="isLoading">
-        <p class="text-sm text-slate-400 lg:text-base">正在加载线路数据...</p>
-      </template>
-      <template v-else>
-        <p class="text-sm font-semibold text-rose-400 lg:text-base">{{ loadError || '线路不存在或数据源暂不可用' }}</p>
-        <p class="mt-1.5 text-xs text-slate-400 lg:mt-2 lg:text-base">上游实时接口未能返回该线路数据，请稍后重试或检查线路号</p>
-      </template>
-    </div>
+    <LineLoadState v-if="!currentLineDetail" :is-loading="isLoading" :load-error="loadError" />
 
     <!-- 2D Konva Route Board Viewport (Full width, zero obstruction, adaptive anchor popover) -->
     <div

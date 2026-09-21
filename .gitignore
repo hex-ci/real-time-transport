@@ -41,3 +41,6 @@ Thumbs.db
 coverage/
 .temp/
 .tmp/
+
+# Agent workspace (local plans, scratch notes)
+.hermes/

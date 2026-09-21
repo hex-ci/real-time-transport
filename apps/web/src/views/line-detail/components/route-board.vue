@@ -26,7 +26,8 @@ import {
   type RouteLayoutMode,
   type RouteLayoutResult,
 } from '@/composables/use-route-layout'
-import UiTooltip from '@/components/ui/UiTooltip.vue'
+import { Tooltip } from '@/components/ui/tooltip'
+import type { StationAnchor } from '../types'
 
 const {
   nearestStation = null,
@@ -48,14 +49,6 @@ const {
   morningStopName?: string | null
   eveningStopName?: string | null
 }>()
-
-export interface StationAnchor {
-  screenX: number
-  screenY: number
-  radius: number
-  x: number
-  y: number
-}
 
 const emit = defineEmits<{
   (e: 'select-station', station: Station, anchor?: StationAnchor): void
@@ -1532,7 +1525,7 @@ function handleResize(): void {
       </div>
 
       <div class="flex items-center gap-2">
-        <UiTooltip :content="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'">
+        <Tooltip :content="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'">
           <button
             class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             @click="handleFitWidth"
@@ -1540,8 +1533,8 @@ function handleResize(): void {
             <MoveHorizontal class="h-3.5 w-3.5 text-cyan-400" />
             <span>{{ layoutMode === 'linear' ? '聚焦站点' : '适应宽度' }}</span>
           </button>
-        </UiTooltip>
-        <UiTooltip content="缩小到整条线路全部可见">
+        </Tooltip>
+        <Tooltip content="缩小到整条线路全部可见">
           <button
             class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             @click="handleFitScreen"
@@ -1549,8 +1542,8 @@ function handleResize(): void {
             <Expand class="h-3.5 w-3.5 text-cyan-400" />
             <span>适应屏幕</span>
           </button>
-        </UiTooltip>
-        <UiTooltip content="放大画布">
+        </Tooltip>
+        <Tooltip content="放大画布">
           <button
             class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             aria-label="放大画布"
@@ -1558,8 +1551,8 @@ function handleResize(): void {
           >
             <Plus class="h-3.5 w-3.5" />
           </button>
-        </UiTooltip>
-        <UiTooltip content="缩小画布">
+        </Tooltip>
+        <Tooltip content="缩小画布">
           <button
             class="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             aria-label="缩小画布"
@@ -1567,7 +1560,7 @@ function handleResize(): void {
           >
             <Minus class="h-3.5 w-3.5" />
           </button>
-        </UiTooltip>
+        </Tooltip>
       </div>
     </div>
 

@@ -9,7 +9,7 @@ import {
 } from 'reka-ui'
 import { Footprints, House, Building2, X } from '@lucide/vue'
 import type { Station, WalkDecision } from '@real-time-transport/shared'
-import type { StationAnchor } from '@/components/RouteBoard.vue'
+import type { StationAnchor } from '../types'
 
 const props = defineProps<{
   station: Station | null

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import HeaderNav from '@/components/HeaderNav.vue'
+import { HeaderNav } from '@/components/header-nav'
 import { useTransitStore } from '@/stores/transit.store'
 
 const transitStore = useTransitStore()

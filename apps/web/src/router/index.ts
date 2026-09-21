@@ -6,12 +6,12 @@ const router = createRouter({
     {
       path: '/',
       name: 'overview',
-      component: () => import('@/views/OverviewView.vue'),
+      component: () => import('@/views/overview/index.vue'),
     },
     {
       path: '/line/:id',
       name: 'line-detail',
-      component: () => import('@/views/LineDetailView.vue'),
+      component: () => import('@/views/line-detail/index.vue'),
       props: route => ({
         id: route.params.id,
         direction: route.query.direction,
@@ -21,17 +21,17 @@ const router = createRouter({
     {
       path: '/platform',
       name: 'platform',
-      component: () => import('@/views/PlatformView.vue'),
+      component: () => import('@/views/platform/index.vue'),
     },
     {
       path: '/kiosk',
       name: 'kiosk',
-      component: () => import('@/views/KioskView.vue'),
+      component: () => import('@/views/kiosk/index.vue'),
     },
     {
       path: '/settings',
       name: 'settings',
-      component: () => import('@/views/SettingsView.vue'),
+      component: () => import('@/views/settings/index.vue'),
     },
     {
       // Catch-all: an unmatched path must SAY so. Rendering nothing leaves the
@@ -39,7 +39,7 @@ const router = createRouter({
       // (e.g. /line/ with the line id missing).
       path: '/:pathMatch(.*)*',
       name: 'not-found',
-      component: () => import('@/views/NotFoundView.vue'),
+      component: () => import('@/views/not-found/index.vue'),
     },
   ],
 })

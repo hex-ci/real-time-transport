@@ -4,9 +4,9 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { Bus, ChevronRight, Clock, Menu, Settings, Tv, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
-import CitySwitcher from '@/components/CitySwitcher.vue'
-import SimulationBanner from '@/components/SimulationBanner.vue'
-import GpsSimulationBanner from '@/components/GpsSimulationBanner.vue'
+import { CitySwitcher } from '@/components/city-switcher'
+import { SimulationBanner } from '@/components/simulation-banner'
+import { GpsSimulationBanner } from '@/components/gps-simulation-banner'
 
 const transitStore = useTransitStore()
 const router = useRouter()

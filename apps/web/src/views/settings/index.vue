@@ -8,24 +8,13 @@ import {
   AccordionItem,
   AccordionRoot,
   AccordionTrigger,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogOverlay,
-  AlertDialogPortal,
-  AlertDialogRoot,
-  AlertDialogTitle,
-  CollapsibleContent,
-  CollapsibleRoot,
-  CollapsibleTrigger,
   RadioGroupItem,
   RadioGroupRoot,
 } from 'reka-ui'
-import { ChevronDown, Clock, Info, MapPin, TriangleAlert, X } from '@lucide/vue'
+import { ChevronDown, Info, MapPin, TriangleAlert, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
-import StationPinPicker from '@/components/StationPinPicker.vue'
-import CommuteHoursForm from '@/components/CommuteHoursForm.vue'
+import { CommuteHoursCard, RemovalDialog, StationPinPicker } from './components'
 import {
   type LineDetail,
   type LineGroup,
@@ -697,89 +686,23 @@ function stopSummary(fav: UserFavoriteLine): string {
       </section>
 
       <!-- ============ Commute hours: a preference, not a per-line setting ===== -->
-      <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5">
-        <!-- Side rail (xl+): the form is always visible. It sits beside the list,
-             so collapsing would save no scrolling and only add a click.
-             Stacked below the list (<xl): collapsible, because there the card
-             does add height to the page. -->
-        <div v-if="isSideRail" class="space-y-4">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-200 lg:text-base">
-            <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
-            <span>通勤时段</span>
-          </h3>
-          <CommuteHoursForm />
-        </div>
-
-        <CollapsibleRoot v-else v-model:open="hoursExpanded">
-          <CollapsibleTrigger
-            class="group flex w-full items-center justify-between gap-2 text-left"
-          >
-            <span class="flex min-w-0 items-center gap-2">
-              <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
-              <span class="min-w-0">
-                <span class="block text-sm font-semibold text-slate-200 lg:text-base">通勤时段</span>
-                <span class="mt-0.5 block truncate font-mono text-xs text-slate-400">{{ hoursSummary }}</span>
-              </span>
-            </span>
-            <ChevronDown
-              class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-data-[state=open]:rotate-180"
-            />
-          </CollapsibleTrigger>
-
-          <CollapsibleContent
-            class="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
-          >
-            <div class="mt-4 border-t border-slate-800/60 pt-4">
-              <CommuteHoursForm />
-            </div>
-          </CollapsibleContent>
-        </CollapsibleRoot>
-      </section>
+      <CommuteHoursCard
+        v-model:expanded="hoursExpanded"
+        :is-side-rail="isSideRail"
+        :summary="hoursSummary"
+      />
     </div>
 
     <!-- Removal confirmation. Unfollowing is irreversible from the UI (the line
          must be searched for again), so it takes an explicit confirm rather than
          firing on a single tap inside the expanded row. -->
-    <AlertDialogRoot :open="pendingRemoval !== null" @update:open="(v) => { if (!v) pendingRemoval = null }">
-      <AlertDialogPortal>
-        <AlertDialogOverlay class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm" />
-        <AlertDialogContent
-          class="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
-        >
-          <AlertDialogTitle class="text-sm font-semibold text-white lg:text-base">
-            取消关注 {{ pendingRemoval?.lineName || '该线路' }}？
-          </AlertDialogTitle>
-          <AlertDialogDescription class="mt-2 text-xs text-slate-400 lg:text-base">
-            取消后首页不再显示这条线路的实时车辆与到站信息，上车点设置也会一并移除。需要重新搜索才能再次关注。
-          </AlertDialogDescription>
-          <div class="mt-5 flex justify-end gap-2">
-            <AlertDialogCancel
-              class="min-h-[40px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95 lg:px-5 lg:text-base"
-            >
-              保留
-            </AlertDialogCancel>
-            <!-- Plain button, NOT AlertDialogAction: that component is a
-                 DialogClose, so its own click handler closed the dialog and
-                 cleared the pending target before this handler could read it.
-                 See confirmRemoval. -->
-            <button
-              type="button"
-              class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
-              :disabled="removingFavorite"
-              @click="confirmRemoval"
-            >
-              {{ removingFavorite ? '处理中…' : '确认取消关注' }}
-            </button>
-          </div>
-          <p
-            v-if="removalError"
-            class="mt-3 flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base"
-          >
-            <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{{ removalError }}</span>
-          </p>
-        </AlertDialogContent>
-      </AlertDialogPortal>
-    </AlertDialogRoot>
+    <RemovalDialog
+      :open="pendingRemoval !== null"
+      :line-name="pendingRemoval?.lineName ?? null"
+      :removing="removingFavorite"
+      :error="removalError"
+      @confirm="confirmRemoval"
+      @cancel="pendingRemoval = null"
+    />
   </div>
 </template>

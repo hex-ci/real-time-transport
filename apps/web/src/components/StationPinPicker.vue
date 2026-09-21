@@ -13,7 +13,6 @@ import {
   ComboboxAnchor,
   ComboboxContent,
   ComboboxEmpty,
-  ComboboxInput,
   ComboboxItem,
   ComboboxPortal,
   ComboboxRoot,
@@ -43,6 +42,20 @@ const query = shallowRef('')
 
 const selected = computed(() =>
   props.stations.find(s => s.name === props.modelValue) ?? null,
+)
+
+/**
+ * An assigned stop that the current direction does not serve.
+ *
+ * Displayed by name without an order: the whole point is that there is no stop
+ * number here, and showing "未设置" instead would contradict the mismatch warning
+ * beside it while hiding the value the user still has stored.
+ *
+ * Requires a loaded stop list — an empty list means "not loaded yet", and
+ * claiming the stop is unserved then would assert something we do not know.
+ */
+const unservedStop = computed(() =>
+  props.modelValue && props.stations.length > 0 && !selected.value ? props.modelValue : null,
 )
 
 const filtered = computed(() => {
@@ -89,8 +102,11 @@ function clear(): void {
               {{ selected.name }}
               <span class="ml-1 font-mono text-xs text-slate-400">第{{ selected.order }}站</span>
             </span>
+            <span v-else-if="unservedStop" class="truncate text-amber-400">
+              {{ unservedStop }}
+            </span>
             <span v-else class="truncate text-slate-400">
-              未固定（跟随定位）
+              未设置
             </span>
           </span>
           <ChevronDown class="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -104,12 +120,21 @@ function clear(): void {
           class="z-50 max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl"
         >
           <div class="border-b border-slate-800 p-2">
-            <ComboboxInput
+            <!-- A plain input, not ComboboxInput: reka-ui focuses its input both on
+                 content mount and on open, so the panel would always open with the
+                 caret in the box. Filtering is this component's own `filtered`
+                 computed (ignore-filter is on), so ComboboxInput bought nothing but
+                 the stolen focus. A plain input leaves rootContext.inputElement
+                 unset, so neither focus path fires — no blur hack needed. -->
+            <input
               v-model="query"
-              :display-value="() => ''"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="open"
               placeholder="搜索站点名或站序…"
               class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
-            />
+            >
           </div>
           <ComboboxViewport class="max-h-[240px] overflow-y-auto p-1">
             <ComboboxEmpty class="px-3 py-4 text-center text-xs text-slate-400 lg:px-3.5 lg:py-5 lg:text-base">

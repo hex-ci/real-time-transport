@@ -292,30 +292,37 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Set or clear a favourite's pinned station for one direction.
+   * Patch one commute slot (morning/evening) of a favourite.
    *
-   * `null` clears the pin so the card falls back to GPS. Pins are per direction
-   * because a route's two directions serve opposite ends of the city — one pin
-   * cannot answer "when does my bus come" for both.
+   * `undefined` leaves a field untouched, `null` clears it — the server maps the
+   * same distinction onto its SQL. A slot carries both its direction and its
+   * board stop; callers that set a stop while a direction is on screen (the route
+   * detail popover) write both at once, so a stop never exists without the
+   * direction that gives it its stop numbering.
    */
-  /**
-   * Set or clear one commute board stop. Stops are keyed by PURPOSE
-   * (morning = AM leg, evening = PM leg), matching the API contract; the
-   * direction each purpose rides is derived from the stop pair, never stored.
-   */
-  async function setBoardStop(
+  async function updateCommuteSlot(
     favoriteId: string,
     purpose: 'morning' | 'evening',
-    stationName: string | null,
+    patch: { direction?: number | null, stopName?: string | null },
   ): Promise<void> {
     const target = favorites.value.find(f => f.id === favoriteId)
     if (!target) return
-    const field = purpose === 'morning' ? 'morningStopName' : 'eveningStopName'
+
+    const body: Record<string, string | number | null> = {}
+    if (patch.direction !== undefined) {
+      const key = purpose === 'morning' ? 'morningDirection' : 'eveningDirection'
+      body[key] = patch.direction
+    }
+    if (patch.stopName !== undefined) {
+      const key = purpose === 'morning' ? 'morningStopName' : 'eveningStopName'
+      body[key] = patch.stopName
+    }
+    if (Object.keys(body).length === 0) return
 
     const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: stationName }),
+      body: JSON.stringify(body),
     })
     const json = await res.json()
     if (!json.success || !json.data) {
@@ -324,6 +331,15 @@ export const useTransitStore = defineStore('transit', () => {
     const saved: UserFavoriteLine = json.data
     // Reassign rather than mutate in place: `favorites` is a shallowRef.
     favorites.value = favorites.value.map(f => (f.id === saved.id ? saved : f))
+  }
+
+  /** Set or clear just the stop of a commute slot (direction left as-is). */
+  async function setBoardStop(
+    favoriteId: string,
+    purpose: 'morning' | 'evening',
+    stationName: string | null,
+  ): Promise<void> {
+    await updateCommuteSlot(favoriteId, purpose, { stopName: stationName })
   }
 
   async function removeFavorite(idOrIndex: string | number): Promise<void> {
@@ -366,6 +382,7 @@ export const useTransitStore = defineStore('transit', () => {
     initWs,
     addFavorite,
     setBoardStop,
+    updateCommuteSlot,
     removeFavorite,
   }
 })

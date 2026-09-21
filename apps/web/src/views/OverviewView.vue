@@ -10,7 +10,8 @@ import { useCityStore } from '@/stores/city.store'
 import LineMiniCard from '@/components/LineMiniCard.vue'
 import type { LineDetail, UserFavoriteLine } from '@real-time-transport/shared'
 import {
-  deriveCommuteDirections,
+  effectiveCommuteDirection,
+  favoriteDirections,
   favoriteIsBidirectional,
   resolveBoardStop,
   resolveFavoriteLineId,
@@ -109,14 +110,14 @@ interface CardRow {
   direction: 0 | 1
   /** This direction's order for the displayed stop; null when it has no such stop. */
   stopOrder: number | null
-  /** Terminal of this direction, used to identify the row in the nearby view. */
-  endStop: string
+  /** Destination-board label (「开往 X」), so the row is identifiable and a11y-named. */
+  directionName: string
 }
 
 interface MiniCardConfig {
   lineName: string
-  startStop: string
-  endStop: string
+  /** Label of the direction the card leads with, from the loaded detail. */
+  directionName: string
   /** The stop the card reports on: a board stop (commute) or the located platform. */
   stopName: string | null
   /** GPS distance to that stop, metres — nearby mode only. */
@@ -128,6 +129,14 @@ interface MiniCardConfig {
   rows: CardRow[]
   /** Which direction leads on a two-row card; null lets the card fall back to dir0. */
   primaryDirection: 0 | 1 | null
+  /**
+   * Where tapping the card goes: a route is viewable regardless of whether the
+   * user has configured a commute leg for it, so this is resolved from the
+   * favourite and never from `rows` (which is legitimately empty while a
+   * direction is unchosen or its detail has not loaded).
+   */
+  detailLineId: string
+  detailDirection: 0 | 1
   /** Favourite this card belongs to, so a direction pick can be stored against it. */
   favoriteId: string | null
 }
@@ -189,31 +198,15 @@ const cityFavorites = computed(() =>
 const canSwitchAny = computed(() => cityFavorites.value.some(f => favoriteIsBidirectional(f)))
 
 /**
- * Direction derivation per favourite, from the two board stops' order in each
- * direction's own stop list. Null = underivable (one stop missing, both the
- * same, or loop/S-shaped geometry) — the card then rides preferredDirection.
+ * The direction a favourite's purpose rides, as the user chose it.
+ *
+ * Null when never chosen — the card then shows an explicit "set your direction"
+ * state. Deliberately no fallback to `preferredDirection`: that field anchors
+ * which upstream lineId is direction 0, so pretending it is the commute
+ * direction would display a route the user never picked.
  */
-const derivedDirections = computed<Record<string, { morning: 0 | 1, evening: 0 | 1 } | null>>(() => {
-  const map: Record<string, { morning: 0 | 1, evening: 0 | 1 } | null> = {}
-  for (const f of cityFavorites.value) {
-    const d0 = detailCache.value[`${f.lineId}_${f.preferredDirection === 1 ? 1 : 0}`]
-    const d1 = f.reverseLineId
-      ? detailCache.value[`${f.reverseLineId}_${f.preferredDirection === 1 ? 0 : 1}`]
-      : undefined
-    if (!d0 || !d1) {
-      map[f.id!] = null
-      continue
-    }
-    map[f.id!] = deriveCommuteDirections(f, { 0: d0, 1: d1 })
-  }
-  return map
-})
-
-/** The direction a favourite's purpose rides: derived when possible, fallback primary. */
-function directionFor(f: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 {
-  const derived = derivedDirections.value[f.id!]
-  if (derived) return derived[purpose]
-  return (f.preferredDirection === 1 ? 1 : 0) as 0 | 1
+function directionFor(f: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
+  return effectiveCommuteDirection(f, purpose)
 }
 
 /** Details of both directions of a favourite, keyed by its own direction numbers. */
@@ -279,17 +272,14 @@ function nearbyPrimaryDirection(
     return override.direction
   }
 
-  // Only the two commute slots express a direction preference; outside them the
-  // user has no stated destination, so the stable fallback applies.
+  // The user's stated direction for this slot wins when that platform exists
+  // here; outside the commute slots they have expressed no preference.
   const purpose = currentMode.value === 'morning'
     ? 'morning'
     : currentMode.value === 'evening' ? 'evening' : null
-  if (purpose && both[0] && both[1]) {
-    const derived = deriveCommuteDirections(f, { 0: both[0], 1: both[1] })
-    if (derived) {
-      const preferred = purpose === 'morning' ? derived.morning : derived.evening
-      if (available.has(preferred)) return preferred
-    }
+  if (purpose) {
+    const chosen = directionFor(f, purpose)
+    if (chosen !== null && available.has(chosen)) return chosen
   }
 
   return 0
@@ -298,7 +288,7 @@ function nearbyPrimaryDirection(
 /**
  * One card per followed ROUTE.
  *
- * Commute modes resolve the direction from the board-stop pair and yield a
+ * Commute modes read the direction the user chose for that slot and yield a
  * single row. Nearby mode anchors on the located platform and yields one row
  * per direction that actually calls there.
  */
@@ -310,9 +300,6 @@ const cardsData = computed<MiniCardConfig[]>(() => {
     const both = detailsOf(f)
     const anyDetail = both[0] ?? both[1]
     const isSubway = anyDetail?.type === 'subway' || f.lineId.startsWith('subway_')
-    // Terminals come from whichever direction loaded first; both describe the
-    // same physical route, so either supplies the route's two ends.
-    const head = anyDetail
 
     if (mode === 'nearby') {
       const located = nearbyByFavorite.value[f.id!]
@@ -326,19 +313,20 @@ const cardsData = computed<MiniCardConfig[]>(() => {
           lineId: lineIdFor(f, direction) ?? detail.lineId,
           direction,
           stopOrder: order,
-          endStop: detail.stops[detail.stops.length - 1]?.name || '',
+          directionName: detail.directionName,
         })
       }
       cards.push({
         lineName: f.lineName,
-        startStop: head?.stops[0]?.name || '',
-        endStop: head?.stops[head.stops.length - 1]?.name || '',
+        directionName: rows[0]?.directionName ?? '',
         stopName: located?.name ?? null,
         stopDistanceMeters: located?.distanceMeters ?? null,
         detailLoaded: Boolean(anyDetail),
         isSubway,
         rows,
         primaryDirection: nearbyPrimaryDirection(f, both, rows),
+        detailLineId: rows[0]?.lineId ?? f.lineId,
+        detailDirection: rows[0]?.direction ?? 0,
         favoriteId: f.id ?? null,
       })
       continue
@@ -346,13 +334,35 @@ const cardsData = computed<MiniCardConfig[]>(() => {
 
     const purpose = mode
     const direction = directionFor(f, purpose)
+    // No direction chosen yet: render the card with its honest empty state
+    // rather than defaulting to direction 0, which would show a route the user
+    // never said they ride.
+    if (direction === null) {
+      // Nothing is configured for this leg, so there is no row to read a target
+      // from. The route itself is still viewable, so point at the favourite's
+      // own primary lineId — the anchor `preferredDirection` describes.
+      cards.push({
+        lineName: f.lineName,
+        directionName: '',
+        stopName: null,
+        stopDistanceMeters: null,
+        detailLoaded: Boolean(anyDetail),
+        isSubway,
+        rows: [],
+        primaryDirection: null,
+        detailLineId: f.lineId,
+        detailDirection: (f.preferredDirection === 1 ? 1 : 0) as 0 | 1,
+        favoriteId: f.id ?? null,
+      })
+      continue
+    }
+
     const detail = both[direction]
     const stopName = resolveBoardStop(f, purpose)
     const stop = stopName ? detail?.stops.find(s => s.name === stopName) : undefined
     cards.push({
       lineName: f.lineName,
-      startStop: head?.stops[0]?.name || '',
-      endStop: detail?.stops[detail.stops.length - 1]?.name || '',
+      directionName: detail?.directionName ?? '',
       stopName: stop?.name ?? null,
       stopDistanceMeters: null,
       detailLoaded: Boolean(detail),
@@ -362,11 +372,15 @@ const cardsData = computed<MiniCardConfig[]>(() => {
             lineId: lineIdFor(f, direction) ?? detail.lineId,
             direction,
             stopOrder: stop.order,
-            endStop: detail.stops[detail.stops.length - 1]?.name || '',
+            directionName: detail.directionName,
           }]
         : [],
       // A commute card carries one row, so the lead is that row regardless.
       primaryDirection: null,
+      // Direction is chosen here, but the stop may be unset: fall back to the
+      // direction's own lineId so the card stays tappable either way.
+      detailLineId: lineIdFor(f, direction) ?? detail?.lineId ?? f.lineId,
+      detailDirection: direction,
       favoriteId: f.id ?? null,
     })
   }
@@ -387,15 +401,10 @@ async function ensureDetails(): Promise<void> {
   const tasks: Array<Promise<void>> = []
 
   for (const f of cityFavorites.value) {
-    const bidirectional = favoriteIsBidirectional(f)
-    for (const dir of [0 as const, 1 as const]) {
-      // Only fetch a direction that actually resolves to a lineId. For a
-      // single-direction favourite we fetch just its primary direction.
-      const lineId = bidirectional
-        ? resolveFavoriteLineId(f, dir)
-        : (dir === (f.preferredDirection === 1 ? 1 : 0) ? f.lineId : null)
-      if (!lineId) continue
-
+    // Each direction the route actually has, with the lineId serving it. A
+    // single-direction route yields one entry, so nothing fetches a phantom
+    // reverse leg that upstream does not have.
+    for (const { direction: dir, lineId } of favoriteDirections(f)) {
       const key = `${lineId}_${dir}`
       if (nextCache[key]) continue
       tasks.push((async () => {
@@ -626,8 +635,7 @@ onMounted(() => {
         v-for="(line, idx) in cardsData"
         :key="`${line.lineName}_${idx}_${currentMode}`"
         :line-name="line.lineName"
-        :start-stop="line.startStop"
-        :end-stop="line.endStop"
+        :direction-name="line.directionName"
         :stop-name="line.stopName"
         :stop-distance-meters="line.stopDistanceMeters"
         :rows="line.rows.map(r => ({
@@ -638,7 +646,7 @@ onMounted(() => {
         :primary-direction="line.primaryDirection"
         :detail-loaded="line.detailLoaded"
         :is-subway="line.isSubway"
-        @click="goToDetail(line.rows[0]?.lineId ?? '', line.rows[0]?.direction ?? 0)"
+        @click="goToDetail(line.detailLineId, line.detailDirection)"
         @switch-direction="onSwitchDirection(line, $event)"
       />
     </div>

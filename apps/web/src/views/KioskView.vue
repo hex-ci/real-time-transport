@@ -5,7 +5,8 @@ import { ChevronRight } from '@lucide/vue'
 import { useIntervalFn, useWakeLock } from '@vueuse/core'
 import type { LineDetail } from '@real-time-transport/shared'
 import {
-  deriveCommuteDirections,
+  effectiveCommuteDirection,
+  favoriteDirections,
   resolveBoardStop,
   resolveFavoriteLineId,
 } from '@real-time-transport/shared/line-group'
@@ -49,13 +50,17 @@ async function loadDetails(): Promise<void> {
   const nextDetails = { ...lineDetails.value }
   let hasNew = false
   const tasks = cityFavorites.value.map(async (f) => {
-    for (const dir of [f.preferredDirection ?? 0, f.reverseLineId ? (f.preferredDirection === 1 ? 0 : 1) : null] as Array<number | null>) {
-      if (dir === null) continue
-      const key = detailKey(f.lineId, dir)
+    for (const { direction: dir, lineId } of favoriteDirections(f)) {
+      // Keyed by the lineId that actually serves this direction: on bus routes
+      // upstream issues a DISTINCT lineId per direction, so the reverse leg
+      // lives under another lineId entirely. Building the key from f.lineId
+      // fetched the forward route's data twice and cached it under a key
+      // nothing reads, leaving the board with no stop to show.
+      const key = detailKey(lineId, dir)
       if (nextDetails[key]) continue
       try {
         const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-        const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
+        const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
         const json = await res.json()
         if (json.success && json.data) {
           nextDetails[key] = json.data as LineDetail
@@ -73,22 +78,6 @@ async function loadDetails(): Promise<void> {
   }
 }
 
-/**
- * Direction derivation per favourite (same rule as the overview). Null =
- * underivable — the card then rides preferredDirection.
- */
-const derivedDirections = computed<Record<string, { morning: 0 | 1, evening: 0 | 1 } | null>>(() => {
-  const map: Record<string, { morning: 0 | 1, evening: 0 | 1 } | null> = {}
-  for (const f of cityFavorites.value) {
-    const d0 = lineDetails.value[`${f.lineId}_${f.preferredDirection === 1 ? 1 : 0}`]
-    const d1 = f.reverseLineId
-      ? lineDetails.value[`${f.reverseLineId}_${f.preferredDirection === 1 ? 0 : 1}`]
-      : undefined
-    map[f.id!] = d0 && d1 ? deriveCommuteDirections(f, { 0: d0, 1: d1 }) : null
-  }
-  return map
-})
-
 /** The kiosk board always shows the CURRENT commute leg by configured hours. */
 const activePurpose = computed<'morning' | 'evening'>(() => {
   const mode = transitStore.commuteProfile?.mode
@@ -96,10 +85,13 @@ const activePurpose = computed<'morning' | 'evening'>(() => {
 })
 
 const kioskCards = computed<KioskCard[]>(() => {
-  return cityFavorites.value.map((f) => {
+  return cityFavorites.value.flatMap((f) => {
     const purpose = activePurpose.value
-    const derived = derivedDirections.value[f.id!]
-    const dir: 0 | 1 = derived ? derived[purpose] : ((f.preferredDirection === 1 ? 1 : 0) as 0 | 1)
+    const dir = effectiveCommuteDirection(f, purpose)
+    // No direction chosen: the board has nothing honest to show for this route
+    // (its stop order and arrivals all depend on the direction), so it is
+    // omitted rather than pointing at an arbitrary direction.
+    if (dir === null) return []
     const lineId = resolveFavoriteLineId(f, dir) ?? f.lineId
     const key = detailKey(lineId, dir)
     const detail = lineDetails.value[key]
@@ -130,12 +122,12 @@ async function refreshKiosk(): Promise<void> {
   loading.value = Object.keys(lineDetails.value).length === 0
   await loadDetails()
 
-  // Arrivals for every favourite's board stop (per derived direction)
+  // Arrivals for every favourite's board stop (per its chosen direction)
   const nextMap: Record<string, { arrivals: Array<{ time: string, etaSeconds: number, isAtStation?: boolean }> } | null> = {}
   const tasks = cityFavorites.value.map(async (f) => {
     const purpose = activePurpose.value
-    const derived = derivedDirections.value[f.id!]
-    const dir: 0 | 1 = derived ? derived[purpose] : ((f.preferredDirection === 1 ? 1 : 0) as 0 | 1)
+    const dir = effectiveCommuteDirection(f, purpose)
+    if (dir === null) return
     const lineId = resolveFavoriteLineId(f, dir) ?? f.lineId
     const key = detailKey(lineId, dir)
     const detail = lineDetails.value[key]

@@ -77,6 +77,8 @@ export class Database {
           reverseLineId: row.reverse_line_id ?? undefined,
           morningStopName: row.pinned_station_name ?? undefined,
           eveningStopName: row.reverse_pinned_station_name ?? undefined,
+          morningDirection: row.morning_direction ?? null,
+          eveningDirection: row.evening_direction ?? null,
           displayOrder: row.display_order ?? 0,
         }))
       }
@@ -96,6 +98,8 @@ export class Database {
         reverseLineId: f.reverseLineId,
         morningStopName: f.morningStopName ?? undefined,
         eveningStopName: f.eveningStopName ?? undefined,
+        morningDirection: f.morningDirection ?? null,
+        eveningDirection: f.eveningDirection ?? null,
         displayOrder: f.displayOrder ?? 0,
       }))
   }
@@ -215,27 +219,31 @@ export class Database {
   }
 
   /**
-   * Set or clear a favourite's commute board stops.
+   * Set or clear a favourite's commute board stops and their directions.
    *
    * Kept separate from `updateFavorite` because that method wraps every column
-   * in COALESCE, which can never write NULL — clearing a stop is exactly a NULL
-   * write. Here `undefined` leaves a field untouched and `null` clears it.
-   * Fields are keyed by PURPOSE (morning/evening), mapped onto the storage
-   * columns inside this method.
+   * in COALESCE, which can never write NULL — clearing a stop (or unpicking a
+   * direction) is exactly a NULL write. Here `undefined` leaves a field
+   * untouched and `null` clears it. Fields are keyed by PURPOSE
+   * (morning/evening), mapped onto the storage columns inside this method.
    */
   async setBoardStops(id: string, stops: {
     morningStopName?: string | null
     eveningStopName?: string | null
+    morningDirection?: number | null
+    eveningDirection?: number | null
   }): Promise<boolean> {
     const sets: string[] = []
-    const values: (string | null)[] = [id]
-    const push = (column: string, value: string | null | undefined) => {
+    const values: (string | number | null)[] = [id]
+    const push = (column: string, value: string | number | null | undefined) => {
       if (value === undefined) return
       values.push(value)
       sets.push(`${column} = $${values.length}`)
     }
     push('pinned_station_name', stops.morningStopName)
     push('reverse_pinned_station_name', stops.eveningStopName)
+    push('morning_direction', stops.morningDirection)
+    push('evening_direction', stops.eveningDirection)
 
     if (sets.length === 0) return false
 
@@ -259,6 +267,8 @@ export class Database {
       if (stops.eveningStopName !== undefined) {
         rec.eveningStopName = stops.eveningStopName
       }
+      if (stops.morningDirection !== undefined) rec.morningDirection = stops.morningDirection
+      if (stops.eveningDirection !== undefined) rec.eveningDirection = stops.eveningDirection
       return true
     }
     return false

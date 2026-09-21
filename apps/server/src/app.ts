@@ -261,10 +261,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       return reply.status(404).send({ success: false, error: 'favorite not found' })
     }
 
-    // null clears the stop, undefined leaves it alone — see Database.setBoardStops.
+    // null clears the value, undefined leaves it alone — see Database.setBoardStops.
     const updated = await db.setBoardStops(id, {
       morningStopName: body.data.morningStopName,
       eveningStopName: body.data.eveningStopName,
+      morningDirection: body.data.morningDirection,
+      eveningDirection: body.data.eveningDirection,
     })
 
     if (!updated) {

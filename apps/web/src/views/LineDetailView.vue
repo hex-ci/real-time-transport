@@ -34,7 +34,7 @@ import { useGis } from '@/composables/use-gis'
 import RouteBoard, { type StationAnchor } from '@/components/RouteBoard.vue'
 import StationPopover from '@/components/StationPopover.vue'
 import type { Station } from '@real-time-transport/shared'
-import { purposeFromDirection } from '@real-time-transport/shared/line-group'
+import { effectiveCommuteDirection } from '@real-time-transport/shared/line-group'
 
 const {
   id: propId,
@@ -117,7 +117,7 @@ const liveFreshnessLabel = computed(() => {
 })
 
 const lineId = computed(() => String(propId || ''))
-const currentDirection = computed(() => Number(propDirection ?? 0))
+const currentDirection = computed<0 | 1>(() => (Number(propDirection ?? 0) === 1 ? 1 : 0))
 const currentCityCode = computed(() => String(propCityCode || cityStore.currentCode))
 const gisLoading = computed(() => isLoadingDecision.value)
 
@@ -206,7 +206,11 @@ const directionOptions = computed<DirectionOption[]>(() => {
 
   const labelFor = (direction: number): string => {
     if (isLoop) return direction === 0 ? '上行' : '下行'
-    // Terminal of each direction, derived from real station data.
+    // The loaded direction has the authoritative upstream label. The opposite
+    // one is derived from its terminal — this direction's FIRST stop — because
+    // its own detail is never fetched (the label is all the tab needs, and a
+    // request per tab would cost a fetch for one string).
+    if (direction === curDir && d.directionName) return d.directionName
     const terminal = direction === curDir ? last : first
     return terminal ? `开往 ${terminal}` : (direction === 0 ? '上行' : '下行')
   }
@@ -327,13 +331,28 @@ const matchingFavorite = computed(() => {
 })
 
 /**
- * Commute purpose of the direction currently on screen. Judged from this
- * direction's own stop order, so it works without holding the other direction.
+ * Commute purpose the direction on screen serves, per the user's own choice.
+ *
+ * Reads the stored directions rather than inferring from stop order: the user
+ * states which way they commute, and the current direction either matches that
+ * choice or it does not. Null when they have not chosen, so no badge is shown
+ * instead of one derived from a guess.
+ *
+ * Also null when BOTH purposes resolve to the direction on screen — on a
+ * single-direction route they always do, and they may also coincide on a
+ * two-way one. The badge names the purpose, so with two candidates it would be
+ * picking one arbitrarily and asserting something untrue about the other.
  */
 const activePurpose = computed<'morning' | 'evening' | null>(() => {
   const fav = matchingFavorite.value
   if (!fav) return null
-  return purposeFromDirection(fav, currentLineDetail.value)
+  const dir = currentDirection.value
+  const morning = effectiveCommuteDirection(fav, 'morning') === dir
+  const evening = effectiveCommuteDirection(fav, 'evening') === dir
+  if (morning && evening) return null
+  if (morning) return 'morning'
+  if (evening) return 'evening'
+  return null
 })
 
 /** Board-stop states of the station currently open in the popover. */
@@ -351,9 +370,12 @@ const stopError = shallowRef<string | null>(null)
 /**
  * Bind or unbind the open station to a commute purpose.
  *
- * Board stops are keyed by PURPOSE, not direction — a stop is "where I board in
- * the morning", a fact independent of which direction is on screen. Setting a
- * purpose replaces that purpose's stop; tapping the active purpose clears it.
+ * Setting a stop also records the direction currently on screen as that
+ * purpose's direction: the user is looking at this direction's stops while
+ * assigning one, so "where I board in the morning" and "which way I travel in
+ * the morning" are answered by the same gesture. Without it the stop would carry
+ * no direction, and its stop number would be meaningless. Clearing the stop
+ * leaves the direction alone, so re-picking later only needs the stop.
  */
 async function toggleBoardStop(purpose: 'morning' | 'evening'): Promise<void> {
   const fav = matchingFavorite.value
@@ -363,8 +385,10 @@ async function toggleBoardStop(purpose: 'morning' | 'evening'): Promise<void> {
   stopSaving.value = true
   stopError.value = null
   try {
-    const next = stationPurpose.value === purpose ? null : station.name
-    await transitStore.setBoardStop(fav.id, purpose, next)
+    const clearing = stationPurpose.value === purpose
+    await transitStore.updateCommuteSlot(fav.id, purpose, clearing
+      ? { stopName: null }
+      : { stopName: station.name, direction: currentDirection.value })
   }
   catch (err) {
     stopError.value = err instanceof Error ? err.message : '上车点保存失败'
@@ -641,8 +665,8 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- Commute purpose badge: which leg this direction serves, derived from
-             the two board stops. Hidden when the pair cannot be resolved. -->
+        <!-- Commute purpose badge: which leg this direction serves, read from the
+             user's stored choice. Hidden when they have not chosen. -->
         <span
           v-if="activePurpose"
           class="hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium sm:inline-block"

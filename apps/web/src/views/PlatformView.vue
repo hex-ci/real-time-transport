@@ -9,6 +9,7 @@ import { storeToRefs } from 'pinia'
 import { LocateFixed } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
 import type { LineDetail, LiveBus } from '@real-time-transport/shared'
+import { favoriteDirections } from '@real-time-transport/shared'
 import { useTransitStore } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
@@ -63,19 +64,25 @@ function detailKey(lineId: string, direction: number): string {
 
 async function loadLineDetails(): Promise<void> {
   const tasks = cityFavorites.value.map(async (f) => {
-    const dir = f.preferredDirection ?? 0
-    const key = detailKey(f.lineId, dir)
-    if (lineDetails.value[key]) return
-    try {
-      const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-      const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
-      const json = await res.json()
-      if (json.success && json.data) {
-        lineDetails.value[key] = json.data as LineDetail
+    // Load each direction the route actually HAS, under the lineId serving it:
+    // upstream issues a distinct lineId per direction on bus routes, so the
+    // reverse leg's stops are not reachable through f.lineId at all. A
+    // single-direction route contributes one entry — never a phantom second
+    // direction pointing at the same lineId.
+    for (const { direction: dir, lineId } of favoriteDirections(f)) {
+      const key = detailKey(lineId, dir)
+      if (lineDetails.value[key]) continue
+      try {
+        const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
+        const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
+        const json = await res.json()
+        if (json.success && json.data) {
+          lineDetails.value[key] = json.data as LineDetail
+        }
       }
-    }
-    catch {
-      // skip
+      catch {
+        // skip
+      }
     }
   })
   await Promise.allSettled(tasks)
@@ -88,7 +95,11 @@ async function loadLineDetails(): Promise<void> {
 function buildStationOptions(): void {
   const counter = new Map<string, number>()
   for (const f of cityFavorites.value) {
-    const detail = lineDetails.value[detailKey(f.lineId, f.preferredDirection ?? 0)]
+    // The primary direction only: ranking hubs by how many followed lines call
+    // here. `favoriteDirections` returns it first, so no direction arithmetic.
+    const primary = favoriteDirections(f)[0]
+    if (!primary) continue
+    const detail = lineDetails.value[detailKey(primary.lineId, primary.direction)]
     if (!detail) continue
     for (const s of detail.stops) {
       counter.set(s.name, (counter.get(s.name) || 0) + 1)
@@ -108,17 +119,18 @@ function buildStationOptions(): void {
 function buildRulesForStation(stationName: string): PlatformLineRule[] {
   const rules: PlatformLineRule[] = []
   for (const f of cityFavorites.value) {
-    // Include both directions of each favorited line
-    for (const dir of [0, 1]) {
-      const detail = lineDetails.value[detailKey(f.lineId, dir)]
+    // Every direction this route actually has — one row per direction, and a
+    // single-direction route contributes exactly one.
+    for (const { direction: dir, lineId } of favoriteDirections(f)) {
+      const detail = lineDetails.value[detailKey(lineId, dir)]
       if (!detail) continue
       const stop = detail.stops.find(s => s.name === stationName)
       if (!stop) continue
       rules.push({
-        lineId: f.lineId,
+        lineId,
         lineName: f.lineName,
         direction: dir,
-        terminal: detail.directionName || `开往 ${detail.stops[detail.stops.length - 1]?.name || '终点站'}`,
+        terminal: detail.directionName,
         stationOrder: stop.order,
       })
     }
@@ -267,29 +279,9 @@ async function detectNearbyPlatform(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  // loadLineDetails already pulls BOTH directions, each under the lineId that
+  // serves it, so a second pass here would only re-fetch the forward route.
   await loadLineDetails()
-  // Second pass: also load the opposite direction details for full platform coverage
-  const tasks: Array<Promise<void>> = []
-  for (const f of cityFavorites.value) {
-    for (const dir of [0, 1]) {
-      const key = detailKey(f.lineId, dir)
-      if (lineDetails.value[key]) continue
-      tasks.push((async () => {
-        try {
-          const qs = new URLSearchParams({ direction: String(dir), cityCode: cityStore.currentCode })
-          const res = await fetch(`/api/transit/lines/${encodeURIComponent(f.lineId)}?${qs.toString()}`)
-          const json = await res.json()
-          if (json.success && json.data) {
-            lineDetails.value[key] = json.data as LineDetail
-          }
-        }
-        catch {
-          // skip
-        }
-      })())
-    }
-  }
-  await Promise.allSettled(tasks)
   buildStationOptions()
   await loadPlatformDepartures()
 }

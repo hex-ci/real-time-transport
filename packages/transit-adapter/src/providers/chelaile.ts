@@ -24,6 +24,19 @@ function getAesKey(): Buffer {
   return Buffer.from(raw, 'utf8')
 }
 
+/**
+ * Destination-board label (「开往 X」) for one upstream direction record.
+ *
+ * Single source for the rule: search and detail both derive the label, so they
+ * must accept the same field chain in the same order. Duplicating the chain
+ * let them drift (one accepted `endStn`, the other did not), which showed up as
+ * the same direction being named differently in the search row and the selector.
+ */
+function destinationLabel(raw: { endSn?: unknown, endStn?: unknown, destinationName?: unknown }): string {
+  const terminal = raw.endSn || raw.endStn || raw.destinationName || '终点站'
+  return `开往 ${String(terminal)}`
+}
+
 const DEFAULT_PARAMS: Record<string, string> = {
   s: 'h5',
   wxs: 'wx_app',
@@ -240,6 +253,7 @@ export class ChelaileProvider implements ITransitProvider {
         direction: Number(item.direction || 0),
         startStop: String(item.startSn || item.startStn || ''),
         endStop: String(item.endSn || item.endStn || ''),
+        directionName: destinationLabel(item),
         cityCode,
       })).filter((l: LineSummary) => {
         if (!l.lineId) return false
@@ -295,7 +309,7 @@ export class ChelaileProvider implements ITransitProvider {
         lineId,
         lineName: String(rawLine.name || rawLine.lineName || ''),
         direction: Number(rawLine.direction || 0),
-        directionName: `开往 ${rawLine.endSn || rawLine.destinationName || '终点站'}`,
+        directionName: destinationLabel(rawLine),
         firstBusTime: String(rawLine.firstTime || ''),
         lastBusTime: String(rawLine.lastTime || ''),
         cityCode: cityId,

@@ -8,7 +8,6 @@ import {
   AccordionItem,
   AccordionRoot,
   AccordionTrigger,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -19,8 +18,10 @@ import {
   CollapsibleContent,
   CollapsibleRoot,
   CollapsibleTrigger,
+  RadioGroupItem,
+  RadioGroupRoot,
 } from 'reka-ui'
-import { ChevronDown, Clock, MapPin, TriangleAlert, X } from '@lucide/vue'
+import { ChevronDown, Clock, Info, MapPin, TriangleAlert, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 import StationPinPicker from '@/components/StationPinPicker.vue'
@@ -33,6 +34,8 @@ import {
   type UserSettings,
 } from '@real-time-transport/shared'
 import {
+  commuteDirectionFor,
+  effectiveCommuteDirection,
   isBidirectional,
   resolveBoardStop,
   resolveFavoriteLineId,
@@ -53,6 +56,15 @@ const lastKeyword = shallowRef('')
  * directions, each needing its own stop list from its own upstream lineId.
  */
 const stationLists = shallowRef<Record<string, Station[]>>({})
+/** Directions the API answered for but returned no detail for. */
+const stationLoadFailed = shallowRef<Record<string, boolean>>({})
+/**
+ * Direction labels keyed `${favoriteId}_${direction}`, taken from each
+ * direction's upstream `directionName` ("开往 X"). Stored per direction because
+ * a bus route's two directions are separate upstream lines and each names its
+ * own terminus; absent until that direction's stops are loaded.
+ */
+const directionLabels = shallowRef<Record<string, string>>({})
 const pinError = shallowRef<string | null>(null)
 
 onMounted(() => {
@@ -63,31 +75,109 @@ function pinKey(favoriteId: string, direction: number): string {
   return `${favoriteId}_${direction}`
 }
 
-/** The two commute legs of a favourite, each bound to its own direction lineId. */
-function favoriteDirections(fav: UserFavoriteLine): Array<{
+/**
+ * Commute direction options of a favourite, one entry per available direction.
+ *
+ * A bus route's two directions are two upstream lineIds, so each option carries
+ * the lineId its stops must be fetched from. The label is the upstream's own
+ * `directionName` ("开往 X"), which is what the vehicle's destination board
+ * reads — 上行/下行 is not in the data and is not consistent between cities.
+ */
+function directionOptions(fav: UserFavoriteLine): Array<{
   direction: 0 | 1
-  purpose: 'morning' | 'evening'
-  label: string
-  lineId: string | null
+  lineId: string
+  label: string | null
 }> {
   const primary = (fav.preferredDirection === 1 ? 1 : 0) as 0 | 1
   const other = (1 - primary) as 0 | 1
-  // The AM picker binds to the primary direction's lineId and the PM picker to
-  // the reverse one; which direction "is" the commute is derived from the pair.
-  const entries: Array<{ direction: 0 | 1, purpose: 'morning' | 'evening', label: string, lineId: string | null }> = [
-    { direction: primary, purpose: 'morning', label: '上班上车点', lineId: fav.lineId },
-  ]
-  // Only offer the second picker when it resolves to a real lineId — never
-  // invent one, which would show another route's stops.
-  if (fav.reverseLineId) {
-    entries.push({
-      direction: other,
-      purpose: 'evening',
-      label: '下班上车点',
-      lineId: resolveFavoriteLineId(fav, other),
-    })
+  const out: Array<{ direction: 0 | 1, lineId: string, label: string | null }> = []
+
+  const push = (direction: 0 | 1) => {
+    const lineId = resolveFavoriteLineId(fav, direction)
+    if (!lineId) return
+    out.push({ direction, lineId, label: directionLabels.value[pinKey(fav.id!, direction)] ?? null })
   }
-  return entries
+  push(primary)
+  push(other)
+  return out
+}
+
+/** Direction the purpose rides, as chosen by the user. Null until they pick. */
+function chosenDirection(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
+  return commuteDirectionFor(fav, purpose)
+}
+
+/**
+ * Direction whose stops the picker lists.
+ *
+ * Same rule every other view uses, so the picker's stop source can never
+ * disagree with what the home card or kiosk board renders for this purpose.
+ */
+function pickerDirection(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
+  return effectiveCommuteDirection(fav, purpose)
+}
+
+/** Stops of the direction a purpose rides; empty until a direction is chosen. */
+function purposeStations(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): Station[] {
+  const dir = pickerDirection(fav, purpose)
+  if (dir === null || !fav.id) return []
+  return stationLists.value[pinKey(fav.id, dir)] ?? []
+}
+
+/**
+ * Whether the purpose's direction has no stops to offer.
+ *
+ * Only true once the API has actually ANSWERED for this direction and returned
+ * nothing — a pending or failed request leaves the picker in place, because
+ * "not loaded yet" and "upstream has nothing" must stay distinguishable.
+ */
+function stationsUnavailable(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): boolean {
+  const dir = pickerDirection(fav, purpose)
+  if (dir === null || !fav.id) return false
+  return Boolean(stationLoadFailed.value[pinKey(fav.id, dir)])
+}
+
+/**
+ * Whether the purpose's board stop is missing from its chosen direction.
+ *
+ * Both directions of a bus route do not call at identical stops (913 has four
+ * stops served by one direction only — real platforms on opposite kerbs, not bad
+ * data), so switching direction can strand a previously chosen stop. Reporting
+ * the mismatch is required; silently keeping a stop that can never be boarded
+ * would show a commute that cannot happen.
+ */
+function stopMissingFromDirection(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): boolean {
+  // The picker's own direction, so the warning matches the list the user sees.
+  const dir = pickerDirection(fav, purpose)
+  if (dir === null || !fav.id) return false
+  const stops = stationLists.value[pinKey(fav.id, dir)]
+  const stop = resolveBoardStop(fav, purpose)
+  // `undefined` stops = not loaded yet; claiming a mismatch then would be a lie.
+  if (!stops || !stop) return false
+  return !stops.some(s => s.name === stop)
+}
+
+/**
+ * A neutral note when both purposes ride the SAME physical direction.
+ *
+ * Allowed, not blocked: it is impossible on a linear route (you cannot travel
+ * both ways at once) but loop lines exist and the user may have a reason, and
+ * nothing downstream assumes the two differ. Naming the direction makes the
+ * doubling obvious at a glance instead of leaving them to compare two blocks.
+ *
+ * Returns null unless there are two directions to choose between: on a
+ * single-direction route the same value is the only value, so "pick the other
+ * way" would be advice the user cannot act on.
+ */
+function sameDirectionNote(fav: UserFavoriteLine): string | null {
+  if (directionOptions(fav).length < 2) return null
+  const morning = effectiveCommuteDirection(fav, 'morning')
+  const evening = effectiveCommuteDirection(fav, 'evening')
+  if (morning === null || morning !== evening) return null
+  const label = directionLabels.value[pinKey(fav.id!, morning)]
+  return label
+    ? `上班和下班都是「${label}」，返程通常应选另一个方向`
+    : '上班和下班是同一方向，返程通常应选另一个方向'
 }
 
 async function ensureStations(fav: UserFavoriteLine, direction: 0 | 1, lineId: string): Promise<void> {
@@ -101,17 +191,29 @@ async function ensureStations(fav: UserFavoriteLine, direction: 0 | 1, lineId: s
     const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
     const json = await res.json()
     if (json.success && json.data) {
-      stationLists.value = { ...stationLists.value, [key]: (json.data as LineDetail).stops }
+      const detail = json.data as LineDetail
+      stationLists.value = { ...stationLists.value, [key]: detail.stops }
+      if (detail.directionName) {
+        directionLabels.value = { ...directionLabels.value, [key]: detail.directionName }
+      }
+      return
     }
+    // Reachable and empty: record it, so the panel can say the direction has no
+    // stops instead of showing a picker that will never fill.
+    stationLoadFailed.value = { ...stationLoadFailed.value, [key]: true }
   }
   catch {
-    // Leave unloaded: the picker shows an empty list rather than wrong stops
+    // Transient (offline, server down): leave unloaded so a later pass retries,
+    // and do NOT claim the direction is unavailable — that would be a lie.
   }
 }
 
 /**
- * Load stop lists for every followed direction of the current city, so a picker
- * never opens onto an empty list. Driven by a watcher (not a one-shot call in
+ * Load stop lists for every direction of the current city's followed lines.
+ *
+ * BOTH directions, not just the chosen one: the direction selector must show
+ * "开往 X" for an option before the user picks it, and that label comes from the
+ * direction's own detail. Driven by a watcher (not a one-shot call in
  * `onMounted`) because following a new line later in the session must load its
  * stops too — otherwise its picker stays empty until the page is reloaded.
  */
@@ -119,8 +221,8 @@ async function ensureAllStations(): Promise<void> {
   const tasks: Array<Promise<void>> = []
   for (const fav of cityFavorites.value) {
     if (!fav.id) continue
-    for (const entry of favoriteDirections(fav)) {
-      if (entry.lineId) tasks.push(ensureStations(fav, entry.direction, entry.lineId))
+    for (const opt of directionOptions(fav)) {
+      tasks.push(ensureStations(fav, opt.direction, opt.lineId))
     }
   }
   await Promise.allSettled(tasks)
@@ -137,6 +239,28 @@ async function onPinChange(
   }
   catch (err) {
     pinError.value = err instanceof Error ? err.message : '上车点保存失败'
+  }
+}
+
+/**
+ * Record the direction a purpose rides.
+ *
+ * The board stop is deliberately left untouched when it is not served by the new
+ * direction: that is a real case (stops exist in one direction only) and the
+ * user's typed choice is worth keeping visible so they can decide, rather than
+ * being deleted under them. `stopMissingFromDirection` then flags it.
+ */
+async function onDirectionChange(
+  fav: UserFavoriteLine,
+  purpose: 'morning' | 'evening',
+  direction: 0 | 1,
+): Promise<void> {
+  pinError.value = null
+  try {
+    await transitStore.updateCommuteSlot(fav.id!, purpose, { direction })
+  }
+  catch (err) {
+    pinError.value = err instanceof Error ? err.message : '方向保存失败'
   }
 }
 
@@ -261,24 +385,40 @@ watch(isSideRail, (wide) => {
 const hoursSummary = computed(() =>
   `${savedHours.value.morningStart}–${savedHours.value.morningEnd} · ${savedHours.value.eveningStart}–${savedHours.value.eveningEnd}`)
 
-/** The favourite queued for removal, pending confirmation. Null when none. */
+/** Favourite queued for removal, and the failure of the last attempt. */
 const pendingRemoval = shallowRef<UserFavoriteLine | null>(null)
 const removingFavorite = shallowRef(false)
+const removalError = shallowRef<string | null>(null)
 
 function requestRemoval(fav: UserFavoriteLine): void {
+  removalError.value = null
   pendingRemoval.value = fav
 }
 
+/**
+ * Unfollow the pending target, keeping the dialog up until the request settles.
+ *
+ * The confirm control is a plain button, NOT reka-ui's `AlertDialogAction`:
+ * that component IS a `DialogClose`, whose own click handler closes the dialog,
+ * and Vue runs the component's handler before the consumer's fallthrough one.
+ * The close cleared `pendingRemoval` first, so the handler read `null` and
+ * returned without ever sending the DELETE.
+ *
+ * Closing explicitly also keeps the button's pending state honest: it stays
+ * disabled with 「处理中…」 while the request is in flight, and a failure leaves
+ * the dialog open with the reason instead of vanishing mid-action.
+ */
 async function confirmRemoval(): Promise<void> {
   const target = pendingRemoval.value
-  if (!target) return
+  if (!target || removingFavorite.value) return
+  removalError.value = null
   removingFavorite.value = true
   try {
     await transitStore.removeFavorite(target.id || target.lineId)
     pendingRemoval.value = null
   }
   catch (err) {
-    pinError.value = err instanceof Error ? err.message : '取消关注失败'
+    removalError.value = err instanceof Error ? err.message : '取消关注失败'
   }
   finally {
     removingFavorite.value = false
@@ -375,11 +515,15 @@ function stopSummary(fav: UserFavoriteLine): string {
                   单向
                 </span>
               </div>
+              <!-- Both directions labelled by their own terminus, matching the
+                   direction selector below and the real destination board.
+                   Never 去/回 here: following a route is not a commute, so
+                   neither direction is the "return" one. -->
               <div v-if="item.up" class="mt-1 truncate text-xs text-slate-400">
-                <span class="text-emerald-500/80">去</span> {{ item.up.startStop }} ➔ {{ item.up.endStop }}
+                <span class="text-emerald-400">{{ item.up.directionName }}</span>
               </div>
               <div v-if="item.down" class="mt-0.5 truncate text-xs text-slate-400">
-                <span class="text-violet-500/80">回</span> {{ item.down.startStop }} ➔ {{ item.down.endStop }}
+                <span class="text-violet-400">{{ item.down.directionName }}</span>
               </div>
             </div>
             <button
@@ -411,8 +555,10 @@ function stopSummary(fav: UserFavoriteLine): string {
             :value="item.id || item.lineId"
           >
             <AccordionHeader as-child>
+              <!-- Vertical padding is set so the collapsed row still clears the 44px
+                   touch target now that it carries a single line of text. -->
               <AccordionTrigger
-                class="group flex w-full items-center gap-2.5 p-3 text-left transition hover:bg-slate-900/60"
+                class="group flex w-full items-center gap-2.5 px-3 py-3.5 text-left transition hover:bg-slate-900/60"
               >
                 <span
                   class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
@@ -420,12 +566,7 @@ function stopSummary(fav: UserFavoriteLine): string {
                 >
                   {{ item.lineName || '线路' }}
                 </span>
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-xs text-slate-300 lg:text-base">{{ stopSummary(item) }}</span>
-                  <span class="mt-0.5 block text-xs text-slate-400">
-                    {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
-                  </span>
-                </span>
+                <span class="min-w-0 flex-1 truncate text-xs text-slate-300 lg:text-base">{{ stopSummary(item) }}</span>
                 <!-- data-state comes from reka-ui, so the chevron needs no local
                      state binding. -->
                 <ChevronDown
@@ -434,39 +575,105 @@ function stopSummary(fav: UserFavoriteLine): string {
               </AccordionTrigger>
             </AccordionHeader>
 
-            <AccordionContent class="border-t border-slate-800/60">
-              <div class="space-y-3 px-3 pt-3 pb-3">
+            <!-- reka-ui keeps the panel mounted when closed and exposes its measured
+                 height as --reka-accordion-content-height; these utilities animate
+                 to and from that value, so the row slides instead of snapping. The
+                 border/padding live on the inner element: with border-box sizing a
+                 height:0 box still renders its own border and padding, which would
+                 leave a stray line when the row is collapsed. -->
+            <AccordionContent
+              class="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
+            >
+              <div class="border-t border-slate-800/60 space-y-4 px-3 pt-3 pb-3">
                 <div
-                  v-for="entry in favoriteDirections(item)"
-                  :key="`${item.id}_${entry.purpose}`"
-                  class="space-y-1"
+                  v-for="purpose in (['morning', 'evening'] as const)"
+                  :key="`${item.id}_${purpose}`"
+                  class="space-y-2"
                 >
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-400">
-                      {{ entry.purpose === 'morning' ? '🏠' : '🏢' }} {{ entry.label }}
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-medium text-slate-300 lg:text-sm">
+                      {{ purpose === 'morning' ? '🏠 上班' : '🏢 下班' }}
                     </span>
                     <span
-                      v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
+                      v-if="purposeStations(item, purpose).length === 0 && pickerDirection(item, purpose) !== null"
                       class="text-xs text-slate-400"
                     >
-                      展开后加载站点
+                      正在加载站点…
                     </span>
                   </div>
-                  <StationPinPicker
-                    v-if="entry.lineId"
-                    :model-value="resolveBoardStop(item, entry.purpose) ?? null"
-                    :stations="stationLists[pinKey(item.id!, entry.direction)] || []"
-                    :direction-label="entry.label"
-                    @update:model-value="(name) => onPinChange(item, entry.purpose, name)"
-                  />
-                  <p v-else class="text-xs text-slate-400 lg:text-base">
-                    该方向上游未提供，无法设置上车点
-                  </p>
+
+                  <!-- Direction first: a stop's meaning (its number, whether it is
+                       even served) depends on which way the bus travels, so picking
+                       the stop before the direction would show numbers from a route
+                       the user is not riding. -->
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs text-slate-400">方向</span>
+                    <template v-if="directionOptions(item).length > 1">
+                      <RadioGroupRoot
+                        :model-value="chosenDirection(item, purpose) ?? undefined"
+                        class="flex flex-wrap gap-2"
+                        @update:model-value="(v) => onDirectionChange(item, purpose, Number(v) as 0 | 1)"
+                      >
+                        <RadioGroupItem
+                          v-for="opt in directionOptions(item)"
+                          :key="`${purpose}_${opt.direction}`"
+                          :value="opt.direction"
+                          class="min-h-[36px] rounded-lg border px-3 text-xs transition"
+                          :class="chosenDirection(item, purpose) === opt.direction
+                            ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
+                            : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500/40'"
+                        >
+                          {{ opt.label ?? `方向 ${opt.direction}` }}
+                        </RadioGroupItem>
+                      </RadioGroupRoot>
+                    </template>
+                    <span v-else class="text-xs text-slate-400">
+                      {{ directionOptions(item)[0]?.label ?? '上游未提供方向' }}
+                    </span>
+                  </div>
+
+                  <div v-if="chosenDirection(item, purpose) === null && directionOptions(item).length > 1" class="text-xs text-slate-500">
+                    请先选择方向
+                  </div>
+                  <template v-else>
+                    <!-- The direction has no stops at all: a picker here would be
+                         permanently empty, so say why instead of showing it. -->
+                    <p
+                      v-if="stationsUnavailable(item, purpose)"
+                      class="text-xs text-slate-400 lg:text-base"
+                    >
+                      该方向上游未提供，无法设置上车点
+                    </p>
+                    <template v-else>
+                      <StationPinPicker
+                        :model-value="resolveBoardStop(item, purpose) ?? null"
+                        :stations="purposeStations(item, purpose)"
+                        :direction-label="purpose === 'morning' ? '上班' : '下班'"
+                        @update:model-value="(name) => onPinChange(item, purpose, name)"
+                      />
+                      <p
+                        v-if="stopMissingFromDirection(item, purpose)"
+                        class="flex items-center gap-1.5 text-xs text-amber-400"
+                      >
+                        <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
+                        <span>「{{ resolveBoardStop(item, purpose) }}」不在本方向停靠，请重选</span>
+                      </p>
+                    </template>
+                  </template>
                 </div>
 
-                <p class="text-xs text-slate-400">
-                  ⓘ 两个上车点设置后，上班/下班方向自动判定
+                <!-- Neutral note, not a warning: a same-way choice is allowed and
+                     the user may have meant it (loop lines, a one-station hop).
+                     Placed once per route, after both direction blocks, because
+                     it describes the PAIR rather than either purpose alone. -->
+                <p
+                  v-if="sameDirectionNote(item)"
+                  class="flex items-start gap-1.5 text-xs text-slate-400"
+                >
+                  <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{{ sameDirectionNote(item) }}</span>
                 </p>
+
                 <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
                   <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
                   <span>{{ pinError }}</span>
@@ -519,8 +726,12 @@ function stopSummary(fav: UserFavoriteLine): string {
             />
           </CollapsibleTrigger>
 
-          <CollapsibleContent class="mt-4 border-t border-slate-800/60 pt-4">
-            <CommuteHoursForm />
+          <CollapsibleContent
+            class="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
+          >
+            <div class="mt-4 border-t border-slate-800/60 pt-4">
+              <CommuteHoursForm />
+            </div>
           </CollapsibleContent>
         </CollapsibleRoot>
       </section>
@@ -547,14 +758,26 @@ function stopSummary(fav: UserFavoriteLine): string {
             >
               保留
             </AlertDialogCancel>
-            <AlertDialogAction
+            <!-- Plain button, NOT AlertDialogAction: that component is a
+                 DialogClose, so its own click handler closed the dialog and
+                 cleared the pending target before this handler could read it.
+                 See confirmRemoval. -->
+            <button
+              type="button"
               class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
               :disabled="removingFavorite"
               @click="confirmRemoval"
             >
               {{ removingFavorite ? '处理中…' : '确认取消关注' }}
-            </AlertDialogAction>
+            </button>
           </div>
+          <p
+            v-if="removalError"
+            class="mt-3 flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base"
+          >
+            <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{{ removalError }}</span>
+          </p>
         </AlertDialogContent>
       </AlertDialogPortal>
     </AlertDialogRoot>

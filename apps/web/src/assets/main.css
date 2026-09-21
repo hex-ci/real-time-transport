@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* Provides the enter/exit utilities (animate-in, fade-in-0, zoom-in-95, …) that the
+   overlays already reference, plus the accordion-down/up and collapsible-down/up
+   keyframes whose fallback chain includes `--reka-accordion-content-height` — the
+   exact variable reka-ui sets on disclosure content. Before this the referenced
+   utilities compiled to nothing, so every overlay appeared with no motion at all. */
+@import "tw-animate-css";
 
 /* Type scale, fixed in whole pixels.
    Sizes do NOT scale with viewport width. A first attempt did exactly that and

@@ -71,6 +71,9 @@ export class SubwayRouterProvider implements ITransitProvider {
         direction: 0,
         startStop: first,
         endStop: last,
+        // Same rule as the subway engine's getLineDetail: the terminal names
+        // the direction, so search and the direction selector agree.
+        directionName: `开往 ${last || '终点站'}`,
         cityCode,
       },
       {
@@ -79,6 +82,7 @@ export class SubwayRouterProvider implements ITransitProvider {
         direction: 1,
         startStop: last,
         endStop: first,
+        directionName: `开往 ${first || '终点站'}`,
         cityCode,
       },
     ]

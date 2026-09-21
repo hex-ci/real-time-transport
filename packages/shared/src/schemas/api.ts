@@ -6,6 +6,14 @@ export const LineSummarySchema = z.object({
   direction: z.number().int().min(0).max(1),
   startStop: z.string(),
   endStop: z.string(),
+  /**
+   * Destination-board label for this direction (「开往 X」).
+   *
+   * The same field `LineDetail` carries, so a search hit and the direction
+   * selector name a direction identically. Only the provider knows the terminal
+   * at search time, so it is built there rather than re-composed by callers.
+   */
+  directionName: z.string().default(''),
   cityCode: z.string().default('027'),
 })
 export type LineSummary = z.infer<typeof LineSummarySchema>
@@ -46,14 +54,27 @@ export const UserFavoriteLineSchema = z.object({
    * reverse_pinned_station_name column.
    */
   eveningStopName: z.string().optional(),
+  /**
+   * Direction the user commutes in the MORNING, as an explicit choice.
+   *
+   * `null`/absent means the user has not chosen yet — the settings UI requires a
+   * direction before offering stops, so an unset value is a real state and must
+   * not be coerced to 0. Deliberately NOT derived from the two board stops: the
+   * derivation could disagree with the direction whose stops the user was shown
+   * while picking, and it degenerates whenever a stop exists in only one
+   * direction (913 has four such stops).
+   */
+  morningDirection: z.number().int().min(0).max(1).nullable().optional(),
+  /** Direction the user commutes in the EVENING, chosen independently. */
+  eveningDirection: z.number().int().min(0).max(1).nullable().optional(),
   displayOrder: z.number().int().default(0),
 })
 export type UserFavoriteLine = z.infer<typeof UserFavoriteLineSchema>
 
 /**
- * Payload for updating a favourite's board stops.
+ * Payload for updating a favourite's board stops and their commute directions.
  *
- * `null` clears the stop (falling back to manual selection / no-target state);
+ * `null` clears the value (stop: no board stop; direction: not chosen yet);
  * `undefined` leaves it untouched. Passing explicit nulls is required because a
  * plain PATCH with optional fields cannot express "remove the stop" — see the
  * endpoint's handling.
@@ -61,6 +82,8 @@ export type UserFavoriteLine = z.infer<typeof UserFavoriteLineSchema>
 export const UpdateFavoriteSchema = z.object({
   morningStopName: z.string().nullable().optional(),
   eveningStopName: z.string().nullable().optional(),
+  morningDirection: z.number().int().min(0).max(1).nullable().optional(),
+  eveningDirection: z.number().int().min(0).max(1).nullable().optional(),
 })
 export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
 

@@ -25,14 +25,19 @@ interface CardRow {
   lineId: string
   direction: 0 | 1
   stopOrder: number | null
-  endStop: string
+  /** Destination-board label for this direction (「开往 X」). */
+  directionName: string
   arrivals: ArrivalsFeed | null
 }
 
 const props = defineProps<{
   lineName: string
-  startStop: string
-  endStop: string
+  /**
+   * Label of the direction whose terminal the card leads with. Comes from the
+   * authoritative upstream `directionName`; rows carry their own, this covers
+   * the case where no row resolved (no board stop set, or no platform here).
+   */
+  directionName: string
   /** The stop being reported on: a board stop (commute) or the located platform (nearby). */
   stopName: string | null
   /** GPS distance to that stop, metres — nearby mode only. */
@@ -172,7 +177,7 @@ const modeLabel = computed(() => (props.mode === 'morning'
         </span>
         <div class="min-w-0">
           <h3 class="line-clamp-2 text-sm font-semibold text-slate-100 transition lg:text-base" :class="accent.headingHover">
-            开往 {{ primaryRow?.endStop || endStop }}
+            {{ primaryRow?.directionName || directionName }}
           </h3>
           <p class="truncate text-xs text-slate-400">
             {{ modeLabel }}
@@ -248,13 +253,13 @@ const modeLabel = computed(() => (props.mode === 'morning'
           :class="canSwitch ? 'cursor-pointer hover:opacity-80 active:scale-[0.99]' : 'cursor-default'"
           :disabled="!canSwitch"
           :aria-label="canSwitch
-            ? `切换到开往 ${secondaryRow.endStop} 方向`
+            ? `切换到${secondaryRow.directionName}方向`
             : undefined"
           @click.stop="canSwitch && $emit('switch-direction', secondaryRow.direction)"
         >
           <span class="flex min-w-0 items-center gap-1 text-slate-400">
             <ArrowLeftRight v-if="canSwitch" class="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span class="truncate">开往 {{ secondaryRow.endStop }}</span>
+            <span class="truncate">{{ secondaryRow.directionName }}</span>
           </span>
           <span class="flex shrink-0 items-baseline gap-1.5">
             <template v-if="secondaryHasArrivals">

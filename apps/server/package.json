@@ -12,6 +12,7 @@
     "start": "node --env-file-if-exists=../../.env src/index.ts",
     "migrate:up": "tsx --env-file-if-exists=../../.env src/db/migrate.ts up",
     "migrate:down": "tsx --env-file-if-exists=../../.env src/db/migrate.ts down",
+    "backfill:commute-directions": "tsx --env-file-if-exists=../../.env src/db/backfill-commute-directions.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

@@ -8,6 +8,8 @@ export interface RouteDirectionEntry {
   lineId: string
   startStop: string
   endStop: string
+  /** Destination-board label (「开往 X」), built by the provider. */
+  directionName: string
 }
 
 /**
@@ -35,6 +37,7 @@ function toEntry(s: LineSummary): RouteDirectionEntry {
     lineId: s.lineId,
     startStop: s.startStop,
     endStop: s.endStop,
+    directionName: s.directionName,
   }
 }
 
@@ -136,6 +139,34 @@ export function favoriteIsBidirectional(fav: {
 }
 
 /**
+ * The directions a favourite actually has, each with the lineId serving it.
+ *
+ * One entry on a single-direction route, two on a two-way one. Enumerate THIS
+ * rather than `[0, 1]`: a one-way favourite has no second direction, and
+ * pairing a hardcoded pair with a `?? f.lineId` fallback invents one — the same
+ * upstream lineId then answers for both, producing two identical rows on the
+ * platform board (measured: 金融街1号专线 listed twice, same stop order, same
+ * arrivals).
+ *
+ * A subway favourite carries one lineId for both directions; that is still two
+ * real directions, so it yields two entries with the same lineId.
+ */
+export function favoriteDirections(fav: {
+  lineId: string
+  preferredDirection?: number
+  reverseLineId?: string
+}): Array<{ direction: 0 | 1, lineId: string }> {
+  const primary = (fav.preferredDirection === 1 ? 1 : 0) as 0 | 1
+  const out: Array<{ direction: 0 | 1, lineId: string }> = [
+    { direction: primary, lineId: fav.lineId },
+  ]
+  if (fav.reverseLineId) {
+    out.push({ direction: (1 - primary) as 0 | 1, lineId: fav.reverseLineId })
+  }
+  return out
+}
+
+/**
  * Read the board stop for a commute purpose.
  *
  * Board stops are keyed by PURPOSE, not direction: `morningStopName` is where
@@ -157,12 +188,19 @@ export function resolveBoardStop(
 /**
  * Derive which direction serves each commute purpose for one route.
  *
+ * NO LONGER USED AT RUNTIME. Directions are an explicit user choice stored on
+ * the favourite (`morningDirection` / `eveningDirection`) because this
+ * derivation can disagree with the direction whose stops the user was actually
+ * shown while picking, and it degenerates to null whenever a board stop exists
+ * in only one direction (913 has four such stops, 4+4 across directions).
+ * Kept as the one-shot backfill tool that migrates pre-existing board stops to
+ * explicit directions; new code must read the stored fields instead.
+ *
  * Uses BOTH directions' stop lists (same stop carries a different order per
  * direction). Direction d is the morning direction iff the morning board stop
- * precedes the evening one in d's stop order; the two directions must reach
+ * precedes the evening one in d's own stop order; the two directions must reach
  * opposite verdicts, otherwise the route's geometry defeats the ordering
- * heuristic (loop lines, S-shaped routes) and null is returned — callers fall
- * back to preferredDirection instead of guessing.
+ * heuristic (loop lines, S-shaped routes) and null is returned.
  */
 export function deriveCommuteDirections(
   fav: { morningStopName?: string, eveningStopName?: string },
@@ -193,37 +231,82 @@ export function deriveCommuteDirections(
   return dir0IsMorning ? { morning: 0, evening: 1 } : { morning: 1, evening: 0 }
 }
 
-/** Which commute purpose (if any) a concrete direction serves on this route. */
-export function purposeOfDirection(
-  derived: { morning: 0 | 1, evening: 0 | 1 } | null,
-  direction: 0 | 1,
-): 'morning' | 'evening' | null {
-  if (!derived) return null
-  return derived.morning === direction ? 'morning' : 'evening'
+/**
+ * Which direction a favourite commutes in, for one purpose.
+ *
+ * Reads the user's explicit choice only. Returns null when it was never chosen
+ * (a real state — the settings UI requires picking a direction first), and
+ * callers must show "not set" rather than defaulting to 0, which would silently
+ * present an arbitrary physical direction as the user's commute.
+ *
+ * `preferredDirection` is deliberately NOT a fallback here: it anchors which
+ * upstream lineId is direction 0, a storage concern unrelated to which way the
+ * user travels. Falling back to it is what let the old derivation disagree with
+ * the direction whose stops the picker had just shown.
+ */
+export function commuteDirectionFor(
+  fav: { morningDirection?: number | null, eveningDirection?: number | null },
+  purpose: 'morning' | 'evening',
+): 0 | 1 | null {
+  const raw = purpose === 'morning' ? fav.morningDirection : fav.eveningDirection
+  if (raw !== 0 && raw !== 1) return null
+  return raw
 }
 
 /**
- * Which commute leg ONE direction serves, judged from that direction's own stop
- * order alone: if the morning board stop comes before the evening one, travelling
- * that way takes the user to work.
+ * The direction a purpose actually rides, resolving the single-direction case.
  *
- * The home view derives both directions together so the two verdicts can
- * cross-check each other; a view that only ever holds one direction (the route
- * detail) can still label it with this. Returns null when either stop is unset,
- * they are the same stop, or a name is absent from this direction's stop list —
- * all cases where the label would be a guess.
+ * On a two-way route this is exactly `commuteDirectionFor` — the user's choice,
+ * or null until they make it. On a route with only ONE direction there is no
+ * choice to make, so requiring a stored value would leave every consumer stuck
+ * on "not set" forever: the settings panel shows a static label instead of a
+ * picker, so nothing can ever write one. Such a route resolves to its sole
+ * direction.
+ *
+ * This is display-side only. It never fabricates a stored user choice, so the
+ * DB keeps NULL until the user genuinely picks on a route where that is possible.
+ *
+ * Consumers must use THIS rather than `commuteDirectionFor` directly — the
+ * settings picker, home card, kiosk board and detail badge all render a
+ * direction, and each one needing its own single-direction special case is how
+ * they drift apart.
  */
-export function purposeFromDirection(
-  fav: { morningStopName?: string, eveningStopName?: string },
-  detail: { stops: Array<{ name: string, order: number }> } | null | undefined,
-): 'morning' | 'evening' | null {
-  const morning = fav.morningStopName
-  const evening = fav.eveningStopName
-  if (!morning || !evening || morning === evening || !detail) return null
-  const m = detail.stops.find(s => s.name === morning)?.order
-  const e = detail.stops.find(s => s.name === evening)?.order
-  if (m === undefined || e === undefined) return null
-  return m < e ? 'morning' : 'evening'
+export function effectiveCommuteDirection(
+  fav: {
+    lineId: string
+    reverseLineId?: string
+    preferredDirection?: number
+    morningDirection?: number | null
+    eveningDirection?: number | null
+  },
+  purpose: 'morning' | 'evening',
+): 0 | 1 | null {
+  const chosen = commuteDirectionFor(fav, purpose)
+  if (chosen !== null) return chosen
+  if (favoriteIsBidirectional(fav)) return null
+  // Sole direction: the one `preferredDirection` anchors.
+  return fav.preferredDirection === 1 ? 1 : 0
+}
+
+/**
+ * Whether a direction's stop list serves a given board stop.
+ *
+ * The two directions of a bus route do not call at identical stops — 913 has
+ * four stops served by only one direction each, and they are real platforms
+ * (金星桥东 / 金星桥西 are opposite kerbs of a one-way pair), not bad data. So
+ * after the user switches direction a previously chosen stop may not exist in
+ * the new one; the UI must say so rather than keep a stop that can never be
+ * boarded here.
+ *
+ * Returns null when there is nothing to judge (no stop set, or the direction's
+ * stops are not loaded) — null is "unknown", not "not served".
+ */
+export function stopServedByDirection(
+  detail: { stops: Array<{ name: string }> } | null | undefined,
+  stopName: string | null | undefined,
+): boolean | null {
+  if (!stopName || !detail) return null
+  return detail.stops.some(s => s.name === stopName)
 }
 
 /**

@@ -33,6 +33,14 @@ const router = createRouter({
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),
     },
+    {
+      // Catch-all: an unmatched path must SAY so. Rendering nothing leaves the
+      // page silently blank, which reads as a broken app rather than a bad URL
+      // (e.g. /line/ with the line id missing).
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/views/NotFoundView.vue'),
+    },
   ],
 })
 

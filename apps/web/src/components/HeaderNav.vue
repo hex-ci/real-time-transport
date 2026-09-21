@@ -43,7 +43,8 @@ function onCityChange(): void {
          Data simulation (amber) and GPS override (sky) stay visually distinct. -->
     <SimulationBanner />
     <GpsSimulationBanner />
-    <div class="flex w-full items-center justify-between px-3 py-1.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-3">
+    <!-- lg:py-2.5 offsets the taller text-base nav pills so the sticky header keeps its original height -->
+    <div class="flex w-full items-center justify-between px-3 py-1.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-3 lg:py-2.5">
       <!-- Brand -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]">
@@ -62,7 +63,7 @@ function onCityChange(): void {
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-300 transition hover:bg-slate-800 hover:text-white"
+          class="rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-300 transition hover:bg-slate-800 hover:text-white lg:px-3 lg:py-2 lg:text-base"
           active-class="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30"
         >
           {{ item.label }}

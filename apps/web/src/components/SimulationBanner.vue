@@ -19,7 +19,7 @@ const { simulationEnabled } = storeToRefs(useTransitStore())
   >
     <FlaskConical class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
     <span class="text-xs font-semibold tracking-wide">模拟数据模式</span>
-    <span class="text-[11px] text-amber-400/80">
+    <span class="text-xs text-amber-400/80">
       · 车辆为推演生成，非真实在途数据
     </span>
   </div>

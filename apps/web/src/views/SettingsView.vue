@@ -306,7 +306,7 @@ function stopSummary(fav: UserFavoriteLine): string {
       <h2 class="text-xl font-bold text-white md:text-2xl">
         设置与管理
       </h2>
-      <p class="mt-1 text-xs text-slate-400">
+      <p class="mt-1 text-xs text-slate-400 lg:text-base">
         管理日常通勤关注的公交和地铁线路
       </p>
     </div>
@@ -322,7 +322,7 @@ function stopSummary(fav: UserFavoriteLine): string {
       <!-- ============ Followed lines: search + list in one card ============ -->
       <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <h3 class="text-sm font-semibold text-slate-200">
+          <h3 class="text-sm font-semibold text-slate-200 lg:text-base">
             关注线路
             <span class="ml-1 font-normal text-slate-400">({{ cityFavorites.length }})</span>
           </h3>
@@ -342,11 +342,11 @@ function stopSummary(fav: UserFavoriteLine): string {
             type="search"
             enterkeyhint="search"
             placeholder="输入线路号，如 372、地铁10号线、亦庄线..."
-            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs"
+            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-4 lg:text-base"
           >
           <button
             type="submit"
-            class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 md:px-4 md:text-xs"
+            class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 md:px-4 md:text-xs lg:text-base"
           >
             搜索
           </button>
@@ -357,7 +357,7 @@ function stopSummary(fav: UserFavoriteLine): string {
           <div
             v-for="item in searchResults"
             :key="item.groupKey"
-            class="flex items-center justify-between gap-2 p-3 text-xs"
+            class="flex items-center justify-between gap-2 p-3 text-xs lg:gap-2.5 lg:p-3.5 lg:text-base"
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
@@ -383,7 +383,7 @@ function stopSummary(fav: UserFavoriteLine): string {
               </div>
             </div>
             <button
-              class="min-h-[44px] shrink-0 rounded-lg bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-cyan-500 hover:text-slate-950 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              class="min-h-[44px] shrink-0 rounded-lg bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-cyan-500 hover:text-slate-950 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
               :disabled="isRouteFollowed(item)"
               @click="addFavorite(item)"
             >
@@ -391,7 +391,7 @@ function stopSummary(fav: UserFavoriteLine): string {
             </button>
           </div>
         </div>
-        <p v-else-if="searched && searchResults.length === 0" class="mt-3 text-center text-xs text-slate-400">
+        <p v-else-if="searched && searchResults.length === 0" class="mt-3 text-center text-xs text-slate-400 lg:text-base">
           在 {{ cityStore.currentCityName }} 未找到匹配「{{ lastKeyword }}」的线路
         </p>
 
@@ -421,8 +421,8 @@ function stopSummary(fav: UserFavoriteLine): string {
                   {{ item.lineName || '线路' }}
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-xs text-slate-300">{{ stopSummary(item) }}</span>
-                  <span class="mt-0.5 block text-xs text-slate-500">
+                  <span class="block truncate text-xs text-slate-300 lg:text-base">{{ stopSummary(item) }}</span>
+                  <span class="mt-0.5 block text-xs text-slate-400">
                     {{ item.reverseLineId ? '上下行均已关注' : '单方向' }}
                   </span>
                 </span>
@@ -447,7 +447,7 @@ function stopSummary(fav: UserFavoriteLine): string {
                     </span>
                     <span
                       v-if="entry.lineId && !stationLists[pinKey(item.id!, entry.direction)]"
-                      class="text-xs text-slate-500"
+                      class="text-xs text-slate-400"
                     >
                       展开后加载站点
                     </span>
@@ -459,21 +459,21 @@ function stopSummary(fav: UserFavoriteLine): string {
                     :direction-label="entry.label"
                     @update:model-value="(name) => onPinChange(item, entry.purpose, name)"
                   />
-                  <p v-else class="text-xs text-slate-500">
+                  <p v-else class="text-xs text-slate-400 lg:text-base">
                     该方向上游未提供，无法设置上车点
                   </p>
                 </div>
 
-                <p class="text-xs text-slate-500">
+                <p class="text-xs text-slate-400">
                   ⓘ 两个上车点设置后，上班/下班方向自动判定
                 </p>
-                <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400">
+                <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
                   <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
                   <span>{{ pinError }}</span>
                 </p>
 
                 <button
-                  class="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95"
+                  class="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95 lg:gap-2 lg:px-3.5 lg:text-base"
                   @click="requestRemoval(item)"
                 >
                   <X class="h-3.5 w-3.5 shrink-0" />
@@ -484,7 +484,7 @@ function stopSummary(fav: UserFavoriteLine): string {
           </AccordionItem>
         </AccordionRoot>
 
-        <p v-else class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-6 text-center text-xs text-slate-400">
+        <p v-else class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-6 text-center text-xs text-slate-400 lg:p-7 lg:text-base">
           暂无关注线路，请在上方搜索框中搜索并添加线路
         </p>
       </section>
@@ -496,7 +496,7 @@ function stopSummary(fav: UserFavoriteLine): string {
              Stacked below the list (<xl): collapsible, because there the card
              does add height to the page. -->
         <div v-if="isSideRail" class="space-y-4">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-200 lg:text-base">
             <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
             <span>通勤时段</span>
           </h3>
@@ -510,7 +510,7 @@ function stopSummary(fav: UserFavoriteLine): string {
             <span class="flex min-w-0 items-center gap-2">
               <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
               <span class="min-w-0">
-                <span class="block text-sm font-semibold text-slate-200">通勤时段</span>
+                <span class="block text-sm font-semibold text-slate-200 lg:text-base">通勤时段</span>
                 <span class="mt-0.5 block truncate font-mono text-xs text-slate-400">{{ hoursSummary }}</span>
               </span>
             </span>
@@ -535,20 +535,20 @@ function stopSummary(fav: UserFavoriteLine): string {
         <AlertDialogContent
           class="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
         >
-          <AlertDialogTitle class="text-sm font-semibold text-white">
+          <AlertDialogTitle class="text-sm font-semibold text-white lg:text-base">
             取消关注 {{ pendingRemoval?.lineName || '该线路' }}？
           </AlertDialogTitle>
-          <AlertDialogDescription class="mt-2 text-xs text-slate-400">
+          <AlertDialogDescription class="mt-2 text-xs text-slate-400 lg:text-base">
             取消后首页不再显示这条线路的实时车辆与到站信息，上车点设置也会一并移除。需要重新搜索才能再次关注。
           </AlertDialogDescription>
           <div class="mt-5 flex justify-end gap-2">
             <AlertDialogCancel
-              class="min-h-[40px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95"
+              class="min-h-[40px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95 lg:px-5 lg:text-base"
             >
               保留
             </AlertDialogCancel>
             <AlertDialogAction
-              class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
               :disabled="removingFavorite"
               @click="confirmRemoval"
             >

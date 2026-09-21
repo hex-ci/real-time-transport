@@ -218,7 +218,7 @@ onMounted(() => {
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="p-10 text-center text-sm text-slate-400">
+    <div v-if="loading" class="p-10 text-center text-sm text-slate-400 lg:p-10.5 lg:text-base">
       正在加载关注线路...
     </div>
 
@@ -227,12 +227,12 @@ onMounted(() => {
       v-else-if="kioskCards.length === 0"
       class="rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-10 text-center"
     >
-      <p class="text-sm text-slate-400">
+      <p class="text-sm text-slate-400 lg:text-base">
         当前城市（{{ cityStore.currentCityName }}）暂无关注线路
       </p>
       <RouterLink
         to="/settings"
-        class="mt-3 inline-flex items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20"
+        class="mt-3 inline-flex items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 lg:px-4.5 lg:py-2.5 lg:text-base lg:gap-1.5"
       >
         <span>去关注线路</span>
         <ChevronRight class="h-3.5 w-3.5" />
@@ -250,14 +250,14 @@ onMounted(() => {
         <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
           <div class="flex items-center gap-2">
             <span
-              class="rounded-lg border px-2.5 py-1 font-mono text-sm font-bold whitespace-nowrap"
+              class="rounded-lg border px-2.5 py-1 font-mono text-sm font-bold whitespace-nowrap lg:px-3 lg:py-1.5 lg:text-base"
               :class="card.isSubway
                 ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
                 : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-400'"
             >
               {{ card.lineName }}
             </span>
-            <span class="text-sm font-semibold text-slate-200">{{ card.directionName }}</span>
+            <span class="text-sm font-semibold text-slate-200 lg:text-base">{{ card.directionName }}</span>
           </div>
           <span class="font-mono text-xs text-slate-400">
             {{ card.isSubway ? '官方排班推演' : '实时上游' }}
@@ -266,7 +266,7 @@ onMounted(() => {
 
         <div class="flex items-center justify-between gap-3 py-3.5 sm:py-4">
           <div class="min-w-0 flex-1">
-            <span class="block truncate text-xs text-slate-400">
+            <span class="block truncate text-xs text-slate-400 lg:text-base">
               {{ card.targetStationName ? `${card.targetStationName} 进站倒计时` : '目标站（未设置上车点）' }}
             </span>
             <div
@@ -275,7 +275,7 @@ onMounted(() => {
             >
               <template v-if="card.etaMinutes !== null">
                 {{ card.etaMinutes }} <span class="text-sm font-normal text-slate-400">分钟</span>
-                <span v-if="card.etaTime" class="ml-1 text-xs font-normal text-slate-500">{{ card.etaTime }}</span>
+                <span v-if="card.etaTime" class="ml-1 text-xs font-normal text-slate-400">{{ card.etaTime }}</span>
               </template>
               <template v-else-if="card.targetStationName">
                 <span class="font-sans text-base font-normal text-slate-400 sm:text-lg">暂无来车 / 待发车</span>

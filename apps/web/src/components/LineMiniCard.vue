@@ -171,7 +171,7 @@ const modeLabel = computed(() => (props.mode === 'morning'
           {{ lineName }}
         </span>
         <div class="min-w-0">
-          <h3 class="truncate text-sm font-semibold text-slate-100 transition" :class="accent.headingHover">
+          <h3 class="line-clamp-2 text-sm font-semibold text-slate-100 transition lg:text-base" :class="accent.headingHover">
             开往 {{ primaryRow?.endStop || endStop }}
           </h3>
           <p class="truncate text-xs text-slate-400">
@@ -194,29 +194,29 @@ const modeLabel = computed(() => (props.mode === 'morning'
     </div>
 
     <!-- Loading state: detail not yet resolved from the API -->
-    <div v-if="!detailLoaded" class="my-3.5 flex items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400">
+    <div v-if="!detailLoaded" class="my-3.5 flex items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
       <span class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600" :class="accent.spinner"></span>
       正在加载线路数据...
     </div>
 
     <template v-else>
       <!-- Honest empty states, one per cause -->
-      <div v-if="awaitingLocation" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center">
+      <div v-if="awaitingLocation" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
         开启定位后显示离你最近的站点车辆
       </div>
-      <div v-else-if="awaitingBoardStop" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center">
+      <div v-else-if="awaitingBoardStop" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
         未设置{{ mode === 'morning' ? '上班' : '下班' }}上车点 · 在「管理关注」中设置
       </div>
 
       <div v-else-if="stopName" class="my-3.5 space-y-2.5 rounded-xl bg-slate-950/80 p-3">
         <!-- The stop this card reports on -->
-        <div class="flex items-center justify-between text-xs">
+        <div class="flex items-center justify-between text-xs lg:text-base">
           <span class="min-w-0 truncate text-slate-300">
-            {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-500">第 {{ primaryRow.stopOrder }} 站</span>
+            {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-400">第 {{ primaryRow.stopOrder }} 站</span>
           </span>
           <!-- Nearby mode adds the GPS distance; commute mode already names the
                leg under the heading, so the right side stays empty there. -->
-          <span v-if="stopDistanceMeters !== null" class="shrink-0 font-mono text-slate-500">
+          <span v-if="stopDistanceMeters !== null" class="shrink-0 font-mono text-slate-400">
             {{ stopDistanceMeters }}m
           </span>
         </div>
@@ -234,7 +234,7 @@ const modeLabel = computed(() => (props.mode === 'morning'
             {{ nextOf(primaryArrivals)?.time }}<template v-if="nextOf(primaryArrivals)?.stopsAway !== undefined"> · 距 {{ nextOf(primaryArrivals)?.stopsAway }} 站</template><template v-if="nextOf(primaryArrivals)?.distanceMeters"> · {{ ((nextOf(primaryArrivals)!.distanceMeters!) / 1000).toFixed(1) }}km</template>
           </span>
         </div>
-        <div v-else class="text-xs text-slate-400">
+        <div v-else class="text-xs text-slate-400 lg:text-base">
           本站暂无来车
         </div>
 
@@ -244,7 +244,7 @@ const modeLabel = computed(() => (props.mode === 'morning'
         <button
           v-if="secondaryRow"
           type="button"
-          class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs transition"
+          class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs transition lg:gap-2.5 lg:pt-2.5 lg:text-base"
           :class="canSwitch ? 'cursor-pointer hover:opacity-80 active:scale-[0.99]' : 'cursor-default'"
           :disabled="!canSwitch"
           :aria-label="canSwitch
@@ -261,22 +261,22 @@ const modeLabel = computed(() => (props.mode === 'morning'
               <span class="font-mono font-bold" :class="accent.etaText">
                 {{ minutesOf(secondaryRow.arrivals) }}分
               </span>
-              <span class="font-mono text-slate-500">{{ nextOf(secondaryRow.arrivals)?.time }}</span>
+              <span class="font-mono text-slate-400">{{ nextOf(secondaryRow.arrivals)?.time }}</span>
             </template>
-            <span v-else class="text-slate-500">暂无来车</span>
+            <span v-else class="text-slate-400">暂无来车</span>
           </span>
         </button>
 
         <!-- Follow-up buses on the leading row -->
         <div v-if="primarySubsequent.length > 0" class="flex items-center gap-2 border-t border-slate-800/60 pt-2 text-xs">
-          <span class="shrink-0 text-slate-500">后续</span>
+          <span class="shrink-0 text-slate-400">后续</span>
           <span
             v-for="a in primarySubsequent"
             :key="`${a.time}_${a.etaSeconds}`"
             class="flex items-baseline gap-1"
           >
             <span class="font-mono font-bold text-slate-300">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
-            <span class="font-mono text-slate-500">{{ a.time }}</span>
+            <span class="font-mono text-slate-400">{{ a.time }}</span>
           </span>
         </div>
       </div>

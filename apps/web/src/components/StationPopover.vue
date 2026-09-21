@@ -115,10 +115,10 @@ const decisionStyle = computed(() => {
           <div class="flex items-start justify-between gap-2">
             <div class="flex min-w-0 items-center gap-2">
               <span class="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
-              <h3 class="truncate text-sm font-bold text-slate-100">
+              <h3 class="truncate text-sm font-bold text-slate-100 lg:text-base">
                 {{ station.name }}
               </h3>
-              <span class="shrink-0 rounded bg-cyan-950/80 px-1.5 py-0.5 font-mono text-[11px] text-cyan-400 border border-cyan-800/50">
+              <span class="shrink-0 rounded bg-cyan-950/80 px-1.5 py-0.5 font-mono text-xs text-cyan-400 border border-cyan-800/50 lg:px-2 lg:py-1">
                 第 {{ station.order }} 站
               </span>
             </div>
@@ -136,9 +136,9 @@ const decisionStyle = computed(() => {
           <!-- Interchanges -->
           <div
             v-if="station.interchanges && station.interchanges.length > 0"
-            class="flex flex-wrap items-center gap-1 text-[11px] text-slate-400"
+            class="flex flex-wrap items-center gap-1 text-xs text-slate-400"
           >
-            <span class="text-slate-500 text-[10px]">换乘:</span>
+            <span class="text-slate-400 text-xs">换乘:</span>
             <span
               v-for="ic in station.interchanges"
               :key="ic"
@@ -150,7 +150,7 @@ const decisionStyle = computed(() => {
 
           <!-- Freshness & ETA Status -->
           <div class="rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 space-y-1">
-            <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <div class="flex items-center gap-1.5 text-xs text-slate-400">
               <span
                 class="inline-block h-1.5 w-1.5 rounded-full"
                 :class="isRefreshing ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
@@ -158,7 +158,7 @@ const decisionStyle = computed(() => {
               {{ isRefreshing ? '正在获取最新实时数据…' : freshness }}
             </div>
 
-            <p class="font-mono text-xs font-semibold text-cyan-300">
+            <p class="font-mono text-xs font-semibold text-cyan-300 lg:text-base">
               {{ eta }}
             </p>
           </div>
@@ -166,14 +166,14 @@ const decisionStyle = computed(() => {
           <!-- Exact Timetable / Subsequent Arrivals -->
           <div v-if="arrivals && arrivals.arrivals.length > 0" class="rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 space-y-1.5">
             <div class="flex items-center justify-between">
-              <span class="text-[11px] font-semibold text-slate-400">后续进站计划</span>
+              <span class="text-xs font-semibold text-slate-400">后续进站计划</span>
               <span
                 v-if="arrivals.isExact"
-                class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/30"
+                class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30"
               >官方时刻</span>
               <span
                 v-else
-                class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 border border-slate-700/50"
+                class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400 border border-slate-700/50"
               >推演排班</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
@@ -186,8 +186,8 @@ const decisionStyle = computed(() => {
                   : 'border-slate-800 bg-slate-900 text-slate-300'"
               >
                 {{ a.time }}
-                <span v-if="!a.isAtStation" class="ml-1 text-[11px] text-slate-400">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
-                <span v-if="a.stopsAway" class="ml-1 text-[10px] text-slate-500">({{ a.stopsAway }}站)</span>
+                <span v-if="!a.isAtStation" class="ml-1 text-xs text-slate-400">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
+                <span v-if="a.stopsAway" class="ml-1 text-xs text-slate-400">({{ a.stopsAway }}站)</span>
               </span>
             </div>
           </div>
@@ -200,7 +200,7 @@ const decisionStyle = computed(() => {
             <div class="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60 lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
                 :class="stationPurpose === 'morning'
                   ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
                   : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'"
@@ -212,7 +212,7 @@ const decisionStyle = computed(() => {
               </button>
               <button
                 type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60 lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
                 :class="stationPurpose === 'evening'
                   ? 'border-violet-500/50 bg-violet-500/15 text-violet-300'
                   : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-violet-500/50 hover:text-violet-300'"
@@ -223,7 +223,7 @@ const decisionStyle = computed(() => {
                 <span>{{ stationPurpose === 'evening' ? '下班上车点 ✓' : '设为下班上车点' }}</span>
               </button>
             </div>
-            <p v-if="stopError" class="text-[11px] text-rose-400">{{ stopError }}</p>
+            <p v-if="stopError" class="text-xs text-rose-400 lg:text-base">{{ stopError }}</p>
           </div>
 
           <!-- Walk Decision -->
@@ -234,11 +234,11 @@ const decisionStyle = computed(() => {
           >
             <div class="flex items-center gap-1.5">
               <span class="text-sm">{{ decisionStyle.emoji }}</span>
-              <span class="text-xs font-semibold" :class="decisionStyle.text">
+              <span class="text-xs font-semibold lg:text-base" :class="decisionStyle.text">
                 {{ walkDecision.advice }}
               </span>
             </div>
-            <div class="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
+            <div class="flex items-center gap-3 text-xs text-slate-400 font-mono">
               <span>步行 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟 ({{ walkDecision.walkMeters }}米)</span>
               <span v-if="walkDecision.bufferSeconds !== null">
                 缓冲 {{ Math.round(walkDecision.bufferSeconds / 60) }} 分
@@ -248,7 +248,7 @@ const decisionStyle = computed(() => {
           <button
             v-else-if="hasUserCoords"
             type="button"
-            class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99]"
+            class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99] lg:gap-2 lg:px-3.5 lg:py-2.5 lg:text-base"
             :disabled="gisLoading"
             @click="emit('compute-walk')"
           >

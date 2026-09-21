@@ -61,59 +61,63 @@ async function saveSettings(): Promise<void> {
 
 <template>
   <div class="space-y-3">
-    <p class="text-xs text-slate-500">
+    <p class="text-xs text-slate-400 lg:text-base">
       用于自动切换「上班 / 下班 / 附近」视图，不参与方向判定
     </p>
     <!-- Two columns while the card spans the full width (sm–lg); one column once
          it narrows into the xl side rail. -->
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
-      <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
-        <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
+      <!-- The xl side rail is a hard 20rem, so a single line cannot hold the label
+           plus two 16px native time inputs (needs ~344px against 252px of content).
+           From xl the row wraps and the inputs take a line of their own instead of
+           spilling past the card border. -->
+      <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 xl:min-w-0 xl:flex-wrap">
+        <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300 lg:text-base">
           <span>🏠</span><span>早高峰</span>
         </span>
-        <span class="flex items-center gap-1">
+        <span class="flex items-center gap-1 xl:w-full xl:min-w-0 xl:justify-between">
           <input
             v-model="settingsDraft.morningStart"
             type="time"
-            class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+            class="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500 lg:px-2.5 lg:py-1.5 lg:text-base xl:flex-1"
           >
-          <span class="text-xs text-slate-500">—</span>
+          <span class="shrink-0 text-xs text-slate-400">—</span>
           <input
             v-model="settingsDraft.morningEnd"
             type="time"
-            class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+            class="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500 lg:px-2.5 lg:py-1.5 lg:text-base xl:flex-1"
           >
         </span>
       </label>
-      <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2">
-        <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
+      <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 xl:min-w-0 xl:flex-wrap">
+        <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300 lg:text-base">
           <span>🏢</span><span>晚高峰</span>
         </span>
-        <span class="flex items-center gap-1">
+        <span class="flex items-center gap-1 xl:w-full xl:min-w-0 xl:justify-between">
           <input
             v-model="settingsDraft.eveningStart"
             type="time"
-            class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+            class="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500 lg:px-2.5 lg:py-1.5 lg:text-base xl:flex-1"
           >
-          <span class="text-xs text-slate-500">—</span>
+          <span class="shrink-0 text-xs text-slate-400">—</span>
           <input
             v-model="settingsDraft.eveningEnd"
             type="time"
-            class="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500"
+            class="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white outline-none focus:border-cyan-500 lg:px-2.5 lg:py-1.5 lg:text-base xl:flex-1"
           >
         </span>
       </label>
     </div>
     <div class="flex flex-wrap items-center gap-3">
       <button
-        class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
         :disabled="settingsSaving"
         @click="saveSettings"
       >
         {{ settingsSaving ? '保存中…' : '保存时段' }}
       </button>
       <span v-if="settingsSaved" class="text-xs text-emerald-400">已保存</span>
-      <span v-if="settingsError" class="flex items-center gap-1.5 text-xs text-rose-400">
+      <span v-if="settingsError" class="flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
         <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
         <span>{{ settingsError }}</span>
       </span>

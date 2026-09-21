@@ -575,7 +575,7 @@ onUnmounted(() => {
 
         <!-- Direction with quick toggle -->
         <div class="flex min-w-0 items-center gap-1">
-          <span class="max-w-[110px] truncate text-xs font-bold text-white">
+          <span class="min-w-0 truncate text-xs font-bold text-white">
             {{ currentLineDetail.directionName }}
           </span>
           <button
@@ -607,7 +607,7 @@ onUnmounted(() => {
     <div class="hidden md:flex shrink-0 items-center justify-between">
       <RouterLink
         to="/"
-        class="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white"
+        class="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white lg:gap-2 lg:px-3.5 lg:py-2 lg:text-base"
       >
         <ArrowLeft class="h-3.5 w-3.5" />
         <span>返回总览</span>
@@ -631,7 +631,7 @@ onUnmounted(() => {
             :key="opt.direction"
             role="tab"
             :aria-selected="isActiveTab(opt)"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
+            class="rounded-lg px-3 py-1.5 text-xs font-medium transition lg:px-3.5 lg:py-2 lg:text-base"
             :class="isActiveTab(opt)
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
               : 'text-slate-400 border border-transparent hover:text-slate-200'"
@@ -716,11 +716,11 @@ onUnmounted(() => {
       class="shrink-0 rounded-3xl border border-slate-800 bg-slate-900/60 p-12 text-center"
     >
       <template v-if="isLoading">
-        <p class="text-sm text-slate-400">正在加载线路数据...</p>
+        <p class="text-sm text-slate-400 lg:text-base">正在加载线路数据...</p>
       </template>
       <template v-else>
-        <p class="text-sm font-semibold text-rose-400">{{ loadError || '线路不存在或数据源暂不可用' }}</p>
-        <p class="mt-1.5 text-xs text-slate-400">上游实时接口未能返回该线路数据，请稍后重试或检查线路号</p>
+        <p class="text-sm font-semibold text-rose-400 lg:text-base">{{ loadError || '线路不存在或数据源暂不可用' }}</p>
+        <p class="mt-1.5 text-xs text-slate-400 lg:mt-2 lg:text-base">上游实时接口未能返回该线路数据，请稍后重试或检查线路号</p>
       </template>
     </div>
 
@@ -844,7 +844,7 @@ onUnmounted(() => {
               @click="switchDirection(opt); showLineInfo = false"
             >
               <span class="block font-mono text-xs text-slate-400">方向 {{ opt.direction === 0 ? '去程' : '返程' }}</span>
-              <span class="block truncate font-bold text-slate-200 text-xs">{{ opt.label }}</span>
+              <span class="block truncate font-bold text-slate-200 text-xs lg:text-base">{{ opt.label }}</span>
             </button>
           </div>
         </div>
@@ -871,7 +871,7 @@ onUnmounted(() => {
         <!-- Quick Action -->
         <div class="pt-1">
           <button
-            class="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 active:scale-95"
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 active:scale-95 lg:gap-2.5 lg:py-3.5 lg:text-base"
             :disabled="isRefreshingLive"
             @click="transitStore.refreshLive()"
           >

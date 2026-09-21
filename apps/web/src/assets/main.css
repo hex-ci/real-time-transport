@@ -1,5 +1,43 @@
 @import "tailwindcss";
 
+/* Type scale, fixed in whole pixels.
+   Sizes do NOT scale with viewport width. A first attempt did exactly that and
+   broke the overview grid: at 1536px the grid goes from 3 columns to 4, so each
+   card narrows ~27% at the same moment the type jumped to its largest step, and
+   the "开往 …" heading — the only shrinkable element in the card header — started
+   clipping by 60px. Viewport-driven type and viewport-driven column counts fight
+   each other: a wider screen does not mean a wider box.
+
+   No mainstream design system scales UI type with the viewport either. apple.com
+   ships integer px (12/14/17/19/21/24/28/40/56) with no clamp() or vw, and keeps
+   body at 17px on every screen; Material 3 and USWDS likewise use fixed steps.
+   Large-screen legibility comes from layout and measure, not from inflating
+   glyphs.
+
+   So this is the stock Tailwind scale, restated explicitly for two reasons:
+   whole pixels keep glyph rasterisation on pixel boundaries (an odd size makes
+   CJK strokes straddle a pixel edge and go soft), and the unitless line-heights
+   replace Tailwind's rem pairs so leading tracks the glyph size.
+
+   Where a size is genuinely too small for its role, the fix is to move that
+   element up a step, not to inflate the whole scale. */
+@theme {
+  --text-xs: 0.75rem;      /* 12px */
+  --text-xs--line-height: 1.33;
+  --text-sm: 0.875rem;     /* 14px */
+  --text-sm--line-height: 1.43;
+  --text-base: 1rem;       /* 16px */
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;     /* 18px */
+  --text-lg--line-height: 1.56;
+  --text-xl: 1.25rem;      /* 20px */
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.5rem;      /* 24px */
+  --text-2xl--line-height: 1.33;
+  --text-3xl: 1.875rem;    /* 30px */
+  --text-3xl--line-height: 1.2;
+}
+
 /* The whole app is dark-only (see <html class="dark">), but without this the
    browser still renders NATIVE widgets — the clock icon in <input type="time">,
    scrollbars, form autofill, the caret — in their light-theme colours, which are

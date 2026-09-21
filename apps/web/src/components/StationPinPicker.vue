@@ -81,7 +81,7 @@ function clear(): void {
     >
       <ComboboxAnchor as-child>
         <ComboboxTrigger
-          class="flex min-h-[40px] w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-left text-xs transition hover:border-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex min-h-[40px] w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-left text-xs transition hover:border-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-50 lg:px-3.5 lg:gap-2.5 lg:text-base"
         >
           <span class="flex min-w-0 items-center gap-1.5">
             <MapPin class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -108,18 +108,18 @@ function clear(): void {
               v-model="query"
               :display-value="() => ''"
               placeholder="搜索站点名或站序…"
-              class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs"
+              class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
             />
           </div>
           <ComboboxViewport class="max-h-[240px] overflow-y-auto p-1">
-            <ComboboxEmpty class="px-3 py-4 text-center text-xs text-slate-400">
+            <ComboboxEmpty class="px-3 py-4 text-center text-xs text-slate-400 lg:px-3.5 lg:py-5 lg:text-base">
               未找到匹配站点
             </ComboboxEmpty>
             <ComboboxItem
               v-for="st in filtered"
               :key="`${st.order}_${st.name}`"
               :value="st.name"
-              class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200"
+              class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
               @select="choose(st.name)"
             >
               <span class="truncate">{{ st.name }}</span>

@@ -30,7 +30,7 @@ const {
         <TooltipContent
           :side="side"
           :side-offset="sideOffset"
-          class="z-[60] select-none rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-200 shadow-xl focus:outline-none data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95"
+          class="z-[60] select-none rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-200 shadow-xl focus:outline-none lg:px-3 lg:py-1.5 lg:text-base data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95"
         >
           {{ content }}
           <TooltipArrow class="fill-slate-900 stroke-slate-700 stroke-[1.5]" />

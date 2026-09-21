@@ -103,7 +103,7 @@ onMounted(() => {
         <PopoverTrigger as-child>
           <button
             type="button"
-            class="flex h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            class="flex min-h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 lg:gap-2 lg:px-3.5 lg:text-base"
             aria-label="选择城市"
           >
             <MapPin class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -120,7 +120,7 @@ onMounted(() => {
             align="end"
             :side-offset="8"
             :collision-padding="16"
-            class="z-50 w-80 overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl backdrop-blur-xl focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2"
+            class="z-50 w-80 lg:w-96 overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl backdrop-blur-xl focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2"
           >
             <!-- Search -->
             <div class="border-b border-slate-800 p-3">
@@ -132,7 +132,7 @@ onMounted(() => {
                   type="search"
                   enterkeyhint="search"
                   placeholder="搜索城市 / 拼音，如 上海、hangzhou"
-                  class="min-h-[38px] w-full rounded-xl border border-slate-700 bg-slate-950 pl-8 pr-8 text-xs text-white placeholder:text-slate-400 outline-none focus:border-cyan-500"
+                  class="min-h-[38px] w-full rounded-xl border border-slate-700 bg-slate-950 pl-8 pr-8 text-xs text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 lg:pl-9 lg:pr-9 lg:text-base"
                 >
                 <button
                   v-if="keyword"
@@ -176,7 +176,7 @@ onMounted(() => {
                 v-for="c in displayList"
                 :key="c.code"
                 type="button"
-                class="flex min-h-[36px] w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-slate-800"
+                class="flex min-h-[36px] w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-slate-800 lg:px-3 lg:py-2 lg:text-base"
                 :class="c.code === cityStore.currentCode ? 'font-medium text-cyan-300' : 'text-slate-300'"
                 @click="select(c.code)"
               >
@@ -186,7 +186,7 @@ onMounted(() => {
                 </span>
                 <Check v-if="c.code === cityStore.currentCode" class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
               </button>
-              <p v-if="displayList.length === 0" class="px-2 py-4 text-center text-xs text-slate-400">
+              <p v-if="displayList.length === 0" class="px-2 py-4 text-center text-xs text-slate-400 lg:py-5 lg:text-base">
                 未找到匹配城市
               </p>
             </div>
@@ -201,7 +201,7 @@ onMounted(() => {
         <DialogTrigger as-child>
           <button
             type="button"
-            class="flex h-10 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
+            class="flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-2.5 text-xs font-medium text-slate-200 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             aria-label="选择城市"
           >
             <MapPin class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -300,7 +300,7 @@ onMounted(() => {
                   v-for="c in displayList"
                   :key="c.code"
                   type="button"
-                  class="flex min-h-[44px] w-full items-center justify-between py-2.5 text-sm transition hover:bg-slate-800/60"
+                  class="flex min-h-[44px] w-full items-center justify-between py-2.5 text-sm transition hover:bg-slate-800/60 lg:py-3 lg:text-base"
                   :class="c.code === cityStore.currentCode ? 'font-medium text-cyan-300' : 'text-slate-200'"
                   @click="select(c.code)"
                 >

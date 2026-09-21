@@ -658,7 +658,7 @@ function boardMetrics(): BoardMetrics {
     paddingX: 40,
     paddingY: 50,
     rowHeight: 95,
-    labelFontSize: 10,
+    labelFontSize: 11,
     labelWidth: 64,
     stationRadius: 6,
     hitRadius: 18,
@@ -1585,7 +1585,7 @@ function handleResize(): void {
         <component :is="layoutMode === 'folded' ? WrapText : GitCommitHorizontal" class="h-3.5 w-3.5 text-cyan-400" />
         <span class="font-medium text-slate-200">{{ layoutMode === 'folded' ? '折返' : '直线' }}</span>
       </button>
-      <span class="text-slate-600">|</span>
+      <span class="text-slate-500">|</span>
       <span class="flex items-center gap-1 text-slate-300">
         <span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
         定位

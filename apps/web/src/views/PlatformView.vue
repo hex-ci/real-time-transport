@@ -337,7 +337,7 @@ onMounted(() => {
             虚拟候车亭 · 多线聚合起降牌
           </span>
           <h2 class="mt-0.5 flex items-center gap-2 text-lg font-bold text-white sm:mt-1 md:text-2xl">
-            当前站台：<span class="max-w-[200px] truncate text-cyan-300">{{ currentStationName || '选择中...' }}</span>
+            当前站台：<span class="max-w-[260px] truncate text-cyan-300">{{ currentStationName || '选择中...' }}</span>
           </h2>
           <p class="text-xs text-slate-400">
             {{ landmarkHint }} · 按上游实际在途车推演到达时间升序排列
@@ -346,22 +346,22 @@ onMounted(() => {
 
         <div class="flex w-full items-center gap-2 md:w-auto">
           <button
-            class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95"
+            class="min-h-[44px] shrink-0 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:px-3.5 lg:py-2.5 lg:text-base"
             :disabled="detecting"
             @click="detectNearbyPlatform"
           >
-            <span class="inline-flex items-center gap-1.5 sm:hidden">
+            <span class="inline-flex items-center gap-1.5 sm:hidden lg:gap-2">
               <LocateFixed class="h-3.5 w-3.5 shrink-0" />
               <span>{{ detecting ? '扫描中...' : '定位' }}</span>
             </span>
-            <span class="hidden items-center gap-1.5 sm:inline-flex">
+            <span class="hidden items-center gap-1.5 sm:inline-flex lg:gap-2">
               <LocateFixed class="h-3.5 w-3.5 shrink-0" />
               <span>{{ detecting ? '雷达扫描中...' : 'GPS 感知最近站台' }}</span>
             </span>
           </button>
           <select
             v-model="currentStationName"
-            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-base font-medium text-slate-200 outline-none transition focus:border-cyan-500 md:flex-none md:text-xs"
+            class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-base font-medium text-slate-200 outline-none transition focus:border-cyan-500 md:flex-none md:text-xs lg:px-3.5 lg:py-2.5 lg:text-base"
             @change="loadPlatformDepartures"
           >
             <option v-for="st in stationOptions" :key="st" :value="st">
@@ -382,11 +382,11 @@ onMounted(() => {
         <div class="col-span-2 text-right">车况 / 状态</div>
       </div>
 
-      <div v-if="loading" class="p-8 text-center text-xs text-slate-400">
+      <div v-if="loading" class="p-8 text-center text-xs text-slate-400 lg:p-8.5 lg:text-base">
         正在拉取上游实时车况数据...
       </div>
 
-      <div v-else-if="departureItems.length === 0" class="p-8 text-center text-xs text-slate-400">
+      <div v-else-if="departureItems.length === 0" class="p-8 text-center text-xs text-slate-400 lg:p-8.5 lg:text-base">
         该站台暂无已关注线路途经，请在「设置」中关注经过此站的线路
       </div>
 
@@ -397,14 +397,14 @@ onMounted(() => {
           class="px-3 py-3 transition hover:bg-slate-900/50 md:grid md:grid-cols-12 md:items-center md:px-4 md:py-3.5"
         >
           <!-- Row 1 (mobile): line badge + direction -->
-          <div class="flex items-center gap-2.5 md:col-span-3 md:col-start-1 md:row-start-1">
+          <div class="flex items-center gap-2.5 md:col-span-4 md:col-start-1 md:row-start-1">
             <span
               class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2 font-mono font-bold text-cyan-400 whitespace-nowrap"
               :class="item.lineName.length > 4 ? 'text-xs min-w-[58px]' : 'text-xs min-w-[44px]'"
             >
               {{ item.lineName }}
             </span>
-            <span class="min-w-0 truncate text-xs font-medium text-slate-200 md:col-span-4 md:col-start-4 md:truncate">{{ item.terminal }}</span>
+            <span class="min-w-0 truncate text-xs font-medium text-slate-200 lg:text-base">{{ item.terminal }}</span>
           </div>
 
           <!-- Row 2 (mobile): ETA + status, right-aligned against row 1's badge column -->

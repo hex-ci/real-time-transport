@@ -67,14 +67,17 @@ const pageRef = useTemplateRef('pageEl')
 
 /**
  * Exact height for the fixed flex column so the page never scrolls: the room
- * between this view's top edge and the bottom of the viewport, minus the shell's
- * own bottom padding (App.vue gives <main> py-5 = 20px). Measured live because
- * the header height and padding are not constants we should hardcode.
+ * between this view's top edge and the bottom of the viewport, minus whatever
+ * bottom padding the shell's <main> currently applies. Read from the DOM rather
+ * than mirrored as constants: the padding changes per breakpoint and grows by
+ * the iOS home-indicator inset, and a stale copy makes this page overflow.
  */
 const pageHeight = shallowRef(600)
 
 function getMainBottomPadding(): number {
-  return typeof window !== 'undefined' && window.innerWidth < 768 ? 10 : 20
+  const main = pageRef.value?.closest('main')
+  if (!main) return 0
+  return Number.parseFloat(getComputedStyle(main).paddingBottom) || 0
 }
 
 function updatePageHeight(): void {
@@ -649,7 +652,7 @@ onUnmounted(() => {
       <DialogOverlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 md:hidden" />
       <DialogContent
         v-if="currentLineDetail"
-        class="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col space-y-4 overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 p-5 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full md:hidden"
+        class="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col space-y-4 overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 px-5 pt-5 pb-safe-offset-5 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full md:hidden"
       >
         <!-- Header -->
         <div class="flex items-center justify-between border-b border-slate-800 pb-3">

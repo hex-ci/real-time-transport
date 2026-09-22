@@ -37,14 +37,14 @@ function onCityChange(): void {
 </script>
 
 <template>
-  <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+  <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 pt-safe backdrop-blur-xl">
     <!-- Simulation strips inside the sticky header: always on screen on every
          page, and they keep the header's positioning context for the mobile menu.
          Data simulation (amber) and GPS override (sky) stay visually distinct. -->
     <SimulationBanner />
     <GpsSimulationBanner />
     <!-- lg:py-2.5 offsets the taller text-base nav pills so the sticky header keeps its original height -->
-    <div class="flex w-full items-center justify-between px-3 py-1.5 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 sm:py-3 lg:py-2.5">
+    <div class="flex w-full items-center justify-between px-safe-offset-3 py-1.5 sm:px-safe-offset-6 lg:px-safe-offset-8 xl:px-safe-offset-10 2xl:px-safe-offset-12 sm:py-3 lg:py-2.5">
       <!-- Brand -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]">
@@ -108,7 +108,7 @@ function onCityChange(): void {
     >
       <div
         v-if="mobileMenuOpen"
-        class="absolute inset-x-0 top-full z-50 border-b border-slate-800 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur-xl md:hidden"
+        class="absolute inset-x-0 top-full z-50 border-b border-slate-800 bg-slate-950/95 px-safe-offset-4 py-3 shadow-2xl backdrop-blur-xl md:hidden"
       >
         <nav class="flex flex-col gap-1.5">
           <RouterLink

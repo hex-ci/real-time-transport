@@ -5,6 +5,10 @@
    exact variable reka-ui sets on disclosure content. Before this the referenced
    utilities compiled to nothing, so every overlay appeared with no motion at all. */
 @import "tw-animate-css";
+/* iOS safe-area insets (env(safe-area-inset-*)) as Tailwind utilities for the
+   notch and home indicator. index.html already carries viewport-fit=cover,
+   without which every env() value resolves to 0. */
+@import "tailwindcss-safe-area";
 
 /* Type scale, fixed in whole pixels.
    Sizes do NOT scale with viewport width. A first attempt did exactly that and

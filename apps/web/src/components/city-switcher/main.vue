@@ -291,7 +291,7 @@ onMounted(() => {
             </div>
 
             <!-- Scrollable List -->
-            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2 pb-6">
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2 pb-safe-offset-6">
               <p class="py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 {{ keyword.trim() ? `匹配结果 (${matched.length})` : '全部城市' }}
               </p>

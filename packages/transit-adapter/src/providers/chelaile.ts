@@ -452,7 +452,7 @@ export class ChelaileProvider implements ITransitProvider {
   }
 
   /**
-   * Full realtime city dictionary (497 cities as of 2026).
+   * Full realtime city dictionary.
    * Response envelope: { data: { allRealtimeCity: [{ cityName, cityId, pinyin, supportSubway }] } }
    */
   async getCityList(): Promise<Array<{ code: string, name: string, pinyin: string, hasMetro: boolean }>> {

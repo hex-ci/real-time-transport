@@ -9,7 +9,7 @@ export const STATION_TIMETABLES: StationTimetable[] = [
     "lineName": "地铁7号线",
     "cityCode": "027",
     "stationName": "群芳",
-    "sourceNote": "北京地铁官网时刻表 2026-08 抓取（运营调整以现场为准）",
+    "sourceNote": "北京地铁官网时刻表",
     "directions": {
       "0": {
         "name": "开往北京西站",

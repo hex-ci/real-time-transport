@@ -3,9 +3,10 @@
  *
  * The UniversalSubwayEngine simulates whole-line train positions from origin
  * departures + headway rules. For a handful of high-frequency commuter stations
- * we also hold the OFFICIAL minute-level timetable (e.g. Beijing Line 7 群芳站,
- * scraped from bjsubway.com). When a query targets such a station, we return the
- * exact departure minutes instead of the simulated estimate.
+ * we also hold the OFFICIAL minute-level timetable (e.g. the station this repo
+ * ships a published table for, scraped from bjsubway.com). When a query targets
+ * such a station, we return the exact departure minutes instead of the simulated
+ * estimate.
  *
  * Beijing Subway timetable selection rule (official practice):
  *   Mon-Fri -> workday table; Sat/Sun -> weekend table.
@@ -19,7 +20,7 @@ export interface DayTimetable {
   first: string
   /** last departure of the day */
   last: string
-  /** free-text caveat, e.g. "晚间两班半程至双合" */
+  /** free-text caveat, e.g. "晚间两班半程" */
   note: string
   /** { hour (0-23, string key): [minute, ...] } departure minutes at this station */
   departures: Record<string, number[]>
@@ -111,6 +112,47 @@ function serviceStartSeconds(day: DayTimetable): number {
 }
 
 /**
+ * The service window a table's OWN departures imply, in the table's own
+ * 「H:MM」 style.
+ *
+ * A table declares a `first` / `last` beside its departure minutes, and the two
+ * are transcribed from the same page — but they can disagree, and the shipped
+ * 群芳 direction-1 table does: it declares `5:49 / 0:01` while its own departures
+ * include `05:48` and `00:08 / 00:16`. When they disagree, the DEPARTURES are the
+ * fact everything downstream is built from: the arrival rows are the departure
+ * minutes, and the operating state is a statement about those same rows. Judging
+ * the state by the declared summary instead made the board contradict itself —
+ * `after_last` printed above a list of departures, `before_first` beside a
+ * departure that had already gone.
+ *
+ * So the window is derived here, and the declared values are only the fallback
+ * for a table whose departures cannot answer (no listed departure at all, or none
+ * this app can place in a morning-to-tail day). Nothing is invented: a table with
+ * consistent values returns exactly the hours it declares, and the transcribed
+ * data is never rewritten.
+ */
+export function serviceWindowOf(day: DayTimetable): { first: string, last: string } {
+  const times = operatingDaySeconds(day)
+  const firstSec = serviceStartSeconds(day)
+  const lastSec = times.length > 0 ? times[times.length - 1]! : Number.NaN
+
+  if (!Number.isFinite(firstSec) || !Number.isFinite(lastSec)) {
+    return { first: day.first, last: day.last }
+  }
+
+  return { first: clockOf(firstSec), last: clockOf(lastSec) }
+}
+
+/** Seconds in a calendar day: the modulo `clockOf` reduces an operating-day second by. */
+const DAY_SECONDS = 24 * 3600
+
+/** Seconds of the operating day as the table's own 「H:MM」 (unpadded hour, as transcribed). */
+function clockOf(sec: number): string {
+  const daySec = ((sec % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS
+  return `${Math.floor(daySec / 3600)}:${String(Math.floor((daySec % 3600) / 60)).padStart(2, '0')}`
+}
+
+/**
  * Query the next `count` exact departures at a station at/after `nowSecOfDay`.
  *
  * Only the current operating day is considered, and only while it is actually
@@ -135,6 +177,7 @@ export function queryStationArrivals(
   const day = dir[dayType]
 
   const arrivals: StationArrival[] = []
+  const window = serviceWindowOf(day)
   if (nowSecOfDay >= serviceStartSeconds(day)) {
     for (const sec of operatingDaySeconds(day)) {
       // 30s grace keeps a departure that has just left the platform in the list.
@@ -150,8 +193,12 @@ export function queryStationArrivals(
     direction,
     dayType,
     isExact: true,
-    first: day.first,
-    last: day.last,
+    // The window the DEPARTURES above imply, not the table's declared summary:
+    // the caller derives the operating state from these two fields, and a state
+    // read from a declaration that disagrees with the list states something the
+    // list beside it contradicts. See `serviceWindowOf`.
+    first: window.first,
+    last: window.last,
     note: day.note,
     arrivals,
   }

@@ -30,7 +30,7 @@ function normalizeLineNo(raw: string): string {
  * - subway lineIds -> UniversalSubwayEngine (Amap static station sequence + headway sim)
  * - bus lineIds    -> ChelaileProvider (497-city realtime bus)
  *
- * Supports numbered lines (10号线 / 十号线 / 地铁10号线) and named lines
+ * Supports numbered lines (99号线 / 地铁99号线) and named lines
  * (亦庄线 / 机场线 / S1线 ...) in any city.
  */
 export class SubwayRouterProvider implements ITransitProvider {

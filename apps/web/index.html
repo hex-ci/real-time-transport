@@ -8,6 +8,28 @@
     <meta name="format-detection" content="telephone=no,email=no">
     <title>实时交通</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Home-screen install (F7). Launching from a home-screen icon is this app's
+         primary delivery form, so the head carries the whole install contract:
+         - `manifest.webmanifest` declares `display: standalone`, without which an
+           installed launch keeps the browser's URL bar and its bottom button bar,
+           and the safe-area insets stay 0 (nothing to inset into).
+         - `black-translucent` is the only status bar style that lets the page paint
+           under the status bar, and it is what makes `safe-area-inset-top` non-zero
+           for the header's `pt-safe` clearance.
+         - `apple-touch-icon.png` is an OPAQUE PNG: iOS composites an icon's alpha
+           onto black before masking it, so an SVG or a transparent PNG turns into a
+           black blob on the home screen, and iOS also probes that exact root name on
+           its own when no link is present.
+         - No service worker. Installability does not require one, offline caching is
+           out of scope by decision, and a worker would add a second cache to
+           invalidate on every deploy.
+         `viewport-fit=cover` above is the other half of the pair the insets need. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="实时交通">
+    <meta name="theme-color" content="#020617">
     <!-- Lock WeChat browser font scaling: prevents WeChat from injecting custom font sizes
          and breaking precision data dashboard layouts. -->
     <script>

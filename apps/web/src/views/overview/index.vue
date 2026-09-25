@@ -2,14 +2,22 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { House, LocateFixed, Building2, Wand2 } from '@lucide/vue'
+import { House, LocateFixed, Building2, Wand2, TriangleAlert, RefreshCw } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
-import { useTransitStore } from '@/stores/transit.store'
+import {
+  refreshFreshnessOf,
+  refreshStatusTextOf,
+  useTransitStore,
+} from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { CardGrid, EmptyState } from './components'
-import type { CardRow, MiniCardConfig, OverviewMode } from './types'
-import type { LineDetail, UserFavoriteLine } from '@real-time-transport/shared'
+import { commuteLegStateOf } from './commute-leg'
+import { nearbyLocationStateOf } from './nearby-notice'
+import type { NearbyLocationState } from './nearby-notice'
+import type { ArrivalsFeed, CardRow, MiniCardConfig, OverviewMode } from './types'
+import type { LineDetail, RefreshLiveTarget, UserFavoriteLine } from '@real-time-transport/shared'
+import { REFRESH_MAX_LINES } from '@real-time-transport/shared'
 import {
   effectiveCommuteDirection,
   favoriteDirections,
@@ -18,6 +26,7 @@ import {
   resolveFavoriteLineId,
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
+import type { ReadState } from '@/read-state'
 
 const router = useRouter()
 const transitStore = useTransitStore()
@@ -25,6 +34,12 @@ const locationStore = useLocationStore()
 const cityStore = useCityStore()
 
 const { commuteProfile, favorites } = storeToRefs(transitStore)
+const {
+  refreshInFlight,
+  refreshOutcome,
+  refreshWaitSecondsLeft,
+  refreshReading,
+} = storeToRefs(transitStore)
 
 const currentTimeStr = shallowRef('')
 
@@ -72,7 +87,13 @@ function readOverride(): { mode: OverviewMode, slot: string } | null {
 
 const modeOverride = shallowRef(readOverride())
 
-/** The commute slot the profile currently reports; a manual pick is scoped to it. */
+/**
+ * The commute slot the profile currently reports; a manual pick is scoped to it.
+ *
+ * `auto` is the honest slot for BOTH cases the profile can be in when it is not inside a
+ * stored window: outside one, and with no window stored at all. `windowState` is what tells
+ * the two apart for the LABELS below — the slot itself must not lie about it.
+ */
 const currentSlot = computed(() => commuteProfile.value?.mode ?? 'auto')
 
 /** Automatic choice: the configured commute hours decide, otherwise the nearby view. */
@@ -83,6 +104,22 @@ const autoMode = computed<OverviewMode>(() => {
   return 'nearby'
 })
 
+/**
+ * Whether the profile read a window the user actually stored.
+ *
+ * A user who never saved commute hours is 「未设置」, not 「非通勤」: 非通勤 says the clock is
+ * outside two configured windows, and there are none to be outside of. That is TWO facts
+ * about the store — `unset` (no row) and `unchosen` (a row exists and its four times were
+ * never chosen, since 009 nulls) — and both mean there is no window to be inside. The
+ * distinction travels on the payload (`windowState`) because the facts are otherwise
+ * byte-identical here — this screen used to print 非通勤 for a window nobody had
+ * configured, and it would do so again for a row nobody had chosen hours on.
+ */
+const commuteWindowUnset = computed(() => {
+  const state = commuteProfile.value?.windowState
+  return state === 'unset' || state === 'unchosen'
+})
+
 const isManual = computed(() => modeOverride.value?.slot === currentSlot.value)
 
 const currentMode = computed<OverviewMode>(() =>
@@ -90,7 +127,9 @@ const currentMode = computed<OverviewMode>(() =>
 
 /** Human label for what the automatic rule resolved to, shown on the auto button. */
 const autoModeLabel = computed(() => (
-  autoMode.value === 'morning' ? '上班' : autoMode.value === 'evening' ? '下班' : '当前非通勤时段'
+  commuteWindowUnset.value
+    ? '未设置通勤时段'
+    : autoMode.value === 'morning' ? '上班' : autoMode.value === 'evening' ? '下班' : '当前非通勤时段'
 ))
 
 function setMode(mode: OverviewMode): void {
@@ -150,8 +189,53 @@ function onSwitchDirection(card: MiniCardConfig, direction: 0 | 1): void {
   setPrimaryDirection(card.favoriteId, direction)
 }
 
+/** Reason the last pin write failed, shown above the grid. */
+const pinError = shallowRef<string | null>(null)
+
+/**
+ * Favourite whose pin write is still in flight.
+ *
+ * The card moves on the tap (the store writes optimistically), so without this
+ * a second tap reads the already-flipped state and sends the reverse request.
+ */
+const pinningFavoriteId = shallowRef<string | null>(null)
+
+/**
+ * Pin or un-pin one followed line — the overview's own action, the only place
+ * this state exists: the entry point, the marker and the cancel all live on the
+ * home cards.
+ *
+ * A failed write has already been rolled back by the store, so the reason is
+ * surfaced here rather than leaving the card silently where it was.
+ */
+async function onTogglePin(card: MiniCardConfig): Promise<void> {
+  const favoriteId = card.favoriteId
+  if (!favoriteId || pinningFavoriteId.value === favoriteId) return
+  pinError.value = null
+  pinningFavoriteId.value = favoriteId
+  try {
+    await transitStore.togglePin(favoriteId)
+  }
+  catch (err) {
+    pinError.value = err instanceof Error ? err.message : '置顶设置失败'
+  }
+  finally {
+    pinningFavoriteId.value = null
+  }
+}
+
 /** Cached line details keyed by lineId_direction (for stop counts + target order). */
 const detailCache = shallowRef<Record<string, LineDetail>>({})
+
+/**
+ * Which of the three states the followed-lines read is in.
+ *
+ * The cards below are built from `favorites`, and a read that FAILED leaves that array
+ * empty — so the length alone cannot tell the empty state's cause from a list nobody read.
+ * The store reports the answer (`fetchFavorites()`), and this page states it: 「还没有关注
+ * 线路」 is only true once the read actually answered.
+ */
+const favouritesRead = shallowRef<ReadState>('reading')
 
 const cityFavorites = computed(() =>
   favorites.value.filter(f => f.cityCode === cityStore.currentCode),
@@ -182,14 +266,6 @@ function detailsOf(f: UserFavoriteLine): { 0: LineDetail | undefined, 1: LineDet
   } as { 0: LineDetail | undefined, 1: LineDetail | undefined }
 }
 
-/** The upstream lineId a direction resolves to, or null when unavailable. */
-function lineIdFor(f: UserFavoriteLine, direction: 0 | 1): string | null {
-  if (!favoriteIsBidirectional(f)) {
-    return direction === (f.preferredDirection === 1 ? 1 : 0) ? f.lineId : null
-  }
-  return resolveFavoriteLineId(f, direction)
-}
-
 /**
  * The platform the user is standing at, resolved per direction.
  *
@@ -207,6 +283,21 @@ const nearbyByFavorite = computed<Record<string, ReturnType<typeof resolveNearby
   }
   return map
 })
+
+/**
+ * Whether the app has a position, in the state the location store reports.
+ *
+ * Derived from the store's OWN reads — the fix, the request in flight, and the
+ * request that failed — rather than from a second guess in the template. A nearby
+ * card's empty state has two causes (no fix at all, or a fix nothing resolves
+ * from) and the cards receive this so they can word each as what it is.
+ */
+const nearbyLocation = computed<NearbyLocationState>(() => nearbyLocationStateOf({
+  hasFix: locationStore.userCoords !== null,
+  requesting: locationStore.isLocating,
+  failed: locationStore.locationError !== null,
+  supported: locationStore.isSupported,
+}))
 
 /**
  * Which direction leads on a nearby card.
@@ -273,7 +364,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         const order = located.perDirection[direction]?.order ?? null
         if (order === null) continue // this direction has no platform here
         rows.push({
-          lineId: lineIdFor(f, direction) ?? detail.lineId,
+          lineId: resolveFavoriteLineId(f, direction) ?? detail.lineId,
           direction,
           stopOrder: order,
           directionName: detail.directionName,
@@ -286,7 +377,9 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         stopDistanceMeters: located?.distanceMeters ?? null,
         detailLoaded: Boolean(anyDetail),
         isSubway,
+        isPinned: f.isPinned,
         rows,
+        legState: null,
         primaryDirection: nearbyPrimaryDirection(f, both, rows),
         detailLineId: rows[0]?.lineId ?? f.lineId,
         detailDirection: rows[0]?.direction ?? 0,
@@ -297,6 +390,9 @@ const cardsData = computed<MiniCardConfig[]>(() => {
 
     const purpose = mode
     const direction = directionFor(f, purpose)
+    // The stop the user stored for this leg, whether or not the chosen direction
+    // calls there — the card's `stopName` is only the one it can report on.
+    const boardStop = resolveBoardStop(f, purpose) ?? null
     // No direction chosen yet: render the card with its honest empty state
     // rather than defaulting to direction 0, which would show a route the user
     // never said they ride.
@@ -311,7 +407,9 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         stopDistanceMeters: null,
         detailLoaded: Boolean(anyDetail),
         isSubway,
+        isPinned: f.isPinned,
         rows: [],
+        legState: commuteLegStateOf({ direction: null, stopName: boardStop, stops: undefined }),
         primaryDirection: null,
         detailLineId: f.lineId,
         detailDirection: (f.preferredDirection === 1 ? 1 : 0) as 0 | 1,
@@ -321,8 +419,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
     }
 
     const detail = both[direction]
-    const stopName = resolveBoardStop(f, purpose)
-    const stop = stopName ? detail?.stops.find(s => s.name === stopName) : undefined
+    const stop = boardStop ? detail?.stops.find(s => s.name === boardStop) : undefined
     cards.push({
       lineName: f.lineName,
       directionName: detail?.directionName ?? '',
@@ -330,19 +427,21 @@ const cardsData = computed<MiniCardConfig[]>(() => {
       stopDistanceMeters: null,
       detailLoaded: Boolean(detail),
       isSubway,
+      isPinned: f.isPinned,
       rows: stop && detail
         ? [{
-            lineId: lineIdFor(f, direction) ?? detail.lineId,
+            lineId: resolveFavoriteLineId(f, direction) ?? detail.lineId,
             direction,
             stopOrder: stop.order,
             directionName: detail.directionName,
           }]
         : [],
+      legState: commuteLegStateOf({ direction, stopName: boardStop, stops: detail?.stops }),
       // A commute card carries one row, so the lead is that row regardless.
       primaryDirection: null,
       // Direction is chosen here, but the stop may be unset: fall back to the
       // direction's own lineId so the card stays tappable either way.
-      detailLineId: lineIdFor(f, direction) ?? detail?.lineId ?? f.lineId,
+      detailLineId: resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId,
       detailDirection: direction,
       favoriteId: f.id ?? null,
     })
@@ -396,16 +495,7 @@ async function ensureDetails(): Promise<void> {
 }
 
 /** Arrival feed per card key: lineId_direction -> station arrivals response. */
-interface StationArrivalsFeed {
-  isExact: boolean
-  arrivals: Array<{
-    time: string
-    etaSeconds: number
-    stopsAway?: number
-    distanceMeters?: number
-    isAtStation?: boolean
-  }>
-}
+type StationArrivalsFeed = ArrivalsFeed
 const arrivalsMap = shallowRef<Record<string, StationArrivalsFeed | null>>({})
 
 function arrivalsKey(lineId: string, direction: number): string {
@@ -463,9 +553,120 @@ function goToDetail(lineId: string, direction: number): void {
   })
 }
 
-/** Reload everything for the active city: favourites, then static detail, then arrivals. */
+/**
+ * F11's entry on this screen: every line the cards are reading, in the order the
+ * cards are shown, with the repeated one dropped — a line read twice is one
+ * reading, and asking for it twice would spend two upstream reads in one press.
+ *
+ * The endpoint reads what it is asked for and nothing else, so the screen that
+ * shows the cards is the one that names them; a line with no row on screen (no
+ * board stop, no platform here) is not named, because nothing is reading it.
+ */
+const refreshTargets = computed<RefreshLiveTarget[]>(() => {
+  const seen = new Set<string>()
+  const targets: RefreshLiveTarget[] = []
+  for (const card of cardsData.value) {
+    for (const row of card.rows) {
+      const key = arrivalsKey(row.lineId, row.direction)
+      if (seen.has(key)) continue
+      seen.add(key)
+      targets.push({
+        lineId: row.lineId,
+        direction: row.direction,
+        cityCode: cityStore.currentCode,
+      })
+    }
+  }
+  return targets
+})
+
+/**
+ * The lines one press may actually name. The endpoint bounds the count, so the
+ * screen's leading rows go and the rest wait for the next press — `covered`
+ * against `wanted` is reported on the control, because a refresh of part of the
+ * screen must not read as a refresh of all of it.
+ */
+const refreshNamed = computed(() => refreshTargets.value.slice(0, REFRESH_MAX_LINES))
+
+/**
+ * The state line under the button — its coarse state, which is what a live region
+ * announces, and the seconds beside it, which are not announced at all. Null when
+ * there is nothing to report.
+ */
+const refreshStatus = computed(() => refreshStatusTextOf({
+  inFlight: refreshInFlight.value,
+  outcome: refreshOutcome.value,
+  waitSeconds: refreshWaitSecondsLeft.value,
+  wanted: refreshTargets.value.length,
+  covered: refreshNamed.value.length,
+  // The targets are the arrival rows of the followed lines, so the list's own
+  // tri-state is this screen's to state: an unreadable list leaves the same empty
+  // array behind as an answered empty one, and the control must not claim a list
+  // nobody read holds no line to re-read. While the read is still open the same
+  // applies — this screen has not yet learned what it is showing.
+  targetsRead: favouritesRead.value === 'read',
+}))
+
+/** The reading the last refresh obtained, as the freshness line reports it. */
+const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
+
+/**
+ * Tone of the state line. The words carry the state; the tone only backs them up,
+ * so nothing here is the only signal of anything.
+ */
+const refreshStatusClass = computed(() => {
+  if (refreshOutcome.value === 'throttled') return 'text-amber-400'
+  if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
+    return 'text-rose-400'
+  }
+  if (refreshOutcome.value === 'ok') return 'text-emerald-400'
+  return 'text-slate-400'
+})
+
+/**
+ * Ids the button points at, so the state is read out together with the control
+ * instead of being a separate thing to find.
+ */
+const refreshDescribedBy = computed(() => refreshStatus.value
+  ? 'refresh-freshness refresh-status'
+  : 'refresh-freshness')
+
+/**
+ * True for the whole of a press: the request that spends the window, and the card
+ * re-read that shows what it obtained. A press landing between the two would ask
+ * the server a second time inside the window the first one just spent, and be
+ * refused for it.
+ */
+const refreshing = shallowRef(false)
+
+/**
+ * Pressed: ask for a re-read through the shared request, then re-read the cards so
+ * they show what that request obtained.
+ *
+ * Only a refresh that obtained a reading re-reads them: a refusal or a failure
+ * carried nothing, and re-reading then would only re-ask for the values already
+ * on screen.
+ */
+async function onRefresh(): Promise<void> {
+  refreshing.value = true
+  try {
+    const outcome = await transitStore.refreshLive(refreshNamed.value)
+    if (outcome === 'ok') await refreshAllArrivals()
+  }
+  finally {
+    refreshing.value = false
+  }
+}
+
+/**
+ * Reload everything for the active city: favourites, then static detail, then arrivals.
+ *
+ * The first read's ANSWER is recorded as well as its result: everything below is derived
+ * from the list it returns, so a failed read has to be stated rather than left to look like
+ * a city with nothing followed.
+ */
 async function reloadForCurrentCity(): Promise<void> {
-  await transitStore.fetchFavorites()
+  favouritesRead.value = (await transitStore.fetchFavorites()) ? 'read' : 'unreadable'
   await ensureDetails()
   await refreshAllArrivals()
 }
@@ -524,7 +725,7 @@ onMounted(() => {
           <div class="flex flex-wrap items-center gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
               <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-              {{ commuteProfile?.mode === 'work' ? '早高峰模式' : commuteProfile?.mode === 'home' ? '晚高峰模式' : '智能情境' }}
+              {{ commuteWindowUnset ? '未设置通勤时段' : commuteProfile?.mode === 'work' ? '早通勤' : commuteProfile?.mode === 'home' ? '晚通勤' : '非通勤' }}
             </span>
             <span class="font-mono text-xs text-slate-400">{{ currentTimeStr }}</span>
             <span class="text-xs text-slate-400">· {{ cityStore.currentCityName }}</span>
@@ -532,8 +733,13 @@ onMounted(() => {
           <h2 class="mt-1.5 text-xl font-bold tracking-tight text-white sm:mt-2 md:text-2xl">
             {{ commuteProfile?.description || `${cityStore.currentCityName}通勤实时态势监控` }}
           </h2>
+          <!-- States what the card does and stops. The line this replaced named a
+               data source, described how the number is computed, and borrowed a
+               display-wall register the product does not have — while claiming a
+               kind of data F4 forbids claiming for a subway line, whose trains are
+               generated from the timetable. -->
           <p class="mt-1 hidden text-xs text-slate-400 md:block lg:text-base">
-            真实上游秒级推演，点击卡片进入拓扑长轴报站大屏
+            点击卡片查看该线路的在途车辆与到站时刻
           </p>
         </div>
 
@@ -591,6 +797,62 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- F11: the home screen's one refresh entry. Both screens ask through the
+         same request, so the window a press spends is shared rather than one per
+         screen. The state line is this control's other job: a refusal with the
+         wait left on the window, a failure, or the connection being gone is
+         reported here, where the user is looking. -->
+    <section
+      aria-label="数据刷新"
+      class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:rounded-3xl sm:p-4"
+    >
+      <div class="min-w-0">
+        <!-- The reading's own instant, and the kind of value it is. A reading
+             that was never obtained reports no time at all. -->
+        <p id="refresh-freshness" class="text-xs text-slate-400 lg:text-base">
+          {{ refreshFreshness.text }}
+        </p>
+        <!-- The state line. Only the coarse state sits inside the live region: the
+             seconds are rendered beside it, because a countdown in a live region
+             queues one announcement per second of the wait. The region is rendered
+             before it has anything to say — one created together with its first
+             word is not announced at all by some screen readers. The two spans sit
+             against each other, so the line reads as it did from one element. -->
+        <p
+          id="refresh-status"
+          class="text-xs lg:text-base"
+          :class="[refreshStatusClass, refreshStatus ? 'mt-0.5' : '']"
+        >
+          <span role="status" aria-live="polite">{{ refreshStatus?.announcement }}</span><span>{{ refreshStatus?.detail }}</span>
+        </p>
+      </div>
+      <button
+        class="flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-xs font-semibold text-cyan-400 transition active:scale-95 disabled:opacity-60 sm:w-auto sm:px-4 lg:min-h-11 lg:text-base"
+        :disabled="refreshing || refreshNamed.length === 0"
+        :aria-describedby="refreshDescribedBy"
+        @click="onRefresh"
+      >
+        <RefreshCw
+          class="h-3.5 w-3.5 shrink-0"
+          :class="refreshing ? 'animate-spin' : ''"
+          aria-hidden="true"
+        />
+        <span>刷新最新车况</span>
+      </button>
+    </section>
+
+    <!-- A pin write that failed: the store already rolled the card back, so the
+         reason is the only thing left to say. role="alert" announces it as a
+         status message (SC 4.1.3) instead of leaving it to be noticed. -->
+    <p
+      v-if="pinError"
+      role="alert"
+      class="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400 lg:gap-2 lg:text-base"
+    >
+      <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>{{ pinError }}</span>
+    </p>
+
     <!-- Cards Grid: fluid responsive grid from 1 col on mobile to 4 cols on ultrawide.
          Gap follows the page rhythm (space-y) so card-to-card matches nav-to-hero. -->
     <CardGrid
@@ -598,11 +860,20 @@ onMounted(() => {
       :cards="cardsData"
       :mode="currentMode"
       :arrivals="arrivalsMap"
+      :nearby-location="nearbyLocation"
       @open="goToDetail"
       @switch-direction="onSwitchDirection"
+      @toggle-pin="onTogglePin"
     />
 
-    <!-- Empty state -->
-    <EmptyState v-else :city-name="cityStore.currentCityName" />
+    <!-- Empty state. WHICH empty it is comes from the read's own state: an unreadable list
+         is stated as unreadable and offers a retry, and only an ANSWERED empty list is
+         worded as 「还没有关注线路」. -->
+    <EmptyState
+      v-else
+      :city-name="cityStore.currentCityName"
+      :state="favouritesRead"
+      @retry="reloadForCurrentCity"
+    />
   </div>
 </template>

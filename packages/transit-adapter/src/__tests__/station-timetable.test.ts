@@ -6,14 +6,19 @@ import {
   nextDepartureEtaSeconds,
 } from '../index.js'
 
+// The ids and station names used with the production table below are that table's
+// PRIMARY KEYS: they index the transcribed timetable in `src/data/subway-timetables.data.ts`,
+// which is real upstream data rather than a fixture. They must keep matching it —
+// renaming one silently kills the exact-timetable branch. Names that exist only as
+// fixtures in this file (乙乙站, 丙丙（临时站）) carry no such constraint.
 describe('StationTimetableService (precise timetable overlay)', () => {
   const svc = new StationTimetableService()
 
-  it('normalizes station names so 群芳站 matches 群芳', () => {
+  it('normalizes a station name to the key the table is indexed by', () => {
     expect(normalizeStationName('群芳站')).toBe('群芳')
     expect(normalizeStationName('群芳')).toBe('群芳')
-    expect(normalizeStationName('北京西站')).toBe('北京西')
-    expect(normalizeStationName('次渠南（临时站）')).toBe('次渠南')
+    expect(normalizeStationName('乙乙站')).toBe('乙乙')
+    expect(normalizeStationName('丙丙（临时站）')).toBe('丙丙')
     expect(svc.has('subway_027_7', '群芳站')).toBe(true)
     expect(svc.has('subway_027_7', '群芳')).toBe(true)
   })
@@ -25,7 +30,7 @@ describe('StationTimetableService (precise timetable overlay)', () => {
     expect(dayTypeForDate(new Date('2026-01-25T00:30:00Z'))).toBe('weekend') // Sunday
   })
 
-  it('returns exact departures for Line 7 群芳站 to_west_railway (dir 0)', () => {
+  it('returns exact departures for the shipped table station to_west_railway (dir 0)', () => {
     const monday = new Date('2026-01-19T00:30:00Z') // 08:30 CST Monday
     const nowSec = 8 * 3600 + 30 * 60
     const r = svc.query('subway_027_7', '群芳站', 0, nowSec, { count: 6, now: monday })
@@ -95,13 +100,13 @@ describe('StationTimetableService (precise timetable overlay)', () => {
   })
 
   it('returns null for stations without a precise timetable', () => {
-    expect(svc.has('subway_027_7', '万盛东')).toBe(false)
-    expect(svc.query('subway_027_7', '万盛东', 0, 8 * 3600)).toBeNull()
-    expect(svc.has('subway_034_2', '群芳')).toBe(false)
+    expect(svc.has('subway_027_7', '乙站')).toBe(false)
+    expect(svc.query('subway_027_7', '乙站', 0, 8 * 3600)).toBeNull()
+    expect(svc.has('subway_027_88', '群芳')).toBe(false)
   })
 
   it('lists exact-timetable stations for a line', () => {
     expect(svc.stationsForLine('subway_027_7')).toEqual(['群芳'])
-    expect(svc.stationsForLine('subway_027_10')).toEqual([])
+    expect(svc.stationsForLine('subway_027_88')).toEqual([])
   })
 })

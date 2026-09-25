@@ -45,7 +45,7 @@ function toEntry(s: LineSummary): RouteDirectionEntry {
  * Merge flat per-direction search hits into one result per route.
  *
  * Grouping rule: entries sharing a lineName within the same city are one route.
- * This is what makes "913 上行" and "913 下行" (two different chelaile lineIds)
+ * This is what makes "快线 1 路 上行" and "快线 1 路 下行" (two different chelaile lineIds)
  * collapse into a single search result, and keeps subway's two same-lineId
  * directions together as well.
  *
@@ -145,7 +145,7 @@ export function favoriteIsBidirectional(fav: {
  * rather than `[0, 1]`: a one-way favourite has no second direction, and
  * pairing a hardcoded pair with a `?? f.lineId` fallback invents one — the same
  * upstream lineId then answers for both, producing two identical rows on the
- * platform board (measured: 金融街1号专线 listed twice, same stop order, same
+ * platform board (measured: 102 专线 listed twice, same stop order, same
  * arrivals).
  *
  * A subway favourite carries one lineId for both directions; that is still two
@@ -192,7 +192,8 @@ export function resolveBoardStop(
  * the favourite (`morningDirection` / `eveningDirection`) because this
  * derivation can disagree with the direction whose stops the user was actually
  * shown while picking, and it degenerates to null whenever a board stop exists
- * in only one direction (913 has four such stops, 4+4 across directions).
+ * in only one direction (a long route typically has a few such stops, in both
+ * directions).
  * Kept as the one-shot backfill tool that migrates pre-existing board stops to
  * explicit directions; new code must read the stored fields instead.
  *
@@ -209,7 +210,7 @@ export function deriveCommuteDirections(
   const morning = fav.morningStopName
   const evening = fav.eveningStopName
   // Exact-name matching only: a substring hit can hijack a later station
-  // sharing a prefix (e.g. 东石东三路南口 vs 东石东三路).
+  // sharing a prefix (e.g. 甲乙路南口 vs 甲乙路).
   if (!morning || !evening) return null
   if (morning === evening) return null
 
@@ -267,7 +268,7 @@ export function commuteDirectionFor(
  * DB keeps NULL until the user genuinely picks on a route where that is possible.
  *
  * Consumers must use THIS rather than `commuteDirectionFor` directly — the
- * settings picker, home card, kiosk board and detail badge all render a
+ * settings picker, home card and detail badge all render a
  * direction, and each one needing its own single-direction special case is how
  * they drift apart.
  */
@@ -291,9 +292,9 @@ export function effectiveCommuteDirection(
 /**
  * Whether a direction's stop list serves a given board stop.
  *
- * The two directions of a bus route do not call at identical stops — 913 has
- * four stops served by only one direction each, and they are real platforms
- * (金星桥东 / 金星桥西 are opposite kerbs of a one-way pair), not bad data. So
+ * The two directions of a bus route do not call at identical stops — some stops
+ * are served by one direction only, and they are real platforms
+ * (opposite kerbs of a one-way pair), not bad data. So
  * after the user switches direction a previously chosen stop may not exist in
  * the new one; the UI must say so rather than keep a stop that can never be
  * boarded here.
@@ -317,6 +318,14 @@ export function stopServedByDirection(
  * null when the fix is missing or no stop carries coordinates; callers must
  * not default to the first stop, which would present an arbitrary stop as
  * "nearest".
+ *
+ * A stop is a candidate only for a position it actually states. One the stop
+ * list leaves unplaced — or marks with a zero, which no placed stop on this
+ * app's GCJ-02 datum is — is skipped rather than measured from, because a
+ * distance from (0, 0) would make an unplaced platform the nearest thing to the
+ * user and the board would then be snapped to it. The same rule decides what a
+ * parsed coordinate is at all (`statedCoordinate`), so the two reads cannot
+ * drift apart.
  */
 export function nearestStopOnLine(
   stops: Array<{ name: string, order: number, lat?: number, lng?: number }>,
@@ -379,7 +388,7 @@ export function resolveNearbyStop(
     stops: Array<{ name: string, order: number }> | undefined,
   ): { order: number } | null => {
     // Exact name match only: a substring hit can bind to a later station that
-    // merely shares a prefix (东石东三路南口 vs 东石东三路).
+    // merely shares a prefix (甲乙路南口 vs 甲乙路).
     const hit = stops?.find(s => s.name === candidate.name)
     return hit ? { order: hit.order } : null
   }

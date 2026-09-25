@@ -49,6 +49,14 @@ export class ApizeroProvider implements ITransitProvider {
       }
 
       const entry = json.data[0]
+      // An empty `data` is the upstream saying it has NO RECORD of this line —
+      // the same miss chelaile answers with no name and no stop list. Building
+      // `{buses: []}` out of it would hand the boundary a reading identical to a
+      // real line with nothing in transit, which is exactly the shape the live
+      // route must be able to refuse.
+      if (!entry) {
+        return null
+      }
       const rawBuses = entry?.buses || []
 
       // Realtime upstream only exposes stops_remaining / travel_minutes.
@@ -75,6 +83,11 @@ export class ApizeroProvider implements ITransitProvider {
         direction,
         buses,
         dataSource: 'apizero',
+        // This declaration IS the fallback fact — the aggregator reports what a
+        // provider says about its own answer rather than deriving degradation
+        // from list position, so nothing else can mark this reading a stand-in.
+        // apizero answers only when chelaile could not, and the fields it lacks
+        // (progress, coordinates, speed) are why it is the lesser source.
         isDegraded: true,
         updatedAt: Date.now(),
       }

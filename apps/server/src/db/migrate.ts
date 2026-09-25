@@ -70,26 +70,58 @@ async function up(): Promise<void> {
   console.log('migrations up: done')
 }
 
+/** 会丢数据的语句：命中就必须显式确认，普通 DROP INDEX 不算。 */
+const DESTRUCTIVE_SQL = /\b(DROP\s+TABLE|DROP\s+COLUMN|TRUNCATE|DELETE\s+FROM)\b[^;]*/gi
+
 /**
  * 回滚需要每个迁移自带 `-- migrate:down` 段；未提供则拒绝回滚。
  * 自动 DROP TABLE 的推断方式会误删被后续迁移扩过列的表，这里显式要求。
+ *
+ * 默认只回滚最后一步，且破坏性语句需 `--confirm`：整库回滚会连带删掉基线迁移建的
+ * 表（里面有真实数据），而回滚不可逆（开发库 archive_mode=off，无 PITR）。这类操作必须被
+ * 显式要求，不能是默认行为。
  */
 async function down(): Promise<void> {
   await ensureMigrationsTable()
   const applied = await getApplied()
-  const files = (await readdir(MIGRATIONS_DIR))
+  const rollbackAll = process.argv[3] === 'all'
+  const candidates = (await readdir(MIGRATIONS_DIR))
     .filter(f => f.endsWith('.sql'))
     .sort()
     .reverse()
+    .filter(f => applied.has(f))
+  const scope = rollbackAll ? candidates : candidates.slice(0, 1)
 
-  for (const file of files) {
-    if (!applied.has(file)) continue
+  if (scope.length === 0) {
+    console.log('migrations down: nothing to roll back')
+    return
+  }
+
+  const plan = await Promise.all(scope.map(async (file) => {
     const sql = await readFile(join(MIGRATIONS_DIR, file), 'utf-8')
     const downSql = extractDownSection(sql)
     if (!downSql) {
       console.error(`rollback aborted: ${file} has no "-- migrate:down" section`)
       process.exit(1)
     }
+    return {
+      file,
+      downSql,
+      destroys: [...downSql.matchAll(DESTRUCTIVE_SQL)].map(m => m[0].replace(/\s+/g, ' ').trim()),
+    }
+  }))
+
+  const destroys = plan.flatMap(p => p.destroys)
+  if (destroys.length > 0 && !process.argv.includes('--confirm')) {
+    console.error(`refusing to roll back ${scope.length} of ${candidates.length} applied migration(s): the down sections destroy data`)
+    for (const p of plan) {
+      for (const stmt of p.destroys) console.error(`  ${p.file}: ${stmt}`)
+    }
+    console.error(`re-run to confirm: pnpm migrate:down${rollbackAll ? ' all' : ''} --confirm`)
+    process.exit(1)
+  }
+
+  for (const { file, downSql } of plan) {
     console.log(`rollback: ${file}`)
     const client = await pool.connect()
     try {
@@ -106,7 +138,7 @@ async function down(): Promise<void> {
       client.release()
     }
   }
-  console.log('migrations down: done')
+  console.log(`migrations down: done (${scope.length} of ${candidates.length} applied)`)
 }
 
 function stripDownSection(sql: string): string {
@@ -127,7 +159,7 @@ try {
   if (command === 'up') await up()
   else if (command === 'down') await down()
   else {
-    console.error('Usage: tsx src/db/migrate.ts up|down')
+    console.error('Usage: tsx src/db/migrate.ts up | down [all] [--confirm]')
     process.exit(1)
   }
 }

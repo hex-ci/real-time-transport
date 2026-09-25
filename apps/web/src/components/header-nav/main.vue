@@ -2,7 +2,7 @@
 import { shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
-import { Bus, ChevronRight, Clock, Menu, Settings, Tv, X } from '@lucide/vue'
+import { Bus, ChevronRight, Clock, Menu, Settings, Waypoints, X } from '@lucide/vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { CitySwitcher } from '@/components/city-switcher'
 import { SimulationBanner } from '@/components/simulation-banner'
@@ -17,8 +17,10 @@ const mobileMenuOpen = shallowRef(false)
 
 const navItems = [
   { to: '/', label: '关注线路', icon: Bus },
+  // The transfer chain's own page, level with the home tab: it serves the moment
+  // before leaving home, which is the one thing a followed-lines list cannot answer.
+  { to: '/commute-chain', label: '换乘链路', icon: Waypoints },
   { to: '/platform', label: '站台大屏', icon: Clock },
-  { to: '/kiosk', label: '玄关看板', icon: Tv },
   { to: '/settings', label: '设置', icon: Settings },
 ]
 
@@ -78,7 +80,7 @@ function onCityChange(): void {
             :class="wsConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-amber-400 animate-ping'"
           ></span>
           <span class="font-mono text-xs text-slate-400">
-            {{ wsConnected ? 'LIVE WS' : 'CONNECTING' }}
+            {{ wsConnected ? '已连接' : '连接中' }}
           </span>
         </div>
 
@@ -135,7 +137,7 @@ function onCityChange(): void {
               :class="wsConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-amber-400 animate-ping'"
             ></span>
             <span class="font-mono text-xs">
-              {{ wsConnected ? '实时 WebSocket 已连接' : 'WebSocket 正在连接...' }}
+              {{ wsConnected ? '实时数据已连接' : '正在连接实时数据…' }}
             </span>
           </span>
           <span class="font-mono text-xs text-slate-400">REALTIME</span>

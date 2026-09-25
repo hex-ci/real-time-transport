@@ -43,7 +43,7 @@ const emit = defineEmits<{
         </AlertDialogDescription>
         <div class="mt-5 flex justify-end gap-2">
           <AlertDialogCancel
-            class="min-h-[40px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95 lg:px-5 lg:text-base"
+            class="min-h-[44px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95 lg:px-5 lg:text-base"
           >
             保留
           </AlertDialogCancel>
@@ -53,7 +53,7 @@ const emit = defineEmits<{
                See confirmRemoval. -->
           <button
             type="button"
-            class="min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
+            class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
             :disabled="removing"
             @click="emit('confirm')"
           >

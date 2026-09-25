@@ -8,7 +8,7 @@ import type {
   LiveLineStatus,
   Station,
 } from '@real-time-transport/shared'
-import { cumulativeDistances } from '@real-time-transport/shared'
+import { cumulativeDistances, statedCoordinate, statedStopOrder } from '@real-time-transport/shared'
 import type { ITransitProvider } from '../types.js'
 
 const BASE_URL = 'https://web.chelaile.net.cn/api'
@@ -75,13 +75,89 @@ function aesDecrypt(ciphertextB64: string): string {
   return decipher.update(buf, undefined, 'utf8') + decipher.final('utf8')
 }
 
-function parseCongestion(tags?: Array<{ title?: string }>): CongestionLevel {
+/**
+ * Upstream crowding tag, verbatim:
+ * `{"dispatch":false,"imageUrlKey":"拥挤度_5","sort":5,"title":"拥挤"}`.
+ *
+ * A vehicle carries exactly one crowding tag, and the upstream states the level
+ * in `title`. Nothing else on the object is evidence: the key's number is not a
+ * level, and `sort` / `dispatch` have no confirmed meaning.
+ */
+export interface ChelaileBusTag {
+  imageUrlKey?: string
+  title?: string
+  sort?: number
+  dispatch?: boolean
+}
+
+/**
+ * The upstream's own WORD for a crowding level, matched by EXACT EQUALITY.
+ *
+ * MEASURED EVIDENCE — live upstream, 2026-09-25, 20 detail reads / 159 vehicles
+ * on the four followed lines. The (key, title) pairs the payloads really carried:
+ *
+ *   拥挤度_1  → 不拥挤   ×113   every sampled line
+ *   拥挤度_3  → 拥挤     ×30    the two busiest lines
+ *   拥挤度_5  → 拥挤     ×7     only on 010-1-0 / 010-1-1
+ *   拥挤度_2 / 拥挤度_4  ×0     never observed
+ *
+ * The keys are recorded as evidence of what was seen, NOT as the lookup, because
+ * the observed keys are not contiguous: `_5` exists and `_4` was never seen. A
+ * key-enumerating table is blind by construction — every key nobody happened to
+ * sample is downgraded to 「未知」 even when its own `title` states the level in
+ * the very same object, which is exactly how `拥挤度_5`/拥挤 was served before
+ * this rule. Only the label can carry a level we have never seen.
+ *
+ * The negated form is its own exact string: `不拥挤` is matched as itself, never
+ * as 「拥挤」 found inside it. Matching the copy loosely (a `title.includes`
+ * test) reported 14 buses the upstream had labelled 不拥挤 as crowded.
+ */
+const CONGESTION_BY_TAG_TITLE: Record<string, CongestionLevel> = {
+  不拥挤: 'low',
+  拥挤: 'high',
+}
+
+export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
   if (!tags || tags.length === 0) return 'unknown'
-  const text = tags.map(t => t.title || '').join(' ')
-  if (text.includes('严重拥堵') || text.includes('拥挤')) return 'high'
-  if (text.includes('缓行') || text.includes('适中')) return 'medium'
-  if (text.includes('畅通') || text.includes('不拥挤')) return 'low'
+  for (const tag of tags) {
+    // Selected by the presence of a known title, never by position: a bus whose
+    // first tag is the non-crowding 无障碍 tag still gets the crowding reading
+    // behind it, and a tag whose title nobody has measured is passed over.
+    // `Object.hasOwn` keeps a title like 「constructor」 out of the prototype's
+    // members; an absent or unmeasured title stays `unknown` — the honest answer
+    // for a word nobody has measured.
+    const title = tag?.title
+    const level = typeof title === 'string' && Object.hasOwn(CONGESTION_BY_TAG_TITLE, title)
+      ? CONGESTION_BY_TAG_TITLE[title]
+      : undefined
+    if (level) return level
+  }
   return 'unknown'
+}
+
+/**
+ * Whether a line-detail payload holds a RECORD of the line at all.
+ *
+ * The endpoint answers 200 with a well-formed envelope for an id it has never
+ * heard of: `jsonr.data` comes back without a `line` object and without a
+ * station list. That is a MISS, not a reading — and the TWO reads of this same
+ * endpoint must agree on it. They did not: `getLineDetail` already refused such
+ * a payload while `getLiveStatus` built a complete empty reading out of it, so
+ * `GET /lines/:id` answered 404 while `GET /lines/:id/live` answered 200 with
+ * `{buses: [], dataSource: 'chelaile', isDegraded: false}` — byte-identical to
+ * a real line with no vehicle in transit, and a client could not tell
+ * 「这条线路不存在」 from 「此刻没车」.
+ *
+ * The line's name and its stop list are its IDENTITY: both are static, and a
+ * line that exists answers with them however few vehicles are running. Vehicles
+ * are deliberately NOT part of this test — a line with no vehicle is a real and
+ * frequent reading — so the live read adds them as a clause of its own: a
+ * payload that carries vehicles is proof the upstream knows this line.
+ */
+function holdsLineRecord(data: any): boolean {
+  const rawLine = data?.line ?? {}
+  const stations = Array.isArray(data?.stations) ? data.stations : []
+  return Boolean(rawLine.name || rawLine.lineName) || stations.length > 0
 }
 
 export class ChelaileProvider implements ITransitProvider {
@@ -105,6 +181,14 @@ export class ChelaileProvider implements ITransitProvider {
    * cumulative arc-length gives meter-accurate per-station distances. We
    * therefore build stationDistances directly from the tagged markers rather
    * than projecting the (GCJ-02, off-road) station coordinates.
+   *
+   * A vertex is a coordinate and goes through the SAME rule as every other read
+   * (`statedCoordinate`): a zero on either axis, or a half of the pair the
+   * payload never stated, is a vertex the upstream never placed. One such vertex
+   * leaves the whole polyline unstateable — its arc-length would be measured
+   * through a point this line's road never reaches, and the tagged markers would
+   * be spread along that imaginary leg — so the answer is null, exactly as for a
+   * trajectory that could not be fetched.
    *
    * Returns null on any failure so callers degrade to even-spacing gracefully.
    */
@@ -153,12 +237,24 @@ export class ChelaileProvider implements ITransitProvider {
       }
 
       // Parse "lng,lat[,tag]" points into [lat, lng] plus cumulative arc-length.
-      const parsed = tra.split(';').map((seg) => {
+      //
+      // Each vertex goes through the coordinate rule (`statedCoordinate`); one
+      // it cannot place makes the whole road unstateable, so the negative cache
+      // is written here exactly as for a line with no trajectory at all.
+      const points: Array<[number, number]> = []
+      const tags: Array<number | undefined> = []
+      for (const seg of tra.split(';')) {
         const f = seg.split(',').map(Number)
-        return { lng: f[0]!, lat: f[1]!, tag: f.length >= 3 ? f[2] : undefined }
-      })
-      const lats: Array<[number, number]> = parsed.map(p => [p.lat, p.lng])
-      const cum = cumulativeDistances(lats)
+        const lng = statedCoordinate(f[0])
+        const lat = statedCoordinate(f[1])
+        if (lng === undefined || lat === undefined) {
+          this.routeGeomCache.set(key, null)
+          return null
+        }
+        points.push([lat, lng])
+        tags.push(f.length >= 3 ? f[2] : undefined)
+      }
+      const cum = cumulativeDistances(points)
       const routeLengthMeters = cum[cum.length - 1] ?? 0
       if (!(routeLengthMeters > 0)) {
         this.routeGeomCache.set(key, null)
@@ -168,8 +264,8 @@ export class ChelaileProvider implements ITransitProvider {
       // Tagged markers: tag=1 is the origin station (cum 0), tag=k is station
       // k-1 (0-indexed). The final station has no tag -> append routeLength.
       const tagged: number[] = []
-      for (let i = 0; i < parsed.length; i++) {
-        if (parsed[i]!.tag !== undefined) tagged.push(cum[i]!)
+      for (let i = 0; i < tags.length; i++) {
+        if (tags[i] !== undefined) tagged.push(cum[i]!)
       }
       let stationDistances: number[]
       if (tagged.length >= 2 && tagged.length >= stationCount - 1) {
@@ -283,7 +379,10 @@ export class ChelaileProvider implements ITransitProvider {
       const rawLine = data.line || {}
       const rawStations = data.stations || []
 
-      if (!rawLine.name && !rawLine.lineName && rawStations.length === 0) {
+      // The upstream answered about no line at all — see `holdsLineRecord`. The
+      // stop list is read into `rawStations` above only past this check, so a
+      // miss cannot travel further as an empty-but-well-formed line.
+      if (!holdsLineRecord(data)) {
         return null
       }
 
@@ -292,9 +391,16 @@ export class ChelaileProvider implements ITransitProvider {
         return {
           id: String(s.sId || `stop_${idx + 1}`),
           name: String(s.sn || `站点 ${idx + 1}`),
-          order: Number(s.order || idx + 1),
-          lat: Number(s.lat || 0),
-          lng: Number(s.lng || 0),
+          // The stop's ordinal, and the list's own position where the payload
+          // states none this app can read: F10 locates a stored station BY its
+          // order, and a NaN or 0 there names no stop at all. See
+          // `statedStopOrder`.
+          order: statedStopOrder(s.order, idx + 1),
+          // The stop's own position, and only when the payload stated one: a
+          // stop the upstream placed nowhere stays unplaced rather than being
+          // pinned at (0, 0). See `statedCoordinate`.
+          lat: statedCoordinate(s.lat),
+          lng: statedCoordinate(s.lng),
           interchanges: metros,
         }
       })
@@ -350,6 +456,16 @@ export class ChelaileProvider implements ITransitProvider {
       const rawStations = data.stations || []
       const totalStations = rawStations.length || 1
 
+      // The upstream answered about NO LINE: no identity in the payload (see
+      // `holdsLineRecord`) and no vehicle either. Nothing here is a reading, and
+      // answering `{buses: []}` from it made 「这条线路不存在」 byte-identical to
+      // 「此刻没车」 — the same payload the detail read of this id already refuses
+      // with 404. A payload holding vehicles is left alone even when it carries no
+      // name: the vehicles are proof the upstream knows this line.
+      if (!holdsLineRecord(data) && rawBuses.length === 0) {
+        return null
+      }
+
       // Route length from jxPath lets us turn distanceToWaitStn (distance to
       // the TERMINAL) into distanceFromStart (authoritative continuous
       // position). Cached after the first call, so this is free per poll.
@@ -383,7 +499,18 @@ export class ChelaileProvider implements ITransitProvider {
         const travel = options?.targetOrder && Array.isArray(b.travels)
           ? b.travels.find((t: any) => Number(t.order) === options.targetOrder)
           : undefined
-        const targetTravelTimeSec = travel && travel.travelTime > 0 ? Number(travel.travelTime) : undefined
+        // ZERO is the upstream's own fact, not a missing value: when the vehicle
+        // is STANDING at the requested stop the source reports travelTime 0
+        // (observed with distanceToWaitStn 0 and speed ~0). Keeping only > 0 threw
+        // that away and sent the row into this app's position/dwell estimate,
+        // which printed a minute for a bus at the platform. A negative value is
+        // chelaile's 「已过目标站」 sentinel, which is not a duration.
+        const targetTravelTime = travel ? Number(travel.travelTime) : undefined
+        const targetTravelTimeSec = targetTravelTime !== undefined
+          && Number.isFinite(targetTravelTime)
+          && targetTravelTime >= 0
+          ? targetTravelTime
+          : undefined
 
         // Authoritative continuous distanceFromStart:
         // 1) Prefer raw b.mileage (vehicle odometer from start in meters, provided by chelaile)

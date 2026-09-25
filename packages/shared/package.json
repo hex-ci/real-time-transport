@@ -12,7 +12,10 @@
     ".": "./src/index.ts",
     "./geo": "./src/geo.ts",
     "./line-group": "./src/line-group.ts",
-    "./constants": "./src/constants.ts"
+    "./constants": "./src/constants.ts",
+    "./departure": "./src/departure.ts",
+    "./data-provenance": "./src/data-provenance.ts",
+    "./operating-state": "./src/operating-state.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
@@ -24,6 +27,6 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.2"
   }
 }

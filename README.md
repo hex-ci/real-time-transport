@@ -27,8 +27,9 @@
   - **逆地理编码**：实时 GPS 坐标解析为可读地标。
 - **多样化使用场景**：
   - **首页动态关注流**：微缩动态轨道（Sparkline）与到站大字号看板。
-  - **虚拟候车亭（站台起降大屏）**：聚合经过当前站台的所有线路，按到站先后实时重排（“谁先来坐谁”）。
-  - **玄关看板**：支持横屏与 Web Wake Lock 防息屏，适合淘汰平板或旧手机桌面常亮展示。
+  - **线路拓扑详情**：超长线路折返 / 直线站牌全览，点选站点查看到站时刻与赶车决策。
+  - **站台大屏（虚拟候车亭）**：聚合经过当前站台的所有线路，按到站先后实时重排（“谁先来坐谁”）。
+  - **设置与管理**：关注线路、通勤时段、上下车点与行驶方向的显式配置。
   - **智能情境感知**：自动根据早晚高峰时间切换上下行方向与目标车站。
 
 ---
@@ -51,11 +52,11 @@
 | :---: | :---: |
 | <img src="docs/screenshots/line-folded-mobile.png" width="280" alt="移动端折返排布" /> | <img src="docs/screenshots/line-linear-mobile.png" width="280" alt="移动端直线排布" /> |
 
-### 3. 虚拟候车亭与玄关看板
+### 3. 站台大屏（虚拟候车亭）
 
-| 虚拟站台起降大屏 | 玄关态势监控看板 |
-| :---: | :---: |
-| <img src="docs/screenshots/platform-pc.png" width="450" alt="站台大屏" /> | <img src="docs/screenshots/kiosk-pc.png" width="450" alt="玄关看板" /> |
+| 站台聚合起降大屏 |
+| :---: |
+| <img src="docs/screenshots/platform-pc.png" width="450" alt="站台大屏" /> |
 
 ---
 
@@ -144,7 +145,7 @@ pnpm build        # 生产环境编译构建
 | GET | `/api/transit/cities` | 全国城市公共交通字典 |
 | GET | `/api/transit/lines/search?keyword=&cityCode=` | 跨数据源线路搜索 |
 | GET | `/api/transit/lines/:lineId?direction=&cityCode=` | 线路详情（站序，DB 静态缓存） |
-| GET | `/api/transit/lines/:lineId/live?direction=&cityCode=` | 实时在途车辆 |
+| GET | `/api/transit/lines/:lineId/live?direction=&cityCode=&order=` | 实时在途车辆（可选 `order=<站序>`：带上它才会下发该目标站的到站秒数 `travelTimeSec`） |
 | GET | `/api/transit/lines/:lineId/stations/:name/arrivals` | 站点到站时刻（精确表优先，否则推演） |
 | GET | `/api/transit/gis/walk-decision` | 真实路网步行赶车决策 |
 | GET | `/api/transit/gis/nearby-stations` | 周边站台雷达 |

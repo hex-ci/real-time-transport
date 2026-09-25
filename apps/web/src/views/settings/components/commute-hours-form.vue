@@ -3,33 +3,68 @@
  * Commute-hours editor.
  *
  * Self-contained: it loads the saved hours and PATCHes them back, so the parent
- * only decides where the form sits (inside a Collapsible under the list, or bare
- * in the xl side rail) and never owns its draft state.
+ * only decides where the form sits (inside the 通勤时段 page's Collapsible, or bare
+ * when that page is wide enough for it) and never owns its draft state.
+ *
+ * A form needs four starting values to be editable at all, and with nothing stored
+ * they are the built-in window — as an EXPLICITLY NAMED internal parameter, the
+ * pattern the subway engine uses for a line whose service hours nobody stated
+ * (`serviceWindowSeconds`). Named, and stated on screen: while no hours are stored the
+ * form says so above the fields, so the numbers before the first save are never
+ * presented as the user's own. The alternative — opening silently on `06:30–11:30`
+ * after a failed read — is the defect this state exists to remove.
+ *
+ * 「no hours are stored」 covers BOTH of the states a settings read can answer with no
+ * hours: 未设置 (no row at all) and 未选择 (a row exists — it may carry anchors — and
+ * its four times are NULL, never chosen since 009). The sentence is about 通勤时段, so
+ * it is true of both: this user has indeed never saved commute hours. The stored hours
+ * still win wherever they exist, and a read nobody completed claims nothing either way.
  */
 import { onMounted, shallowRef } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
-import type { UserSettings } from '@real-time-transport/shared'
+import { DEFAULT_COMMUTE_HOURS, type UserSettings } from '@real-time-transport/shared'
+import { settingsReadOf } from '../index-summary'
 
-const settingsDraft = shallowRef<UserSettings>({
-  morningStart: '06:30',
-  morningEnd: '11:30',
-  eveningStart: '17:00',
-  eveningEnd: '22:00',
-})
+/**
+ * The four times this editor opens with when nothing is stored.
+ *
+ * Values only — they are this form's starting point, never reported as stored hours.
+ * Whatever the user then saves replaces them, and the save path PATCHes the draft.
+ */
+const EDITOR_STARTING_POINT: UserSettings = { ...DEFAULT_COMMUTE_HOURS }
+
+const settingsDraft = shallowRef<UserSettings>({ ...EDITOR_STARTING_POINT })
 const settingsSaving = shallowRef(false)
 const settingsError = shallowRef<string | null>(null)
 const settingsSaved = shallowRef(false)
+
+/**
+ * Whether the four times were never saved. `true` is 未设置/未选择 — a fact the form
+ * states; `false` is a stored window; `null` is 「还没读到」, about which it says nothing.
+ */
+const hoursNeverSaved = shallowRef<boolean | null>(null)
 
 onMounted(async () => {
   try {
     const res = await fetch('/api/transit/settings')
     const json = await res.json()
-    if (json.success && json.data) {
-      settingsDraft.value = json.data as UserSettings
+    const hours = settingsReadOf(json).hours
+    if (hours.state === 'read') {
+      settingsDraft.value = hours.value
+      hoursNeverSaved.value = false
+      return
     }
+    // unset: nothing is stored, so the draft keeps the starting point AND the form
+    // says where those numbers come from. unchosen: the same, one level in — a row
+    // exists but no hour of it was ever chosen, so the four below are still the
+    // editor's own starting point rather than a stored schedule. unreadable: the draft
+    // stays as it is and the form claims nothing about the stored row either way.
+    hoursNeverSaved.value = hours.state === 'unset' || hours.state === 'unchosen' ? true : null
   }
   catch {
-    // Keep defaults: a failed load must not fabricate a different schedule
+    // The read never answered: nothing about the stored row is known, and the draft
+    // is this form's own starting point rather than a claim about it.
+    hoursNeverSaved.value = null
   }
 })
 
@@ -48,6 +83,8 @@ async function saveSettings(): Promise<void> {
       throw new Error(json.error || '保存失败')
     }
     settingsDraft.value = json.data as UserSettings
+    // The hours are stored now, so the form stops saying they were never saved.
+    hoursNeverSaved.value = false
     settingsSaved.value = true
   }
   catch (err) {
@@ -63,6 +100,12 @@ async function saveSettings(): Promise<void> {
   <div class="space-y-3">
     <p class="text-xs text-slate-400 lg:text-base">
       用于自动切换「上班 / 下班 / 附近」视图，不参与方向判定
+    </p>
+    <!-- 未设置 is stated where the numbers it qualifies are: the four below are this
+         editor's own starting point until something is saved, and a form that opened
+         silently on them would be the built-in window wearing the user's clothes. -->
+    <p v-if="hoursNeverSaved === true" class="text-xs text-amber-400/90 lg:text-base">
+      尚未保存过通勤时段：下面四个时刻是编辑器的起点，保存之后才会成为你的时段
     </p>
     <!-- Two columns while the card spans the full width (sm–lg); one column once
          it narrows into the xl side rail. -->

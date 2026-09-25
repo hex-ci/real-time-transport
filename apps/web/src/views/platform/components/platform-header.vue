@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LocateFixed } from '@lucide/vue'
+import { ArrowLeft, LocateFixed } from '@lucide/vue'
 
 defineProps<{
   stationOptions: string[]
@@ -20,6 +20,14 @@ const stationName = defineModel<string>({ required: true })
   <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 shadow-xl backdrop-blur-md sm:rounded-3xl sm:p-5 md:p-6">
     <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
       <div>
+        <RouterLink
+          to="/"
+          class="mb-1 inline-flex min-h-11 items-center gap-1.5 rounded-lg text-xs font-medium text-slate-400 transition hover:text-cyan-300 active:scale-95"
+          aria-label="返回总览"
+        >
+          <ArrowLeft class="h-3.5 w-3.5 shrink-0" />
+          <span>返回总览</span>
+        </RouterLink>
         <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
           虚拟候车亭 · 多线聚合起降牌
         </span>
@@ -27,7 +35,7 @@ const stationName = defineModel<string>({ required: true })
           当前站台：<span class="max-w-[260px] truncate text-cyan-300">{{ stationName || '选择中...' }}</span>
         </h2>
         <p class="text-xs text-slate-400">
-          {{ landmarkHint }} · 按上游实际在途车推演到达时间升序排列
+          {{ landmarkHint }} · 按预计到站时间升序排列
         </p>
       </div>
 

@@ -31,7 +31,7 @@ const coordsLabel = computed(() => {
     <span class="text-xs font-semibold tracking-wide">模拟定位</span>
     <span class="font-mono text-xs text-sky-400/80">{{ coordsLabel }}</span>
     <span class="hidden text-xs text-sky-400/80 sm:inline">
-      · 车辆数据仍为真实上游数据
+      · 仅位置为模拟值
     </span>
   </div>
 </template>

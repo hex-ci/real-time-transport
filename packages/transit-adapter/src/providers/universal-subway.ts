@@ -6,10 +6,11 @@ import type {
   LiveLineStatus,
   Station,
 } from '@real-time-transport/shared'
-import { getCuratedCityName, CITY_DICTIONARY, cumulativeDistances } from '@real-time-transport/shared'
+import { getCuratedCityName, CITY_DICTIONARY, cumulativeDistances, statedCoordinate } from '@real-time-transport/shared'
 import type { ITransitProvider } from '../types.js'
 import type { AmapGisService } from '../services/amap-gis.service.js'
 import type { StationTimetableService } from '../services/station-timetable.service.js'
+import { dayTypeForDate, operatingDateOf, serviceWindowOf } from '../station-timetable.js'
 
 /**
  * Headway windows for metro lines (in seconds).
@@ -23,11 +24,45 @@ const HEADWAY_WINDOWS = [
 
 const DEFAULT_HEADWAY = 360 // 平峰 6 min
 
+/**
+ * Departure window used ONLY to enumerate simulated departures, when neither the
+ * upstream nor the line's own exact timetable carries real service hours.
+ *
+ * It is a SIMULATION PARAMETER, not a reported fact. `getLineDetail` leaves
+ * `firstBusTime` / `lastBusTime` empty rather than publishing this window, so
+ * `operatingStatusOf` answers 未知 instead of claiming the line is 运营中; the
+ * span exists so the train-position model has departures to place.
+ */
+const SIMULATION_FIRST_SEC = 5 * 3600 + 30 * 60 // 05:30
+const SIMULATION_LAST_SEC = 23 * 3600 // 23:00
+
 /** Average inter-station run seconds (2~2.5 min per hop typical for metro). */
 const STATION_RUN_SEC = 135
 
 /** Average cruise speed used for LiveBus.speed (m/s), ~54 km/h. */
 const CRUISE_SPEED = 15
+
+/**
+ * The stop list's own coordinates as [lat, lng] pairs, or null when any stop
+ * carries no position.
+ *
+ * A cumulative profile is index-aligned with the stop list, so ONE unplaced stop
+ * leaves the whole profile unstateable: dropping it would silently renumber the
+ * stops after it, and substituting a point would measure a track the line does
+ * not run on. A zero on either axis is that same absence rather than a position
+ * (`statedCoordinate`), so a row carrying `{ lat: 0, lng: 0 }` for a stop nobody
+ * placed leaves the profile unstateable too.
+ */
+function stopPositions(stops: readonly Station[]): Array<[number, number]> | null {
+  const positions: Array<[number, number]> = []
+  for (const stop of stops) {
+    const lat = statedCoordinate(stop.lat)
+    const lng = statedCoordinate(stop.lng)
+    if (lat === undefined || lng === undefined) return null
+    positions.push([lat, lng])
+  }
+  return positions
+}
 
 interface MetroStopNode {
   station: Station
@@ -39,11 +74,12 @@ interface MetroStopNode {
  *
  * Physical model (deterministic string chart):
  *   T(station_k) = T_departure(origin) + k * STATION_RUN_SEC
- * Departures are enumerated from firstBusTime..lastBusTime using time-of-day
- * headway rules, so ANY metro line in ANY city gets a live simulation as long
- * as Amap can resolve its station sequence.
+ * Departures are enumerated over a departure window using time-of-day headway
+ * rules — the line's real hours when known, otherwise {@link SIMULATION_FIRST_SEC}
+ * ..{@link SIMULATION_LAST_SEC} — so ANY metro line in ANY city gets a live
+ * simulation as long as Amap can resolve its station sequence.
  *
- * lineId convention: `subway_<cityCode>_<lineKeyword>` e.g. `subway_027_10`, `subway_amap_440100_3`
+ * lineId convention: `subway_<cityCode>_<lineKeyword>` e.g. `subway_027_88`, `subway_amap_440100_3`
  */
 /**
  * Resolves a line's static detail from a persistent store (e.g. the server's
@@ -104,6 +140,9 @@ export class UniversalSubwayEngine implements ITransitProvider {
       return null
     }
 
+    // The direction this engine can act on — see `statedDirection`.
+    const dir = statedDirection(direction)
+
     const resolvedCity = resolveCityFromLineId(lineId) || cityCode || '027'
     const keyword = extractLineKeyword(lineId)
     if (!keyword) {
@@ -118,36 +157,48 @@ export class UniversalSubwayEngine implements ITransitProvider {
       return null
     }
 
-    const orderedStops = direction === 1 ? [...result.stations].reverse() : [...result.stations]
+    const orderedStops = dir === 1 ? [...result.stations].reverse() : [...result.stations]
     const stops: Station[] = orderedStops.map((s, idx) => ({
       ...s,
       order: idx + 1,
     }))
 
     const terminalName = stops[stops.length - 1]?.name || '终点站'
-    // Clean amap suffix like 地铁10号线外环(车道沟--车道沟) -> 地铁10号线外环
+    // Clean the amap suffix, e.g. 地铁88号线外环(甲站--甲站) -> 地铁88号线外环
     const cleanName = result.lineName.replace(/\(.*?\)/g, '').trim()
 
     // Real inter-station geometry from the Amap station coordinates (GCJ-02,
     // but distances are internally consistent for the same datum). Gives the
     // client a meter-accurate continuous track for smooth train motion.
-    const stationDistances = cumulativeDistances(
-      stops.map(s => [s.lat, s.lng] as [number, number]),
-    )
-    const routeLengthMeters = stationDistances[stationDistances.length - 1] ?? 0
+    //
+    // The profile is index-aligned with `stops`, so ONE stop without a
+    // coordinate leaves the line's whole geometry unstated rather than a single
+    // entry missing: a distance measured through a stand-in point would be a
+    // number about a track the line does not run on, and a shorter array would
+    // silently renumber every stop after the gap.
+    const positions = stopPositions(stops)
+    const stationDistances = positions ? cumulativeDistances(positions) : undefined
+    const routeLengthMeters = stationDistances?.[stationDistances.length - 1]
+    const hasGeometry = typeof routeLengthMeters === 'number' && routeLengthMeters > 0
+
+    const serviceHours = this.realServiceHours(lineId, dir, stops)
 
     return {
       lineId,
       lineName: cleanName || `地铁${keyword}`,
-      direction,
+      direction: dir,
       directionName: `开往 ${terminalName}`,
-      firstBusTime: result.firstTime || '05:30',
-      lastBusTime: result.lastTime || '23:00',
+      // A reported time is a fact about the line: the upstream's own when it
+      // supplies one, else the line's published timetable. When neither does,
+      // the field stays empty — the simulation window is never published as
+      // service hours (see SIMULATION_FIRST_SEC).
+      firstBusTime: result.firstTime || serviceHours?.first || '',
+      lastBusTime: result.lastTime || serviceHours?.last || '',
       cityCode: resolvedCity,
       type: 'subway',
       stops,
-      routeLengthMeters: routeLengthMeters > 0 ? routeLengthMeters : undefined,
-      stationDistances: routeLengthMeters > 0 ? stationDistances : undefined,
+      routeLengthMeters: hasGeometry ? routeLengthMeters : undefined,
+      stationDistances: hasGeometry ? stationDistances : undefined,
       otherDirectionLineId: lineId, // Same lineId, opposite direction query param
     }
   }
@@ -162,10 +213,16 @@ export class UniversalSubwayEngine implements ITransitProvider {
       return null
     }
 
+    // The direction read ONCE, for the same reason the stop order is: a caller
+    // can hand us something that is not a direction at all (see `statedDirection`),
+    // and every use below — the trains' own ids, the resolved stop order, the
+    // departures and the direction echoed back — must be the same value.
+    const dir = statedDirection(direction)
+
     // Resolve static geometry from the persistent cache when wired up. The
     // live path must NOT re-query Amap on every poll: a single QPS throttle
     // would otherwise 404 a line whose data is already known-good.
-    const detail = await this.resolveDetail(lineId, direction, cityCode)
+    const detail = await this.resolveDetail(lineId, dir, cityCode)
     if (!detail || detail.stops.length < 2) {
       return null
     }
@@ -184,9 +241,14 @@ export class UniversalSubwayEngine implements ITransitProvider {
       currentSecOfDay += 24 * 3600
     }
 
-    // First / last bus in seconds of day
-    const firstSec = parseHm(detail.firstBusTime) || 5 * 3600 + 30 * 60
-    const lastSec = parseHm(detail.lastBusTime) || 23 * 3600
+    // Departure window in seconds of day. The fallback is the SIMULATION window:
+    // the model needs a span to enumerate departures over, but that span is
+    // never reported back as the line's service hours. A last departure after
+    // midnight belongs to this operating day's tail — see `serviceWindowSeconds`.
+    const { first: firstSec, last: lastSec } = serviceWindowSeconds(
+      detail.firstBusTime,
+      detail.lastBusTime,
+    )
 
     // Simulate physical station-by-station cumulative runtimes
     const nodes: MetroStopNode[] = stops.map((station, idx) => ({
@@ -202,9 +264,7 @@ export class UniversalSubwayEngine implements ITransitProvider {
       // Prefer an official minute-level station timetable when available: it gives
       // real departure seconds at that station, which we shift back to the origin
       // by that station's cumulative run offset. Otherwise fall back to headway sim.
-      const departures = this.resolveDepartures(lineId, direction, stops, firstSec, lastSec)
-
-      const isPeak = (hours >= 7 && hours <= 9) || (hours >= 17 && hours <= 19)
+      const departures = this.resolveDepartures(lineId, dir, stops, firstSec, lastSec)
 
       for (let i = 0; i < departures.length; i++) {
         const depTime = departures[i]!
@@ -274,14 +334,20 @@ export class UniversalSubwayEngine implements ITransitProvider {
         }
 
         buses.push({
-          id: `train_${lineId}_d${direction}_dep${i}`,
+          id: simulatedTrainId(lineId, dir, i),
           order,
           nextOrder: order + 1,
           progress: Number(progress.toFixed(3)),
-          lat: stops[segmentIdx]?.lat || 0,
-          lng: stops[segmentIdx]?.lng || 0,
+          // The position of the stop the train is at or leaving, and only when
+          // that stop states a position: a train at an unplaced stop has none
+          // either, and a stop the list marks at 0 is unplaced (`statedCoordinate`)
+          // — reporting it would put the train in the Atlantic.
+          lat: statedCoordinate(stops[segmentIdx]?.lat),
+          lng: statedCoordinate(stops[segmentIdx]?.lng),
           speed: CRUISE_SPEED,
-          congestion: isPeak ? 'high' : 'low',
+          // Derived positions from the timetable, no crowding data at all —
+          // and crowding must never be inferred from the clock.
+          congestion: 'unknown',
           distanceToWaitStn,
           distanceFromStart,
           travelTimeSec,
@@ -292,7 +358,7 @@ export class UniversalSubwayEngine implements ITransitProvider {
 
     return {
       lineId,
-      direction,
+      direction: dir,
       buses,
       dataSource: 'subway_schedule',
       isDegraded: false,
@@ -301,10 +367,46 @@ export class UniversalSubwayEngine implements ITransitProvider {
   }
 
   /**
+   * Real service hours from an exact official timetable held for a station on
+   * this line, or null when no covered station carries them.
+   *
+   * These are PUBLISHED times, so they beat both the empty value and the
+   * simulation window — but not the upstream's own hours, which the caller
+   * prefers. The operating day is resolved the same way the timetable overlay
+   * resolves it, and the hours themselves come from the same
+   * {@link serviceWindowOf} the platform's departures imply, so what the line
+   * reports and what its station lists cannot disagree (the table's declared
+   * `first` / `last` can, and one shipped table's does).
+   */
+  private realServiceHours(
+    lineId: string,
+    direction: number,
+    stops: Station[],
+  ): { first: string, last: string } | null {
+    if (!this.timetables) {
+      return null
+    }
+    const bjNow = new Date(Date.now() + 8 * 3600 * 1000)
+    const dayType = dayTypeForDate(operatingDateOf(bjNow))
+
+    for (const st of stops) {
+      const day = this.timetables.getRaw(lineId, st.name)?.directions[String(direction)]?.[dayType]
+      if (!day) continue
+      const window = serviceWindowOf(day)
+      const first = padClockTime(window.first)
+      const last = padClockTime(window.last)
+      if (first || last) {
+        return { first, last }
+      }
+    }
+    return null
+  }
+
+  /**
    * Resolve origin departure seconds for the current operating day.
    *
    * When an official minute-level timetable exists for a station on this line
-   * (e.g. Beijing Line 7 群芳站), each departure at that station is shifted back
+   * (e.g. the station table this repo ships), each departure at that station is shifted back
    * to the origin by the station's cumulative run offset — this makes the whole
    * simulated line phase-locked to the REAL timetable instead of a generic
    * headway grid. Otherwise enumerate departures with headway rules.
@@ -358,12 +460,41 @@ export function resolveCityFromLineId(lineId: string): string | null {
   return m ? m[1]! : null
 }
 
-/** Extract line keyword (e.g. '10', '亦庄') from subway lineId. */
+/** Extract line keyword (e.g. '88', or a named line's own keyword) from subway lineId. */
 export function extractLineKeyword(lineId: string): string {
   const parts = lineId.split('_')
   // subway_<code>_<keyword...> where <code> may itself be amap_<adcode>
   const codeStartIdx = parts[1] === 'amap' ? 3 : 2
   return parts.slice(codeStartIdx).join('_')
+}
+
+/**
+ * The direction this engine can act on: 0 (the stop list as served) or 1
+ * (reversed).
+ *
+ * A caller can pass neither. `GET /lines/subway_.../live?direction=abc` reaches
+ * the engine as `Number('abc')` = NaN, and left alone that NaN was echoed into
+ * the payload as `direction: null` AND baked into every generated train's id —
+ * `train_subway_027_7_dNaN_dep118`, which the arrivals rows carry as their
+ * `busId`. The stop order below already treats anything but 1 as the normal
+ * direction, so normalizing here makes the id, the echoed direction, the stop
+ * order and the departures one value instead of four readings of the same input.
+ */
+export function statedDirection(direction: number | undefined | null): 0 | 1 {
+  return direction === 1 ? 1 : 0
+}
+
+/**
+ * The name a generated train is carried under, in the app's own vocabulary:
+ * `train_<lineId>_d<direction>_dep<i>`.
+ *
+ * Named here rather than inlined so the one property that matters has one owner:
+ * the direction in the name is a STATED direction (`statedDirection`), never the
+ * raw argument — the observed leak was `train_subway_027_7_dNaN_dep118` reaching
+ * the API as a vehicle's `busId`, from a `?direction=abc` query parameter.
+ */
+export function simulatedTrainId(lineId: string, direction: number | undefined | null, index: number): string {
+  return `train_${lineId}_d${statedDirection(direction)}_dep${index}`
 }
 
 export function parseHm(timeStr: string): number | null {
@@ -373,6 +504,53 @@ export function parseHm(timeStr: string): number | null {
   const mm = Number(match[2])
   if (Number.isNaN(hh) || Number.isNaN(mm)) return null
   return hh * 3600 + mm * 60
+}
+
+/** Seconds in a calendar day: the shift `serviceWindowSeconds` moves a tail by. */
+const CALENDAR_DAY_SECONDS = 24 * 3600
+
+/**
+ * The line's own service window in seconds of the OPERATING day, from its
+ * 「H:MM」 first / last departure strings. The fallbacks are the simulation
+ * parameter ({@link SIMULATION_FIRST_SEC}) for a line whose hours are unknown.
+ *
+ * `parseHm` answers seconds of the CALENDAR day, and the clock this window is
+ * compared against does not run 00:00–24:00: `currentSecOfDay` in `getLiveStatus`
+ * shifts 00:00–03:59 by +24 h so the after-midnight tail stays continuous with
+ * the evening it belongs to — the same 04:00 boundary `operatingDaySecondsOf`
+ * draws in `@real-time-transport/shared`, and the boundary the station timetable
+ * already puts its own tail behind (`operatingDaySeconds`). A last departure read
+ * straight off the clock therefore lands BEFORE its own first departure: the
+ * transcribed 群芳 direction-1 table ends at `00:16`, whose 960 s is earlier than
+ * its own `05:48` start. That inverted window matched no hour of the day — the
+ * departures were filtered away and the direction answered an empty board around
+ * the clock.
+ *
+ * A last time that precedes the first is that same after-midnight tail, and is
+ * understood as the NEXT calendar day. Only the LAST end moves, and only when it
+ * precedes the first: a window stated `05:16`–`23:06` is returned exactly as read,
+ * and a first departure is never moved, because a service day that begins after
+ * midnight is not a shape this data states.
+ */
+export function serviceWindowSeconds(
+  firstBusTime: string,
+  lastBusTime: string,
+): { first: number, last: number } {
+  const first = parseHm(firstBusTime) ?? SIMULATION_FIRST_SEC
+  let last = parseHm(lastBusTime) ?? SIMULATION_LAST_SEC
+  if (last < first) last += CALENDAR_DAY_SECONDS
+  return { first, last }
+}
+
+/**
+ * Zero-pad an official timetable's 「H:MM」 to the 「HH:MM」 the line contract
+ * carries. A value that is not a clock time passes through untouched: the
+ * timetable is real data and is never rewritten into a different value.
+ */
+function padClockTime(raw: string): string {
+  const s = String(raw ?? '').trim()
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s)
+  return m ? `${m[1]!.padStart(2, '0')}:${m[2]}` : s
 }
 
 export function getHeadwayForTime(secOfDay: number): number {

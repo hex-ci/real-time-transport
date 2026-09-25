@@ -51,10 +51,10 @@ describe('Transit Adapter Package', () => {
     const subway = new UniversalSubwayEngine(amap)
 
     // Should return null details gracefully (no Amap key configured)
-    const detail = await subway.getLineDetail('subway_027_7', 0)
+    const detail = await subway.getLineDetail('subway_027_88', 0)
     expect(detail).toBeNull()
 
-    const live = await subway.getLiveStatus('subway_027_7', 0)
+    const live = await subway.getLiveStatus('subway_027_88', 0)
     expect(live).toBeNull()
   })
 
@@ -75,22 +75,22 @@ describe('Transit Adapter Package', () => {
     const router = new SubwayRouterProvider(subwayEngine, chelaile)
 
     // Subway line id starts with subway_ => routed to subway engine
-    const subwayDetail = await router.getLineDetail('subway_027_7', 0)
+    const subwayDetail = await router.getLineDetail('subway_027_88', 0)
     expect(subwayDetail).toBeNull() // No Amap key, graceful null
 
     // Bus line id => routed to Chelaile. The upstream call is real (no mock):
     // it may return a detail (network available) or null (offline/throttled).
     // Both are contract-valid; the only invalid outcome is throwing.
-    const busDetail = await router.getLineDetail('0010257103360', 0)
+    const busDetail = await router.getLineDetail('001073243721', 0)
     expect(busDetail === null || typeof busDetail?.lineId === 'string').toBe(true)
   })
 
   it('parses subway lineIds with city code and keyword correctly', async () => {
     const { resolveCityFromLineId, extractLineKeyword } = await import('../providers/universal-subway.js')
-    expect(resolveCityFromLineId('subway_027_10')).toBe('027')
+    expect(resolveCityFromLineId('subway_027_88')).toBe('027')
     expect(resolveCityFromLineId('subway_amap_440100_3')).toBe('amap_440100')
-    expect(extractLineKeyword('subway_027_10')).toBe('10')
-    expect(extractLineKeyword('subway_027_亦庄线')).toBe('亦庄线')
+    expect(extractLineKeyword('subway_027_88')).toBe('88')
+    expect(extractLineKeyword('subway_027_环城线')).toBe('环城线')
     expect(extractLineKeyword('subway_amap_440100_3')).toBe('3')
   })
 
@@ -111,10 +111,10 @@ describe('Transit Adapter Package', () => {
     const amap = new AmapGisService('')
     const aggregator = new TransitAggregator([failing, new UniversalSubwayEngine(amap)])
 
-    const detail = await aggregator.getLineDetail('subway_027_7', 0)
+    const detail = await aggregator.getLineDetail('subway_027_88', 0)
     expect(detail).toBeNull()
 
-    const live = await aggregator.getLiveStatus('subway_027_7', 0)
+    const live = await aggregator.getLiveStatus('subway_027_88', 0)
     expect(live).toBeNull()
 
     const search = await aggregator.searchLines('372', '027')
@@ -139,10 +139,10 @@ describe('Transit Adapter Package', () => {
     // Regression: /lines/:id/live used to re-resolve static geometry from Amap
     // on every poll, so one QPS throttle 404'd a perfectly valid line.
     const cachedDetail: LineDetail = {
-      lineId: 'subway_027_7',
-      lineName: '地铁7号线',
+      lineId: 'subway_027_88',
+      lineName: '地铁88号线',
       direction: 0,
-      directionName: '开往 北京西站',
+      directionName: '开往 辛站',
       // Service window must cover the engine's whole normalized day range.
       // It maps 00:00–03:59 to +24h, so currentSecOfDay spans [14400, 100799];
       // 01:00–30:00 covers that with margin, keeping this test time-independent.
@@ -151,14 +151,14 @@ describe('Transit Adapter Package', () => {
       cityCode: '027',
       type: 'subway',
       stops: [
-        { id: 's1', name: '环球度假区', order: 1, lat: 39.849152, lng: 116.679099, interchanges: [] },
-        { id: 's2', name: '群芳', order: 2, lat: 39.855, lng: 116.66, interchanges: [] },
-        { id: 's3', name: '高楼金', order: 3, lat: 39.86, lng: 116.63, interchanges: [] },
-        { id: 's4', name: '花庄', order: 4, lat: 39.87, lng: 116.58, interchanges: [] },
-        { id: 's5', name: '黑庄户', order: 5, lat: 39.88, lng: 116.52, interchanges: [] },
-        { id: 's6', name: '郎辛庄', order: 6, lat: 39.885, lng: 116.48, interchanges: [] },
-        { id: 's7', name: '双井', order: 7, lat: 39.89, lng: 116.45, interchanges: [] },
-        { id: 's8', name: '北京西站', order: 8, lat: 39.894, lng: 116.32, interchanges: [] },
+        { id: 's1', name: '甲站', order: 1, lat: 39.95, lng: 116.3, interchanges: [] },
+        { id: 's2', name: '乙站', order: 2, lat: 39.955, lng: 116.305, interchanges: [] },
+        { id: 's3', name: '丙站', order: 3, lat: 39.96, lng: 116.31, interchanges: [] },
+        { id: 's4', name: '丁站', order: 4, lat: 39.965, lng: 116.315, interchanges: [] },
+        { id: 's5', name: '戊站', order: 5, lat: 39.97, lng: 116.32, interchanges: [] },
+        { id: 's6', name: '己站', order: 6, lat: 39.975, lng: 116.325, interchanges: [] },
+        { id: 's7', name: '庚站', order: 7, lat: 39.98, lng: 116.33, interchanges: [] },
+        { id: 's8', name: '辛站', order: 8, lat: 39.985, lng: 116.335, interchanges: [] },
       ],
       routeLengthMeters: 40000,
       stationDistances: [0, 2000, 6000, 12000, 18000, 24000, 32000, 40000],
@@ -166,7 +166,7 @@ describe('Transit Adapter Package', () => {
 
     // No Amap key at all: proves the live path works purely off the resolver.
     const engine = new UniversalSubwayEngine(new AmapGisService(''), undefined, async () => cachedDetail)
-    const live = await engine.getLiveStatus('subway_027_7', 0, '027')
+    const live = await engine.getLiveStatus('subway_027_88', 0, '027')
 
     expect(live).not.toBeNull()
     expect(live?.dataSource).toBe('subway_schedule')
@@ -181,9 +181,9 @@ describe('Transit Adapter Package', () => {
       undefined,
       async () => { throw new Error('DB down') },
     )
-    await expect(throwing.getLiveStatus('subway_027_7', 0, '027')).resolves.toBeNull()
+    await expect(throwing.getLiveStatus('subway_027_88', 0, '027')).resolves.toBeNull()
 
     const empty = new UniversalSubwayEngine(new AmapGisService(''), undefined, async () => null)
-    await expect(empty.getLiveStatus('subway_027_7', 0, '027')).resolves.toBeNull()
+    await expect(empty.getLiveStatus('subway_027_88', 0, '027')).resolves.toBeNull()
   })
 })

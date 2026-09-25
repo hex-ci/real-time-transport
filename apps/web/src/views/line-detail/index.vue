@@ -24,7 +24,11 @@ import {
   DialogTitle,
 } from 'reka-ui'
 import { useEventListener, useIntervalFn } from '@vueuse/core'
-import { useTransitStore } from '@/stores/transit.store'
+import {
+  refreshFreshnessOf,
+  refreshStatusTextOf,
+  useTransitStore,
+} from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { useGis } from '@/composables/use-gis'
@@ -38,8 +42,14 @@ import {
   type StationAnchor,
 } from './components'
 import type { DirectionOption } from './types'
-import type { Station } from '@real-time-transport/shared'
+import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@real-time-transport/shared'
 import { effectiveCommuteDirection } from '@real-time-transport/shared/line-group'
+import { arrivalProvenanceOf, statedArrivalMinutes, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
+import { provenanceLabelOf } from '@/provenance-copy'
+import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
+import { AT_PLATFORM_ETA_TEXT } from './at-platform'
+import { estimateSubwayArrivalSeconds } from './pending-estimate'
 
 const {
   id: propId,
@@ -47,8 +57,10 @@ const {
   cityCode: propCityCode,
 } = defineProps<{
   id: string
-  direction: string
-  cityCode: string
+  // Optional in the route: /line/:id carries neither, and the computeds below
+  // fall back to the store's direction and city.
+  direction?: string
+  cityCode?: string
 }>()
 
 const router = useRouter()
@@ -93,35 +105,56 @@ function updatePageHeight(): void {
 
 const { currentLineDetail, currentLiveStatus } = storeToRefs(transitStore)
 const { nearestStation } = storeToRefs(locationStore)
-const { isLoading, loadError, isRefreshingLive } = storeToRefs(transitStore)
+const { isLoading, loadFailure, isRefreshingLive } = storeToRefs(transitStore)
+const {
+  refreshInFlight,
+  refreshOutcome,
+  refreshWaitSecondsLeft,
+  refreshReading,
+} = storeToRefs(transitStore)
 
 const selectedStation = shallowRef<Station | null>(null)
 const stationAnchor = shallowRef<StationAnchor | null>(null)
 const routeBoardRef = useTemplateRef<InstanceType<typeof RouteBoard>>('routeBoardRef')
 const showLineInfo = shallowRef(false)
 const stationArrivals = shallowRef<{
-  isExact: boolean
-  arrivals: Array<{
-    time: string
-    etaSeconds: number
-    stopsAway?: number
-    distanceMeters?: number
-    isAtStation?: boolean
-  }>
+  /** Each row states its own F4 provenance; the list mark is derived from them. */
+  arrivals: ArrivalRow[]
+  /** F3: whether service is running, from the line's own first/last departure. */
+  operatingStatus?: OperatingStatus
+  /**
+   * F-C: the exact table's own caveat for this platform (e.g. a last departure
+   * that is a half-route), or null when the answer carries none. Rendered with
+   * the departures below, never paraphrased.
+   */
+  note?: string | null
 } | null>(null)
 
 /**
- * Honest freshness label for the live data shown in the station panel: how long
- * ago the upstream snapshot we are rendering was produced. Never claims "实时"
- * without a timestamp behind it, and says so plainly when nothing has arrived.
+ * F4: the line-level mark, for the header and the info drawer.
+ *
+ * The source that ANSWERED decides it — not the route type, and not which screen
+ * this is — so a failover is reflected without the UI knowing anything about the
+ * providers. Null renders no mark.
+ */
+const lineDataMark = computed(() =>
+  provenanceLabelOf(vehicleProvenanceOf(currentLiveStatus.value?.dataSource)))
+
+/**
+ * Honest freshness label for the snapshot the station panel renders: how long ago
+ * the reading we are drawing was produced, and nothing else.
+ *
+ * It used to call that reading 「实时数据」, which is a claim about its KIND — F4's
+ * mark's job — and a false one on every subway line, whose trains are generated
+ * from the timetable. Age is what this line actually knows.
  */
 const liveFreshnessLabel = computed(() => {
   const updated = currentLiveStatus.value?.updatedAt
-  if (!updated) return '暂无实时数据'
+  if (!updated) return '暂无数据'
   const ageSec = Math.max(0, Math.round((Date.now() - updated) / 1000))
-  if (ageSec < 60) return `实时数据 · ${ageSec} 秒前更新`
+  if (ageSec < 60) return `${ageSec} 秒前更新`
   const ageMin = Math.round(ageSec / 60)
-  return `实时数据 · ${ageMin} 分钟前更新`
+  return `${ageMin} 分钟前更新`
 })
 
 const lineId = computed(() => String(propId || ''))
@@ -130,8 +163,84 @@ const currentCityCode = computed(() => String(propCityCode || cityStore.currentC
 const gisLoading = computed(() => isLoadingDecision.value)
 
 /**
- * Subway routes are tinted amber, buses cyan — the same rule KioskView and the
- * home-screen cards use, so the two badges here read as part of one system.
+ * F11's entry on this page: the one line it re-reads, named for the server.
+ *
+ * Declared after the route-derived values it reads (rule: a computed's sources
+ * come first), and built from the line actually on screen — the endpoint reads
+ * what it is asked for, so the page that shows one line asks for one line.
+ */
+const refreshTargets = computed<RefreshLiveTarget[]>(() => [{
+  lineId: lineId.value,
+  direction: currentDirection.value,
+  cityCode: currentCityCode.value,
+}])
+
+/**
+ * The state line under the button — its coarse state, which is what a live region
+ * announces, and the seconds beside it, which are not announced at all. Null when
+ * there is nothing to report.
+ */
+const refreshStatus = computed(() => refreshStatusTextOf({
+  inFlight: refreshInFlight.value,
+  outcome: refreshOutcome.value,
+  waitSeconds: refreshWaitSecondsLeft.value,
+  // One line asked for, so a capped attempt is not a case this page can be in.
+  wanted: refreshTargets.value.length,
+  covered: refreshTargets.value.length,
+  // This page's one target is the line in the route, so there is no list whose
+  // read could still be open: the refresh dialog hangs off the board, which
+  // renders only for a line that loaded (the load state replaces it otherwise).
+  targetsRead: true,
+}))
+
+/**
+ * What the button is doing. It stays out of the way while either half of a press
+ * is open — the request that spends the window, or the read-back that shows it —
+ * because a second press during either one would be an answer about a different
+ * moment.
+ */
+const refreshing = computed(() => refreshInFlight.value || isRefreshingLive.value)
+
+/** The reading this page's last refresh obtained, as the freshness line reports it. */
+const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
+
+/**
+ * Tone of the state line. The words carry the state; the tone only backs them up,
+ * so nothing here is the only signal of anything.
+ */
+const refreshStatusClass = computed(() => {
+  if (refreshOutcome.value === 'throttled') return 'text-amber-400'
+  if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
+    return 'text-rose-400'
+  }
+  if (refreshOutcome.value === 'ok') return 'text-emerald-400'
+  return 'text-slate-400'
+})
+
+/**
+ * Ids the button points at, so the state is read out together with the control
+ * instead of being a separate thing to find.
+ */
+const refreshDescribedBy = computed(() => refreshStatus.value
+  ? 'refresh-freshness refresh-status'
+  : 'refresh-freshness')
+
+/**
+ * Pressed: ask for a re-read through the shared request, then read the line back
+ * so the board shows what that request obtained.
+ *
+ * A refused or failed attempt obtained nothing, so the board keeps the reading it
+ * already has — the control reports the outcome, and the numbers on screen do not
+ * change to match an answer that carried no reading.
+ */
+async function onRefresh(): Promise<void> {
+  const outcome = await transitStore.refreshLive(refreshTargets.value)
+  if (outcome === 'ok') await transitStore.reloadLiveStatus()
+}
+
+/**
+ * Subway routes are tinted amber, buses cyan — the same rule the home-screen
+ * cards use, so the two badges here read as part of one system.
  * The `subway_` lineId prefix is a fallback for the moment before detail loads.
  */
 const isSubway = computed(() =>
@@ -185,8 +294,8 @@ const canSwitchDirection = computed(() => oppositeLineId.value !== null)
  * to the left-hand tab on every switch and made the control feel like it jumped.
  *
  * The opposite way reverses the stop sequence, so its terminal is this
- * direction's first stop. Loop lines (first stop === last stop, e.g. Beijing
- * Line 10) cannot be told apart by terminal, so they fall back to 上行/下行.
+ * direction's first stop. A loop line (first stop === last stop) cannot be told
+ * apart by terminal, so it falls back to 上行/下行.
  */
 const directionOptions = computed<DirectionOption[]>(() => {
   const d = currentLineDetail.value
@@ -302,7 +411,7 @@ function onSelectStation(st: Station, anchor?: StationAnchor): void {
     stationAnchor.value = routeBoardRef.value.getStationAnchor(st.id)
   }
   clearDecision()
-  void transitStore.refreshLive()
+  void transitStore.reloadLiveStatus()
   void fetchStationArrivals()
 }
 
@@ -414,19 +523,50 @@ async function computeWalkDecision(): Promise<void> {
   })
 }
 
-const selectedStationEta = computed(() => {
-  if (!selectedStation.value) return '等待发车'
+/**
+ * F4: the panel's headline answer, together with the KIND of number it is.
+ *
+ * Text and mark are decided by the same branch on purpose — a line that states
+ * 「约 3 分钟」 must carry the provenance of the minute it states, and a line that
+ * states an operating fact carries none, because there is no number to classify.
+ * Keeping them apart is how a computed minute ends up looking like a reading.
+ */
+const selectedStationEta = computed<{ text: string, mark: string | null }>(() => {
+  if (!selectedStation.value) return { text: '等待发车', mark: null }
   const targetOrder = selectedStation.value.order
+
+  /**
+   * The mark for the one remaining self-computed minute: the subway pending
+   * window, where the value comes from the engine's declared model. A bus row
+   * never reaches it — a bus row without an upstream minute states no minute at
+   * all, so there is nothing for a mark to qualify.
+   */
+  const estimatedMark = provenanceLabelOf(arrivalProvenanceOf({
+    vehicle: vehicleProvenanceOf(currentLiveStatus.value?.dataSource),
+    basis: 'our_estimate',
+  }))
 
   // 1. Precise station arrivals returned by backend
   if (stationArrivals.value && stationArrivals.value.arrivals.length > 0) {
     const next = stationArrivals.value.arrivals[0]!
+    const mark = provenanceLabelOf(next.provenance)
     if (next.isAtStation) {
-      return '车辆正在本站 (即将发车)'
+      // An observation of where a vehicle is, not a number: a mark qualifies a
+      // number, and this claim states none. The row's own kind still shows in
+      // the list below.
+      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
     }
-    const mins = Math.max(1, Math.round(next.etaSeconds / 60))
-    if (stationArrivals.value.isExact) {
-      return `官方时刻 ${next.time} 到站 (约 ${mins} 分钟)`
+    // No upstream minute means no minute. The extrapolation this branch would
+    // otherwise fall back on (a snapshot speed applied across the remaining
+    // stops) has no fixed sign of error — measured 5-10 minutes early on one
+    // line and up to 28 minutes late on another — so the row states the absence.
+    const mins = statedArrivalMinutes(next)
+    if (mins === null) return { text: ARRIVAL_MINUTE_UNAVAILABLE_TEXT, mark: null }
+    // A published departure is a clock entry, not a position: the time is the whole
+    // answer, and there is no distance or stop count to report beside it. The mark
+    // beside it says which kind of number it is.
+    if (next.provenance === 'exact_timetable') {
+      return { text: `${next.time} 到站 (约 ${mins} 分钟)`, mark }
     }
     const stopsText = next.stopsAway
       ? (next.stopsAway === 1 ? '即将进站 (1 站)' : `距本站 ${next.stopsAway} 站`)
@@ -434,14 +574,29 @@ const selectedStationEta = computed(() => {
     const distText = next.distanceMeters && next.distanceMeters > 0
       ? ` · ${(next.distanceMeters / 1000).toFixed(1)}km`
       : ''
-    return `预计 ${mins} 分钟到达 (${stopsText}${distText} · ${next.time})`
+    return { text: `预计 ${mins} 分钟到达 (${stopsText}${distText} · ${next.time})`, mark }
   }
 
-  // 2. Explicitly confirmed no approaching buses from backend
+  // 2) Explicitly confirmed no approaching buses from backend
   if (stationArrivals.value && stationArrivals.value.arrivals.length === 0) {
+    // F3: the service day comes first. If it has not started or has already
+    // ended, that IS the answer — a statement about vehicles in transit would be
+    // describing a line that is not running.
+    const operating = stationArrivals.value.operatingStatus
+    if (operating && (operating.state === 'after_last' || operating.state === 'before_first')) {
+      return { text: operatingTextOf(operating), mark: null }
+    }
     const allBuses = currentLiveStatus.value?.buses || []
     if (allBuses.length === 0) {
-      return '线路上暂无在途车辆 / 待发车'
+      // Nothing on the line. 「待发车」 used to be appended here, which claimed a
+      // vehicle was about to leave when there is none; with a state in hand, the
+      // row says whether the line is running at all.
+      return {
+        text: operating
+          ? `${operatingLabelOf(operating)} · 线路上暂无在途车辆`
+          : '线路上暂无在途车辆',
+        mark: null,
+      }
     }
     // A bus is "past" when its next stop is already beyond the target
     const passedBuses = allBuses.filter((b) => {
@@ -450,18 +605,20 @@ const selectedStationEta = computed(() => {
     })
     const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
     if (servingNow) {
-      return '车辆正在本站 (即将发车)'
+      // Same rule as the at-platform branch above: a statement with no number
+      // carries no mark.
+      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
     }
     if (passedBuses.length > 0) {
-      return '本班车已过本站 · 前序暂无在途车'
+      return { text: '本班车已过本站 · 前序暂无在途车', mark: null }
     }
-    return '前序暂无在途车辆'
+    return { text: '前序暂无在途车辆', mark: null }
   }
 
   // 3. Fallback when stationArrivals is pending: derive from currentLiveStatus
-  if (!currentLiveStatus.value) return '等待发车'
+  if (!currentLiveStatus.value) return { text: '等待发车', mark: null }
   const allBuses = currentLiveStatus.value.buses
-  if (allBuses.length === 0) return '线路上暂无在途车辆 / 待发车'
+  if (allBuses.length === 0) return { text: '线路上暂无在途车辆', mark: null }
 
   const upcoming = allBuses
     .filter((b) => {
@@ -477,12 +634,14 @@ const selectedStationEta = computed(() => {
     })
     const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
     if (servingNow) {
-      return '车辆正在本站 (即将发车)'
+      // Same rule as the at-platform branch above: a statement with no number
+      // carries no mark.
+      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
     }
     if (passed.length > 0) {
-      return '本班车已过本站 · 前序暂无在途车'
+      return { text: '本班车已过本站 · 前序暂无在途车', mark: null }
     }
-    return '前序暂无在途车辆'
+    return { text: '前序暂无在途车辆', mark: null }
   }
 
   const bus = upcoming[0]!
@@ -491,24 +650,16 @@ const selectedStationEta = computed(() => {
 
   if (isSubway.value) {
     const progress = typeof bus.progress === 'number' ? bus.progress : 0
-    const mins = Math.max(1, Math.round(((stops - progress) * 135) / 60))
-    return `预计 ${mins} 分钟到达 (${stopsText})`
+    // The server's own model, floored — see `pending-estimate.ts`.
+    const etaSec = estimateSubwayArrivalSeconds(stops, progress)
+    const mins = Math.max(1, Math.round(etaSec / 60))
+    return { text: `预计 ${mins} 分钟到达 (${stopsText})`, mark: estimatedMark }
   }
 
-  const sd = currentLineDetail.value?.stationDistances
-  if (sd && typeof bus.distanceFromStart === 'number' && sd[targetOrder - 1]) {
-    const targetDist = sd[targetOrder - 1]!
-    const remainingMeters = targetDist - bus.distanceFromStart
-    if (remainingMeters > 0) {
-      const speed = (bus.speed && bus.speed >= 3 && bus.speed <= 18) ? bus.speed : 6.0
-      const etaSec = Math.round(remainingMeters / speed + (stops - 1) * 30)
-      const mins = Math.max(1, Math.round(etaSec / 60))
-      const km = (remainingMeters / 1000).toFixed(1)
-      return `预计 ${mins} 分钟到达 (${stopsText} · ${km}km)`
-    }
-  }
-
-  return `正在获取到站时间… (${stopsText})`
+  // A bus row with no upstream minute states no minute, here as in the arrivals
+  // branch above: the row says the minute is unavailable and keeps what it can
+  // still state — how far away the vehicle is.
+  return { text: `${ARRIVAL_MINUTE_UNAVAILABLE_TEXT} (${stopsText})`, mark: null }
 })
 
 watch(
@@ -604,7 +755,7 @@ onUnmounted(() => {
     />
 
     <!-- Loading / Error honest states -->
-    <LineLoadState v-if="!currentLineDetail" :is-loading="isLoading" :load-error="loadError" />
+    <LineLoadState v-if="!currentLineDetail" :is-loading="isLoading" :failure="loadFailure" />
 
     <!-- 2D Konva Route Board Viewport (Full width, zero obstruction, adaptive anchor popover) -->
     <div
@@ -632,7 +783,8 @@ onUnmounted(() => {
         :walk-decision="walkDecision"
         :has-user-coords="Boolean(locationStore.userCoords)"
         :gis-loading="gisLoading"
-        :eta="selectedStationEta"
+        :eta="selectedStationEta.text"
+        :eta-mark="selectedStationEta.mark"
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
         :can-pin="Boolean(matchingFavorite)"
@@ -705,9 +857,9 @@ onUnmounted(() => {
             </span>
           </div>
           <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-            <span class="block text-xs text-slate-400">营运与数据源</span>
+            <span class="block text-xs text-slate-400">数据类型</span>
             <span class="font-mono text-xs font-semibold text-cyan-400">
-              {{ currentLineDetail.type === 'subway' ? '官方排班推演' : '实时上游数据' }}
+              {{ lineDataMark ?? '暂无数据' }}
             </span>
           </div>
         </div>
@@ -750,16 +902,44 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Quick Action -->
+        <!-- F11: this page's one refresh entry. It asks through the request that
+             owns the cooldown, so a press here and a press on the home screen
+             spend one window between them, and it reports what that request
+             answered: the wait left on a refusal, a failure, and the instant the
+             reading it obtained was obtained. The state line below it is the same
+             control's answer when the connection itself is gone. -->
         <div class="pt-1">
           <button
-            class="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 active:scale-95 lg:gap-2.5 lg:py-3.5 lg:text-base"
-            :disabled="isRefreshingLive"
-            @click="transitStore.refreshLive()"
+            class="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 transition active:scale-95 disabled:opacity-60 lg:gap-2.5 lg:py-3.5 lg:text-base"
+            :disabled="refreshing"
+            :aria-describedby="refreshDescribedBy"
+            @click="onRefresh"
           >
-            <RefreshCw class="h-3.5 w-3.5 shrink-0" :class="isRefreshingLive ? 'animate-spin' : ''" />
-            <span>{{ isRefreshingLive ? '正在拉取实时数据…' : '刷新最新实时车况' }}</span>
+            <RefreshCw
+              class="h-3.5 w-3.5 shrink-0"
+              :class="refreshing ? 'animate-spin' : ''"
+              aria-hidden="true"
+            />
+            <span>刷新最新车况</span>
           </button>
+          <!-- The reading's own instant, and the kind of value it is. A reading
+               that was never obtained reports no time at all. -->
+          <p id="refresh-freshness" class="mt-2 text-xs text-slate-400 lg:text-base">
+            {{ refreshFreshness.text }}
+          </p>
+          <!-- The state line. Only the coarse state sits inside the live region: the
+               seconds are rendered beside it, because a countdown in a live region
+               queues one announcement per second of the wait. The region is rendered
+               before it has anything to say — one created together with its first
+               word is not announced at all by some screen readers. The two spans sit
+               against each other, so the line reads as it did from one element. -->
+          <p
+            id="refresh-status"
+            class="text-xs lg:text-base"
+            :class="[refreshStatusClass, refreshStatus ? 'mt-1' : '']"
+          >
+            <span role="status" aria-live="polite">{{ refreshStatus?.announcement }}</span><span>{{ refreshStatus?.detail }}</span>
+          </p>
         </div>
       </DialogContent>
     </DialogPortal>

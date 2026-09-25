@@ -8,26 +8,36 @@ import {
   PopoverRoot,
 } from 'reka-ui'
 import { Footprints, House, Building2, X } from '@lucide/vue'
-import type { Station, WalkDecision } from '@real-time-transport/shared'
+import type { ArrivalRow, Station, WalkDecision } from '@real-time-transport/shared'
+import { statedArrivalMinutes } from '@real-time-transport/shared'
+import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
+import { provenanceLabelOf } from '@/provenance-copy'
+import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../provenance'
 import type { StationAnchor } from '../types'
 
 const props = defineProps<{
   station: Station | null
   anchor: StationAnchor | null
   arrivals?: {
-    isExact: boolean
-    arrivals: Array<{
-      time: string
-      etaSeconds: number
-      stopsAway?: number
-      distanceMeters?: number
-      isAtStation?: boolean
-    }>
+    arrivals: ArrivalRow[]
+    /**
+     * F-C: the exact table's own caveat for this platform, verbatim — e.g. a last
+     * departure that only runs half the route. Upstream's words, carried beside
+     * the departures they qualify and never worded by this panel: prefixing it
+     * would make the app the author of a claim it only holds.
+     */
+    note?: string | null
   } | null
   walkDecision?: WalkDecision | null
   hasUserCoords?: boolean
   gisLoading?: boolean
   eta: string
+  /**
+   * F4: the kind of number `eta` is, or null when the line states none. Rendered
+   * beside the number — a step quieter than it — so a modelled minute never reads
+   * like a reading.
+   */
+  etaMark?: string | null
   freshness: string
   isRefreshing?: boolean
   /** False when this line is not followed, so there is nowhere to store a board stop. */
@@ -45,6 +55,27 @@ const emit = defineEmits<{
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
+
+/** The rows one arrivals answer carried; they are classified as one list. */
+const arrivalRows = computed(() => props.arrivals?.arrivals ?? [])
+
+/**
+ * F4: the mark for the whole list, when every classified row agrees.
+ *
+ * `null` for a list that states nothing and for a list whose rows disagree — one
+ * word would then be false about part of it, and `rowMarkOf` gives those rows
+ * their own instead. Derived from the rows the answer carried, never from where
+ * this popover happens to be rendered.
+ */
+const listMark = computed(() => provenanceLabelOf(arrivalListProvenanceOf(arrivalRows.value)))
+
+/**
+ * One row's own mark, rendered only when the list cannot speak for it. A row that
+ * stated no provenance gets nothing — never the flattering answer.
+ */
+function rowMarkOf(index: number): string | null {
+  return provenanceLabelOf(arrivalRowProvenanceOf(arrivalRows.value, index))
+}
 
 const virtualAnchor = computed(() => {
   if (!props.anchor) return undefined
@@ -155,42 +186,70 @@ const decisionStyle = computed(() => {
                 class="inline-block h-1.5 w-1.5 rounded-full"
                 :class="isRefreshing ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'"
               ></span>
-              {{ isRefreshing ? '正在获取最新实时数据…' : freshness }}
+              {{ isRefreshing ? '正在刷新…' : freshness }}
             </div>
 
+            <!-- The number, and beside it the KIND of number it is (F4). Both are
+                 decided by the same branch in the view, so they cannot disagree. -->
             <p class="font-mono text-xs font-semibold text-cyan-300 lg:text-base">
-              {{ eta }}
+              {{ eta }}<span v-if="etaMark" class="ml-1 text-xs font-normal text-slate-400"><span aria-hidden="true">·</span> {{ etaMark }}</span>
             </p>
           </div>
 
           <!-- Exact Timetable / Subsequent Arrivals -->
           <div v-if="arrivals && arrivals.arrivals.length > 0" class="rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold text-slate-400">后续进站计划</span>
+            <div class="flex items-center justify-between gap-2">
+              <span class="shrink-0 text-xs font-semibold text-slate-400">后续进站计划</span>
+              <!-- The list's own mark: stated once when the rows agree, so the
+                   arrival times stay the loudest thing in the panel. -->
               <span
-                v-if="arrivals.isExact"
-                class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30"
-              >官方时刻</span>
-              <span
-                v-else
-                class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400 border border-slate-700/50"
-              >推演排班</span>
+                v-if="listMark"
+                class="shrink-0 rounded border border-slate-700/60 bg-slate-800/60 px-1.5 py-0.5 text-xs font-medium text-slate-300"
+              >
+                {{ listMark }}
+              </span>
             </div>
             <div class="flex flex-wrap gap-1.5">
               <span
                 v-for="(a, i) in arrivals.arrivals"
-                :key="a.time || i"
+                :key="a.time || a.busId || i"
                 class="rounded-lg border px-2 py-0.5 font-mono text-xs"
                 :class="i === 0
                   ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
                   : 'border-slate-800 bg-slate-900 text-slate-300'"
               >
-                {{ a.time }}
-                <span v-if="!a.isAtStation" class="ml-1 text-xs text-slate-400">{{ Math.max(1, Math.round(a.etaSeconds / 60)) }}分</span>
+                <!-- A row states a minute or it does not, and `statedArrivalMinutes`
+                     is where that is decided. A row with no minute renders the
+                     absence instead of a number — never `undefined分` and never a
+                     minute this app estimated, which is the one thing the row's
+                     own contract no longer carries. -->
+                <template v-if="statedArrivalMinutes(a) !== null">
+                  {{ a.time }}
+                  <span v-if="!a.isAtStation" class="ml-1 text-xs text-slate-400">{{ statedArrivalMinutes(a) }}分</span>
+                </template>
+                <template v-else>{{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}</template>
                 <span v-if="a.stopsAway" class="ml-1 text-xs text-slate-400">({{ a.stopsAway }}站)</span>
+                <!-- Sources differ inside one list: each row speaks for itself —
+                     and only for a row that states a number. An at-platform entry
+                     is an observation of where a vehicle is, with no minute for a
+                     mark to qualify (see the at-platform display rules). -->
+                <span v-if="!a.isAtStation && rowMarkOf(i)" class="ml-1 text-xs text-slate-400">{{ rowMarkOf(i) }}</span>
               </span>
             </div>
           </div>
+
+          <!-- F-C: the table's own caveat, verbatim, beside the departures it
+               qualifies — OUTSIDE the list block on purpose, so it is still read
+               when the list is empty, which is exactly the hour it matters (the
+               last departure may not go the whole way). Upstream's words, never
+               re-worded here. -->
+          <p
+            v-if="arrivals?.note"
+            data-arrivals-note="true"
+            class="rounded-xl border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-xs leading-relaxed text-amber-300/90 lg:text-base"
+          >
+            {{ arrivals.note }}
+          </p>
 
           <!-- Pin control: makes this stop the route's target on the home cards
                for the direction being viewed. -->

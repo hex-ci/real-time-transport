@@ -631,8 +631,8 @@ function boardMetrics(): BoardMetrics {
     return {
       paddingX: 20,
       paddingY: 24,
-      // Sized for the worst real label: a 14-character name
-      // (江场村（鲜活农产品流通中心）) wraps to 4 lines in a 54px column, which at
+      // Sized for the tallest wrapped label the board must lay out: a 14-character
+      // name (甲甲路（乙乙路丙丙路丁丁站）) wraps to 4 lines in a 54px column, which at
       // lineHeight 1.4 needs ~62px. The row must clear stationRadius + 4 label
       // offset + those 4 lines + a gap + the next row's dot radius — the original
       // 64px did not, leaving that label overlapping the row below by 8px.

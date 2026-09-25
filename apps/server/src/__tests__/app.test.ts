@@ -107,4 +107,59 @@ describe('Server Application', () => {
     expect(beijing.hot).toBe(true)
     await app.close()
   })
+
+  it('PATCH /favorites/:id accepts displayOrder on its own', async () => {
+    const app = await buildApp()
+    const created = JSON.parse((await app.inject({
+      method: 'POST',
+      url: '/api/transit/favorites',
+      payload: { userId: 'default_user', cityCode: '027', lineId: '010-1-0', lineName: '1' },
+    })).body).data
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/transit/favorites/${created.id}`,
+      payload: { displayOrder: 3 },
+    })
+
+    // An order-only PATCH has no board stops to write; that must not 404.
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.displayOrder).toBe(3)
+    await app.close()
+  })
+
+  it('PATCH /favorites/:id accepts isPinned on its own', async () => {
+    const app = await buildApp()
+    const created = JSON.parse((await app.inject({
+      method: 'POST',
+      url: '/api/transit/favorites',
+      payload: { userId: 'default_user', cityCode: '027', lineId: '010-52-0', lineName: '52' },
+    })).body).data
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/transit/favorites/${created.id}`,
+      payload: { isPinned: true },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.isPinned).toBe(true)
+    await app.close()
+  })
+
+  it('PATCH /favorites/:id rejects a negative displayOrder', async () => {
+    const app = await buildApp()
+    const created = JSON.parse((await app.inject({
+      method: 'POST',
+      url: '/api/transit/favorites',
+      payload: { userId: 'default_user', cityCode: '027', lineId: '010-300-0', lineName: '300' },
+    })).body).data
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/transit/favorites/${created.id}`,
+      payload: { displayOrder: -1 },
+    })
+    expect(res.statusCode).toBe(400)
+    await app.close()
+  })
 })

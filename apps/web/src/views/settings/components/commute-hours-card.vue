@@ -4,7 +4,14 @@ import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui
 import CommuteHoursForm from './commute-hours-form.vue'
 
 defineProps<{
-  /** Above xl the card sits in a side rail, where the form stays visible. */
+  /**
+   * Whether the form stays visible without a click — the state a wide screen gets.
+   *
+   * The name is the layout the card was built in (a side rail of the old one-page 设置,
+   * where collapsing saved no scrolling); 设置 is now four pages and there is no rail, so
+   * the flag only answers "is there room for the form". Renaming it would be a change to
+   * this card's contract rather than a move of the code, so it kept its name.
+   */
   isSideRail: boolean
   summary: string
 }>()
@@ -29,8 +36,10 @@ const expanded = defineModel<boolean>('expanded', { required: true })
     </div>
 
     <CollapsibleRoot v-else v-model:open="expanded">
+      <!-- min-h-[44px]: the collapsed trigger is a control of its own, so it clears the
+           house touch target even though its two lines of text only measure 38px. -->
       <CollapsibleTrigger
-        class="group flex w-full items-center justify-between gap-2 text-left"
+        class="group flex min-h-[44px] w-full items-center justify-between gap-2 text-left"
       >
         <span class="flex min-w-0 items-center gap-2">
           <Clock class="h-4 w-4 shrink-0 text-cyan-400" />
@@ -40,7 +49,7 @@ const expanded = defineModel<boolean>('expanded', { required: true })
           </span>
         </span>
         <ChevronDown
-          class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-data-[state=open]:rotate-180"
+          class="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180"
         />
       </CollapsibleTrigger>
 

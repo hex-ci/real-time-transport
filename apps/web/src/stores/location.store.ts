@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef, watch } from 'vue'
 import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
-import { haversineMeters } from '@real-time-transport/shared/geo'
+import { haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 
 /**
  * Development-only GPS override.
@@ -20,12 +20,72 @@ const SIMULATION_ENABLED = import.meta.env.DEV
 
 const SIMULATION_COORDS: { lat: number, lng: number } | null = (() => {
   if (!SIMULATION_ENABLED) return null
-  const lat = Number(import.meta.env.VITE_GPS_SIM_LAT)
-  const lng = Number(import.meta.env.VITE_GPS_SIM_LNG)
-  // A half-configured pair would silently place the user at (0, 0), so require both.
+  const rawLat = import.meta.env.VITE_GPS_SIM_LAT
+  const rawLng = import.meta.env.VITE_GPS_SIM_LNG
+  // An empty value is not a coordinate: `Number('')` is 0, so a missing half
+  // would otherwise read as a valid 0 and place the user at (lat, 0). Reject the
+  // blank before the numeric check, then require both halves to be finite.
+  if (!rawLat?.trim() || !rawLng?.trim()) return null
+  const lat = Number(rawLat)
+  const lng = Number(rawLng)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
   return { lat, lng }
 })()
+
+/**
+ * A one-shot fix, exactly as the browser reported it.
+ *
+ * WGS-84, unconverted: the server's `/settings` PATCH owns the single
+ * WGS-84 → GCJ-02 conversion, because a stored anchor becomes the origin of
+ * every later walking route and a coordinate converted twice lands ~500 m away.
+ */
+export interface AnchorFix {
+  lat: number
+  lng: number
+  accuracyM: number | null
+}
+
+/**
+ * Copy for a failed one-shot grab, keyed by failure kind.
+ *
+ * Each line names what the failure costs the user: without a position there is
+ * no anchor, so the app cannot compute the walking time and therefore cannot
+ * say when to leave. A bare 「定位失败」 reads as a hiccup and leaves the anchor
+ * silently unset, which is the failure mode this copy exists to prevent.
+ */
+export const ANCHOR_CAPTURE_ERRORS = {
+  unsupported: '当前浏览器不支持定位，无法抓取位置锚点，因此算不出出门时间。请换用支持定位的浏览器后重试。',
+  denied: '定位权限被拒绝，无法抓取位置锚点，因此算不出出门时间。请在浏览器设置中允许本网站获取位置后重试。',
+  unavailable: '没有取到当前位置，暂时算不出出门时间。请开启设备的定位服务后重试。',
+  timeout: '定位超时，没有取到当前位置，暂时算不出出门时间。请到窗口或空旷处后重试。',
+  failed: '定位失败，没有取到当前位置，暂时算不出出门时间。请检查设备的定位服务后重试。',
+} as const
+
+/**
+ * Read a browser position into the fix an anchor is stored from.
+ *
+ * `latitude`/`longitude` are passed through untouched — they are WGS-84 as the
+ * device reports them, and the browser may not convert them. Accuracy is
+ * carried when the device measured one and reported as absent when it did not:
+ * never invented.
+ */
+export function anchorFixFromPosition(position: GeolocationPosition): AnchorFix {
+  const { latitude, longitude, accuracy } = position.coords
+  return {
+    lat: latitude,
+    lng: longitude,
+    accuracyM: Number.isFinite(accuracy) && accuracy > 0 ? Math.round(accuracy) : null,
+  }
+}
+
+/** The copy for a failed grab, from the browser's own error code. */
+export function anchorCaptureMessage(error: { code?: number } | null | undefined): string {
+  if (!error) return ANCHOR_CAPTURE_ERRORS.failed
+  if (error.code === 1) return ANCHOR_CAPTURE_ERRORS.denied
+  if (error.code === 2) return ANCHOR_CAPTURE_ERRORS.unavailable
+  if (error.code === 3) return ANCHOR_CAPTURE_ERRORS.timeout
+  return ANCHOR_CAPTURE_ERRORS.failed
+}
 
 /**
  * Reactive geolocation built on vueuse's `useGeolocation`, which wraps
@@ -87,6 +147,59 @@ export const useLocationStore = defineStore('location', () => {
   })
 
   const landmark = shallowRef('')
+
+  /** True while a one-shot anchor grab is in flight. */
+  const isCapturingAnchor = shallowRef(false)
+
+  /**
+   * Grab the CURRENT position once, for a stored anchor.
+   *
+   * Deliberately not the store's `geo`/`watchPosition` pair: an anchor is a
+   * point chosen once, not a position that follows the user, and a live stream
+   * here would let a saved anchor drift as they walk. `getCurrentPosition`
+   * resolves a single fix and stops.
+   *
+   * The fix leaves this function exactly as the browser reported it — WGS-84,
+   * unconverted. The server converts it once at the `/settings` PATCH boundary;
+   * converting here too would move the stored anchor ~500 m and invert the
+   * 出门结论 against its 3-minute wait tolerance.
+   */
+  async function captureAnchorFix(): Promise<AnchorFix> {
+    if (SIMULATION_COORDS) {
+      // The same fixed development position the live stream stands in with, so
+      // the picker is usable without physically moving. The page marks it.
+      return { lat: SIMULATION_COORDS.lat, lng: SIMULATION_COORDS.lng, accuracyM: null }
+    }
+
+    // Resolved at call time rather than through `geo`: this is the one-shot API
+    // and not the live stream, so it asks for the capability now and reports a
+    // browser that has none instead of leaving the button dead.
+    const geolocation = typeof navigator === 'undefined' ? undefined : navigator.geolocation
+    if (!geolocation) {
+      throw new Error(ANCHOR_CAPTURE_ERRORS.unsupported)
+    }
+
+    isCapturingAnchor.value = true
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        geolocation.getCurrentPosition(
+          resolve,
+          err => reject(new Error(anchorCaptureMessage(err))),
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            // A stored anchor must be where the user stands NOW: a cached fix
+            // from another place is exactly the error this feature cannot take.
+            maximumAge: 0,
+          },
+        )
+      })
+      return anchorFixFromPosition(position)
+    }
+    finally {
+      isCapturingAnchor.value = false
+    }
+  }
 
   /**
    * Start continuous tracking.
@@ -151,6 +264,17 @@ export const useLocationStore = defineStore('location', () => {
     stationPool.value = stations
   }
 
+  /**
+   * The stop of `stationPool` nearest the current fix, or null.
+   *
+   * A stop is measured only where it states a position: a missing coordinate —
+   * and a zero on either axis, which on this app's GCJ-02 datum is the same
+   * absence rather than a point at (0, 0) — is read through `statedCoordinate`,
+   * the ONE place that rule lives, rather than restated here. That read is what
+   * keeps an unplaced platform from being presented as the nearest thing to the
+   * user, and it is deliberately the shared helper so this store cannot drift
+   * from the server-side reads that apply the same rule.
+   */
   const nearestStation = computed<Station | null>(() => {
     const coords = userCoords.value
     const stations = stationPool.value
@@ -159,14 +283,16 @@ export const useLocationStore = defineStore('location', () => {
     let minD = Infinity
     let closest: Station | null = null
     for (const st of stations) {
-      if (!st.lat || !st.lng) continue
-      const d = haversineMeters(coords.lat, coords.lng, st.lat, st.lng)
+      const lat = statedCoordinate(st.lat)
+      const lng = statedCoordinate(st.lng)
+      if (lat === undefined || lng === undefined) continue
+      const d = haversineMeters(coords.lat, coords.lng, lat, lng)
       if (d < minD) {
         minD = d
         closest = st
       }
     }
-    // No stop carries coordinates: report none rather than defaulting to the
+    // No stop carries a position: report none rather than defaulting to the
     // first stop, which would present an arbitrary stop as "nearest".
     return closest
   })
@@ -174,8 +300,14 @@ export const useLocationStore = defineStore('location', () => {
   const nearestDistanceM = computed<number | null>(() => {
     const coords = userCoords.value
     const nearest = nearestStation.value
-    if (!coords || !nearest?.lat || !nearest.lng) return null
-    return Math.round(haversineMeters(coords.lat, coords.lng, nearest.lat, nearest.lng))
+    if (!coords || !nearest) return null
+    // Same rule, same read: the candidate this distance is measured to is the one
+    // `nearestStation` accepted, and a coordinate it did not accept cannot be
+    // measured from here either.
+    const lat = statedCoordinate(nearest.lat)
+    const lng = statedCoordinate(nearest.lng)
+    if (lat === undefined || lng === undefined) return null
+    return Math.round(haversineMeters(coords.lat, coords.lng, lat, lng))
   })
 
   return {
@@ -194,5 +326,7 @@ export const useLocationStore = defineStore('location', () => {
     stopLocation,
     resolveLandmark,
     updateNearestStation,
+    isCapturingAnchor,
+    captureAnchorFix,
   }
 })

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!--
+    Canonical icon source. scripts/generate-icons.sh rasterises it into the four
+    PNGs apps/web/public serves, so the icon is a build product of one committed
+    vector rather than a hand-edited bitmap.
+
+    Standing constraints this source exists to satisfy:
+    - Opaque and full-bleed. iOS composites an icon's transparency onto black and
+      then applies its own rounded mask, so a transparent or inset backdrop reads
+      as a black blob on the home screen; the launch background is the same
+      #020617, so a masked corner shows no colour seam.
+    - One glyph, drawn at the safe margin below (art spans 20% .. 80% of the
+      canvas), so the maskable variant can be derived by padding rather than by a
+      second drawing that can drift out of sync.
+    - No text and no gradients: this app is dark-first, and a two-colour
+      (slate-950 backdrop, cyan glyph) mark stays legible at 48 px.
+  -->
+  <rect width="512" height="512" fill="#020617"/>
+  <g transform="translate(52 52) scale(17)" fill="none" stroke="#06b6d4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="16" rx="2" />
+    <path d="M4 11h16" />
+    <path d="M8 15h.01" />
+    <path d="M16 15h.01" />
+    <path d="m5 19-2 2" />
+    <path d="m19 19 2 2" />
+  </g>
+</svg>

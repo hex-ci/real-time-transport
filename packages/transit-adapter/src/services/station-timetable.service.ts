@@ -9,7 +9,7 @@ import {
 import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
 
 /**
- * Normalize a station name so that "群芳站" (amap) matches "群芳" (official
+ * Normalize a station name so that "甲站站" (amap) matches "甲站" (official
  * timetable key). Strips a trailing 站 and any parenthetical suffix, then trims.
  */
 export function normalizeStationName(name: string): string {

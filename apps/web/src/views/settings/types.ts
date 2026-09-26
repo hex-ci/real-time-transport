@@ -19,6 +19,14 @@ import type { Station } from '@real-time-transport/shared'
 export type ChainStopsState = 'ready' | 'loading' | 'unavailable' | 'unfollowed'
 
 /**
+ * 一个方向被使用者声明为哪个通勤用途的方向。
+ *
+ * 两个用途各自一个方向，可以落在同一个方向上（同一条线路两个方向朝同一处走的走法确实存在），
+ * 故三种标识都是完整的事实；`null` 是**没有这个声明**，不是「未确定」。
+ */
+export type CommuteRole = 'morning' | 'evening' | 'both'
+
+/**
  * 作为**选择**的站点：它的站名**与**它在被选中的那一个线路+方向里的站序。
  *
  * 两半俱全才是一个站。线上同名站不止一个，故仅有站名定位不到某一站：以名字携带、
@@ -55,6 +63,13 @@ export interface ChainLineOption {
   /** 标识这个选项：已关注线路的 id 加上它行驶的方向。 */
   key: string
   /**
+   * 该选项所属的那条线路（一次关注）：同一条线路的两个方向共享它。
+   *
+   * 排序据此成组——两个方向谁在前由链路的目的决定，而两条线路的先后绝不被重排。
+   * 已存链路的一段命名了一条不再被关注的线路时，它自成一档。
+   */
+  lineGroupKey: string
+  /**
    * 该选项的站点列表为其编号的方向；完全读不出来时为 null——已存链路的一段在其线路不再
    * 被关注后落入的状态，此时它当初录自哪个方向正是不可知的东西。
    */
@@ -64,6 +79,13 @@ export interface ChainLineOption {
   cityCode: string
   /** 数据源为该方向给出的「开往 X」；它没有陈述时为 null。 */
   directionLabel: string | null
+  /**
+   * 使用者在关注行上为该方向声明的通勤用途。
+   *
+   * 只读 `morningDirection` / `eveningDirection` 这两个已存字段——没声明过就是 null，
+   * 绝不从站点、编号或 `preferredDirection` 推导：那会把一个任意的物理方向冒充成他声明的走法。
+   */
+  commuteRole: CommuteRole | null
   /** 该方向的站点，按行驶顺序。`stops` 不为 `ready` 时为空。 */
   stations: Station[]
   stops: ChainStopsState

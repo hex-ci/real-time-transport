@@ -11,12 +11,12 @@
  */
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { resolveFavoriteLineId } from '@real-time-transport/shared/line-group'
+import { commuteDirectionFor, resolveFavoriteLineId } from '@real-time-transport/shared/line-group'
 import type { LineDetail, Station, UserFavoriteLine } from '@real-time-transport/shared'
 import type { ReadState, ReadValue } from '@/read-state'
 import { useCityStore } from '@/stores/city.store'
 import { useTransitStore } from '@/stores/transit.store'
-import type { ChainLineOption } from './types'
+import type { ChainLineOption, CommuteRole } from './types'
 
 export function useLineStops() {
   const transitStore = useTransitStore()
@@ -66,11 +66,30 @@ export function useLineStops() {
   )
 
   /**
+   * 一个方向被关注行声明为哪个通勤用途的方向。
+   *
+   * 只读使用者在这条关注行上存下的 `morningDirection` / `eveningDirection`（详情页设上车点时
+   * 落下的），两个都没落到本方向时返回 null。绝不推导、也绝不用 `preferredDirection` 兜底：
+   * 那是「哪个上游 lineId 是方向 0」的存储问题，与他往哪边走无关——兜底正是让系统替他决定。
+   */
+  function declaredCommuteRole(fav: UserFavoriteLine, direction: 0 | 1): CommuteRole | null {
+    const morning = commuteDirectionFor(fav, 'morning') === direction
+    const evening = commuteDirectionFor(fav, 'evening') === direction
+    if (morning && evening) return 'both'
+    if (morning) return 'morning'
+    if (evening) return 'evening'
+    return null
+  }
+
+  /**
    * 一个关注项的通勤方向选项，每个可用方向一条。
    *
    * 公交线路的两个方向是两个 lineId，故每个选项携带其站点必须从此获取的 lineId。
    * 标签是数据源自己的 `directionName`（「开往 X」），也就是车辆终点站牌上的读法——
    * 上行/下行不在数据里，各城市之间也不一致。
+   *
+   * 顺序是关注行自己的方向编号顺序，**不是**按目的排的：这里拿不到链路的目的，
+   * 排序由 `chain-draft.ts` 的纯函数在录入表单侧按草稿的目的应用。任何方向都不因目的被略去。
    */
   function directionOptions(fav: UserFavoriteLine): Array<{
     direction: 0 | 1
@@ -217,11 +236,13 @@ export function useLineStops() {
         const read = stopsRead(fav, option.direction)
         return {
           key,
+          lineGroupKey: fav.id!,
           direction: option.direction,
           lineId: option.lineId,
           lineName: fav.lineName,
           cityCode: fav.cityCode || cityStore.currentCode,
           directionLabel: option.label,
+          commuteRole: declaredCommuteRole(fav, option.direction),
           stations: read.state === 'read' ? read.value : [],
           // 三种读取状态映射成链路编辑器自己的话：答了就是 ready（空表由编辑器的
           // `stopsStateSentence` 说成「暂无站点数据」），没答上来与还在读都只能是 loading ——

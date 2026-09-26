@@ -23,6 +23,7 @@ import {
   chainDraftOf,
   emptyChainDraft,
   emptyLegDraft,
+  orderedLineOptionsFor,
   refuseChainDraft,
 } from '../chain-draft'
 import type { ChainDraft, ChainRefusal } from '../chain-draft'
@@ -86,6 +87,15 @@ const PURPOSES = [
  * 而下面的区块正是三种各自照原样陈述的地方。
  */
 const hasLines = computed(() => props.lines.length > 0)
+
+/**
+ * 供各段选择的选项，按这份草稿的目的排过序。
+ *
+ * 目的在这里才知道（它是草稿的一部分），故排序在此应用：同一条线路的两个方向中，带本目的方向的
+ * 那条排前。这只是**先后**——选项集合与 `props.lines` 完全相同，没有任何方向因目的被略去、
+ * 停用或隐藏，因为「先往反方向坐到枢纽」是真实走法。规则本身住在 `orderedLineOptionsFor`。
+ */
+const orderedLines = computed(() => orderedLineOptionsFor(props.lines, draft.value.purpose))
 
 /** 关注集合完全读不到时，缺失的线路读作什么。 */
 const noLinesUnreadable = followedLinesUnreadableText('暂时无法录入乘车段')
@@ -201,7 +211,7 @@ function onCancel(): void {
         :key="index"
         :leg="leg"
         :index="index"
-        :lines="lines"
+        :lines="orderedLines"
         :removable="draft.legs.length > 1"
         @update:leg="(next) => { draft.legs[index] = next }"
         @remove="removeLeg(index)"

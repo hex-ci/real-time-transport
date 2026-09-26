@@ -7,6 +7,7 @@ import {
   emptyChainDraft,
   emptyLegDraft,
   lineOptionLabel,
+  orderedLineOptionsFor,
   refuseChainDraft,
 } from '../chain-draft'
 import type { ChainLineOption } from '../types'
@@ -167,6 +168,16 @@ const LOOP_FAVOURITE = {
   reverseLineId: LOOP_DOWN,
   displayOrder: 2,
 }
+
+/**
+ * 关注线路，其中**一条**声明过上下班方向：快线 1 路 的方向 1 是上班方向、方向 0 是下班方向
+ * ——两个字段都是使用者在详情页设上车点时落下的。地铁 88 号线 什么都没声明：
+ * 它的两个方向因此一个标识都不该有（系统不替他判断他往哪边走）。
+ */
+const DECLARED_FAVOURITES = [
+  { ...FAVOURITES[0]!, morningDirection: 1, eveningDirection: 0 },
+  FAVOURITES[1]!,
+]
 
 function lineResponder(request: { url: string }): unknown {
   const lineId = decodeURIComponent(request.url.split('/lines/')[1]!.split('?')[0]!)
@@ -400,6 +411,20 @@ async function chooseLine(host: MountedHost, index: number, label: string): Prom
   const select = legFields(host, index).find(item => item.tag === 'select')!
   const option = host.node(item => item.tag === 'option' && host.textOf(item) === label, `the option 「${label}」`)
   await choose(host, select, String(option.props.value))
+}
+
+/**
+ * 某一段下拉里的方向选项本身（不含那一条占位项），按屏幕上的先后。
+ * 值取自渲染出的树，故被断言的是用户读到的东西，而不是本测试对选项集的复述。
+ */
+function directionOptionsOf(host: MountedHost, index: number): HostElement[] {
+  const select = legFields(host, index).find(item => item.tag === 'select')!
+  return within(host, select).filter(item => item.tag === 'option' && item.props.value !== '')
+}
+
+/** 同上，只要它们印出来的文字。 */
+function directionOptionTexts(host: MountedHost, index: number): string[] {
+  return directionOptionsOf(host, index).map(item => host.textOf(item))
 }
 
 /**
@@ -1187,21 +1212,158 @@ describe('房子里的结构规则', () => {
   })
 })
 
+describe('方向按使用者的声明标注上下班，并按链路自己的目的排序', () => {
+  it('标识只来自关注行声明过的那两个字段：没声明的关注行一个标识都不带', async () => {
+    // 快线 1 路 声明过（方向 1 上班、方向 0 下班），地铁 88 号线 没声明过：
+    // 声明过的两个方向各自成句，没声明过的两条仍只说线路名与「开往 X」。
+    const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
+    await openComposer(host)
+
+    expect(directionOptionTexts(host, 0)).toEqual([
+      '快线 1 路 · 上班方向 · 开往十里堡',
+      '快线 1 路 · 下班方向 · 开往建国门',
+      '地铁 88 号线 · 开往平安里',
+      '地铁 88 号线 · 开往西直门',
+    ])
+    host.unmount()
+  })
+
+  it('下班目的的链路里，下班方向那条排在前；上班方向与上游的「开往 X」照旧在', async () => {
+    const host = await mountChainEditor({
+      favourites: DECLARED_FAVOURITES,
+      chains: [storedChain({ purpose: 'evening' })],
+    })
+    await openEditorFor(host, '早上上班')
+
+    expect(directionOptionTexts(host, 0)).toEqual([
+      '快线 1 路 · 下班方向 · 开往建国门',
+      '快线 1 路 · 上班方向 · 开往十里堡',
+      '地铁 88 号线 · 开往平安里',
+      '地铁 88 号线 · 开往西直门',
+    ])
+    host.unmount()
+  })
+
+  it('上班与下班两个目的只换先后，不换选项集：任何方向都既不停用也不消失', async () => {
+    const morning = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
+    await openComposer(morning)
+    const evening = await mountChainEditor({
+      favourites: DECLARED_FAVOURITES,
+      chains: [storedChain({ purpose: 'evening' })],
+    })
+    await openEditorFor(evening, '早上上班')
+
+    const morningTexts = directionOptionTexts(morning, 0)
+    const eveningTexts = directionOptionTexts(evening, 0)
+    expect(eveningTexts).not.toEqual(morningTexts)
+    expect(eveningTexts).toHaveLength(morningTexts.length)
+    expect([...eveningTexts].sort()).toEqual([...morningTexts].sort())
+    // 反方向那条（目的不指向它）仍在，且没有一个是禁用的：先往反方向坐到枢纽是真实走法。
+    expect(directionOptionsOf(evening, 0).every(item => item.props.disabled === undefined)).toBe(true)
+    morning.unmount()
+    evening.unmount()
+  })
+
+  it('在录入屏上换目的，同一条线路的两个方向当场换先后（先后跟着这份草稿的目的走）', async () => {
+    const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
+    await openComposer(host)
+    expect(directionOptionTexts(host, 0).slice(0, 2))
+      .toEqual(['快线 1 路 · 上班方向 · 开往十里堡', '快线 1 路 · 下班方向 · 开往建国门'])
+
+    const evening = host.node(
+      item => item.props.role === 'radio' && item.props.value === 'evening',
+      'the 下班 purpose radio',
+    )
+    await press(host, evening)
+
+    expect(directionOptionTexts(host, 0).slice(0, 2))
+      .toEqual(['快线 1 路 · 下班方向 · 开往建国门', '快线 1 路 · 上班方向 · 开往十里堡'])
+    host.unmount()
+  })
+})
+
 describe('规则模块本身', () => {
   /** 一个「线路+方向」选项，使关于选项的规则无需挂载即可读取。 */
   function option(overrides: Partial<ChainLineOption> = {}): ChainLineOption {
     return {
       key: 'fav-bus-1_0',
+      lineGroupKey: 'fav-bus-1',
       direction: 0,
       lineId: BUS_UP,
       lineName: '快线 1 路',
       cityCode: '027',
       directionLabel: '开往建国门',
+      commuteRole: null,
       stations: STOP_LISTS[`${BUS_UP}#0`] as never,
       stops: 'ready',
       ...overrides,
     }
   }
+
+  /**
+   * 一个关注行的两个方向，供排序规则使用：方向 1 是声明的上班方向、方向 0 是下班方向
+   * ——两个方向都标了，且各标一个用途，故「谁在前」完全由目的决定。
+   */
+  function bothMarkedPair(): ChainLineOption[] {
+    return [
+      option({ key: 'fav-bus-1_0', commuteRole: 'evening', directionLabel: '开往建国门' }),
+      option({ key: 'fav-bus-1_1', direction: 1, lineId: BUS_DOWN, commuteRole: 'morning', directionLabel: '开往十里堡' }),
+    ]
+  }
+
+  it('上班目的把带上班方向的那条排前，下班目的把带下班方向的那条排前（一条关于排序的单元规则）', () => {
+    const pair = bothMarkedPair()
+    expect(orderedLineOptionsFor(pair, 'morning').map(item => item.key)).toEqual(['fav-bus-1_1', 'fav-bus-1_0'])
+    expect(orderedLineOptionsFor(pair, 'evening').map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+  })
+
+  it('两条都没标识、或都标了同一个用途时保持原序：没有可依据的声明就不重排（一条关于静止的单元规则）', () => {
+    // 没标识：谁在前没有依据，故先录的那条还在前。
+    const unmarked = [
+      option({ key: 'fav-bus-1_0', commuteRole: null }),
+      option({ key: 'fav-bus-1_1', direction: 1, lineId: BUS_DOWN, commuteRole: null }),
+    ]
+    expect(orderedLineOptionsFor(unmarked, 'morning').map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+    expect(orderedLineOptionsFor(unmarked, 'evening').map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+    // 都标了同一个用途：两条都匹配，匹配不出先后，故仍是原序——绝不按编号或线路 id 猜一个。
+    const bothSame = [
+      option({ key: 'fav-bus-1_0', commuteRole: 'both' }),
+      option({ key: 'fav-bus-1_1', direction: 1, lineId: BUS_DOWN, commuteRole: 'both' }),
+    ]
+    expect(orderedLineOptionsFor(bothSame, 'morning').map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+    expect(orderedLineOptionsFor(bothSame, 'evening').map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+  })
+
+  it('排序不是过滤：反方向那条一个不少，也绝不因为没有匹配的标识而被停用（一条关于不替使用者决定的单元规则）', () => {
+    // 「先往反方向坐到枢纽」是真实走法：只把带标识的那条提到前面，其余原样留在列表里。
+    const lines = [
+      option({ key: 'fav-bus-1_0', commuteRole: 'evening' }),
+      option({ key: 'fav-bus-1_1', direction: 1, lineId: BUS_DOWN, commuteRole: 'morning' }),
+    ]
+    const ordered = orderedLineOptionsFor(lines, 'evening')
+    expect(ordered.map(item => item.key)).toEqual(['fav-bus-1_0', 'fav-bus-1_1'])
+    expect(ordered).toHaveLength(lines.length)
+    expect(ordered.every(item => lines.includes(item))).toBe(true)
+    // 反向那一程（带上班标识）仍在列表里，没有被停用或降级成一个「不可选」的选项。
+    expect(ordered.find(item => item.key === 'fav-bus-1_1')).toBeDefined()
+  })
+
+  it('排序只在同一条线路的两个方向之间：跨关注行的先后原样不动（一条关于作用域的单元规则）', () => {
+    const lines = [
+      option({ key: 'fav-a_0', lineGroupKey: 'fav-a', commuteRole: null }),
+      option({ key: 'fav-a_1', lineGroupKey: 'fav-a', direction: 1, lineId: BUS_DOWN, commuteRole: 'morning' }),
+      option({ key: 'fav-b_0', lineGroupKey: 'fav-b', lineName: '地铁 88 号线', lineId: SUBWAY, commuteRole: 'morning' }),
+      option({ key: 'fav-b_1', lineGroupKey: 'fav-b', lineName: '地铁 88 号线', lineId: SUBWAY, direction: 1, commuteRole: null }),
+    ]
+    // 上班方向在 第二条线路的第一个方向：它被提到自己那条线路的前面，而这两条线路的先后仍是关注顺序。
+    expect(orderedLineOptionsFor(lines, 'morning').map(item => item.key))
+      .toEqual(['fav-a_1', 'fav-a_0', 'fav-b_0', 'fav-b_1'])
+  })
+
+  it('一条线路只有一个方向时，排序把它原样留下（一条关于边界的单元规则）', () => {
+    const single = [option({ key: 'fav-a_0', lineGroupKey: 'fav-a', commuteRole: 'evening' })]
+    expect(orderedLineOptionsFor(single, 'morning').map(item => item.key)).toEqual(['fav-a_0'])
+  })
 
   it('选项的名字只写知道的事：开往 X / 方向 N / 方向未知 / 站序未知（一条关于措辞的单元规则）', () => {
     expect(lineOptionLabel(option())).toBe('快线 1 路 · 开往建国门')
@@ -1215,15 +1377,38 @@ describe('规则模块本身', () => {
     expect(lineOptionLabel(option({ direction: null, directionLabel: null }))).toBe('快线 1 路 · 站序未知')
   })
 
+  it('四个标识情形各自成句：只上班 / 只下班 / 上班·下班 / 没声明过就什么都不标（一条关于措辞的单元规则）', () => {
+    // 标识只有两个来源：使用者在关注行上声明的 `morningDirection` 与 `eveningDirection`。
+    // 没声明过的方向不是「未确定」而是**没有这个声明**，故它什么都不标——系统不替他判断他往哪边走。
+    expect(lineOptionLabel(option({ commuteRole: 'morning' }))).toBe('快线 1 路 · 上班方向 · 开往建国门')
+    expect(lineOptionLabel(option({ commuteRole: 'evening' }))).toBe('快线 1 路 · 下班方向 · 开往建国门')
+    expect(lineOptionLabel(option({ commuteRole: 'both' }))).toBe('快线 1 路 · 上班·下班 · 开往建国门')
+    expect(lineOptionLabel(option({ commuteRole: null }))).toBe('快线 1 路 · 开往建国门')
+  })
+
+  it('标识插在线路名与「开往 X」之间：上游的终点站照旧念，兜底措辞也照旧（一条关于次序的单元规则）', () => {
+    // 标注只增不改：没有数据源陈述终点站时，仍说编号；方向本身读不出来时，
+    // 仍按线路形态说「方向未知」/「站序未知」。
+    expect(lineOptionLabel(option({ commuteRole: 'morning', directionLabel: null })))
+      .toBe('快线 1 路 · 上班方向 · 方向 0')
+    expect(lineOptionLabel(option({ commuteRole: 'evening', directionLabel: null, direction: null })))
+      .toBe('快线 1 路 · 下班方向 · 站序未知')
+    expect(lineOptionLabel(option({
+      commuteRole: 'both', direction: null, directionLabel: null, lineId: SUBWAY, lineName: '地铁 88 号线',
+    }))).toBe('地铁 88 号线 · 上班·下班 · 方向未知')
+  })
+
   it('空段草稿与空名字都被拒绝，且句子说的是事实（一条关于规则的单元规则）', () => {
     const lines = [
       {
         key: 'fav-bus-1_0',
+        lineGroupKey: 'fav-bus-1',
         direction: 0 as const,
         lineId: BUS_UP,
         lineName: '快线 1 路',
         cityCode: '027',
         directionLabel: '开往建国门',
+        commuteRole: null,
         stations: STOP_LISTS[`${BUS_UP}#0`] as never,
         stops: 'ready' as const,
       },

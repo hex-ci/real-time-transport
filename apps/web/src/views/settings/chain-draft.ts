@@ -4,7 +4,7 @@ import type {
   CommuteChainLeg,
   CommuteChainPurpose,
 } from '@real-time-transport/shared'
-import type { ChainLineOption, ChainStopsState } from './types'
+import type { ChainLineOption, ChainStopsState, CommuteRole } from './types'
 
 /**
  * 通勤链路的编辑器，作为唯一的判断处。
@@ -111,7 +111,10 @@ export function anchorText(anchor: CommuteChainAnchor): string {
 }
 
 /**
- * 一个选项在用户读到它之处的命名方式：先线路，再方向自己的终点站标签。
+ * 一个选项在用户读到它之处的命名方式：先线路，再使用者声明过的通勤标识，最后方向自己的终点站标签。
+ *
+ * 标识只说使用者**声明过**的事（`morningDirection` / `eveningDirection`），故没声明过的方向
+ * 一个字都不标——「未声明」不是「上班·下班」，也不是任何一个他能读成结论的东西。
  *
  * 兜底是「方向 N」而不是猜一个终点站：没有陈述 `directionName` 的数据源就是没有陈述终点站，
  * 造一个会给一段贴上无人报告过的目的地。
@@ -126,13 +129,73 @@ export function anchorText(anchor: CommuteChainAnchor): string {
  *   ——「方向未知」就是那个事实，读侧从已存的站序解析方向。
  */
 export function lineOptionLabel(option: ChainLineOption): string {
-  if (option.directionLabel) return `${option.lineName} · ${option.directionLabel}`
-  if (option.direction === null) {
-    return isSubwayLineId(option.lineId)
-      ? `${option.lineName} · 方向未知`
-      : `${option.lineName} · 站序未知`
+  const parts = [option.lineName]
+  const role = commuteRoleText(option.commuteRole)
+  if (role) parts.push(role)
+  if (option.directionLabel) {
+    parts.push(option.directionLabel)
   }
-  return `${option.lineName} · 方向 ${option.direction}`
+  else if (option.direction === null) {
+    parts.push(isSubwayLineId(option.lineId) ? '方向未知' : '站序未知')
+  }
+  else {
+    parts.push(`方向 ${option.direction}`)
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * 通勤标识在选项名字里的措辞。
+ *
+ * 「上班·下班」是一个方向同时是两个用途的方向——它因此是两个完整的声明，不是缺了一半。
+ */
+export function commuteRoleText(role: CommuteRole | null): string | null {
+  if (role === 'morning') return '上班方向'
+  if (role === 'evening') return '下班方向'
+  if (role === 'both') return '上班·下班'
+  return null
+}
+
+/** 某个通勤标识是否算作本用途的方向。 */
+function carriesPurpose(role: CommuteRole | null, purpose: CommuteChainPurpose): boolean {
+  if (role === null) return false
+  return role === 'both' || role === purpose
+}
+
+/**
+ * 按链路自己的目的给线路选项排序：带本目的方向的那条排在它同一线路的前面。
+ *
+ * 三件它**不**做的事，缺一不可：
+ *
+ * - 不删、不停用任何方向：反方向那一程仍在列表里——「先往反方向坐到枢纽」是真实走法，
+ *   系统只把该用的那条提到前面，绝不替使用者决定他不走哪一边；
+ * - 不在没有可依据的声明时重排：两个方向都没标识、或都标了同一个用途时，先录的那条仍在先
+ *   ——没有依据就什么都不做，绝不按编号或线路 id 猜一个先后；
+ * - 不重排线路之间的先后：只在同一条线路（`lineGroupKey`）的两个方向之间做，故关注顺序原样。
+ *
+ * 结果与输入是同一个集合，只是某些线路内部的两个方向换了位置。
+ */
+export function orderedLineOptionsFor(
+  lines: ChainLineOption[],
+  purpose: CommuteChainPurpose,
+): ChainLineOption[] {
+  const out: ChainLineOption[] = []
+  let run: ChainLineOption[] = []
+
+  // 一条线路的方向在列表里是连续的（由加载它们的页面按关注逐条铺开），故按连续段处理，
+  // 段内把带本目的方向的那条提到前面；段与段之间不动。
+  const flush = (): void => {
+    out.push(...run.filter(option => carriesPurpose(option.commuteRole, purpose)))
+    out.push(...run.filter(option => !carriesPurpose(option.commuteRole, purpose)))
+    run = []
+  }
+
+  for (const option of lines) {
+    if (run.length > 0 && run[0]!.lineGroupKey !== option.lineGroupKey) flush()
+    run.push(option)
+  }
+  flush()
+  return out
 }
 
 /**
@@ -205,11 +268,15 @@ function lineKeyOfStoredLeg(leg: CommuteChainLeg, lines: ChainLineOption[]): str
 function storedLineOption(leg: CommuteChainLeg): ChainLineOption {
   return {
     key: `stored:${leg.lineId}`,
+    // 一条不再被关注的线路自成一档：它没有第二个方向可选，故排序不动它。
+    lineGroupKey: `stored:${leg.lineId}`,
     direction: null,
     lineId: leg.lineId,
     lineName: leg.lineName,
     cityCode: leg.cityCode,
     directionLabel: null,
+    // 该线路已不在关注列表里，故关注行上声明的方向也无从读到——标识只能是「没有」。
+    commuteRole: null,
     stations: [],
     stops: 'unfollowed',
   }

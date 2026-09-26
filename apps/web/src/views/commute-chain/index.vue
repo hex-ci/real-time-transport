@@ -19,26 +19,12 @@ import { anchorForPurpose, emptyStateOf } from './empty-state'
 import type { PurposeOption } from './types'
 
 /**
- * F10's chain page: the chains the user recorded, each walked by the engine against
- * live readings, answering one question per transfer — 「能不能赶上换乘点那班车」.
+ * 换乘链路页：使用者录下的链路，逐条由引擎对着实时读数走一遍，逐换乘点回答「能不能赶上换乘点那班车」。
  *
- * It is a first-level entry of its own rather than a block on the home screen: the
- * home screen is a list of followed lines, and mixing transfer conclusions into it
- * would make one surface out of two. Nothing here concludes anything either — the
- * band, the margin and every 「不给结论」 code are the engine's, and this page only
- * chooses words (`margin.ts`, `refusal.ts`) and states what each answer is worth
- * (`provenance.ts`).
+ * 本页不产出任何结论：档位、余量与每个不给结论的码都是引擎的，本页只选词、只陈述每个答案值多少。
+ * 链路止于末段的下车站：没有目的地，也没有总到达分钟，此处不算也不加总。
  *
- * The chain ENDS at its last leg's alight station. There is no destination, no walk
- * past the end and no total arrival minute: a chain records where it starts from and
- * never where it goes, so a total would be a number nobody measured. This page
- * computes none and adds none up.
- *
- * One purpose at a time. The endpoint answers a purpose's chains from ONE set of
- * readings, so N requests could be served from N poll windows and the page would be
- * comparing margins computed from readings of different ages — the jumpiness the
- * product rules out. The purpose on screen is therefore always the purpose the
- * answer belongs to (`hasFeed`), and it is switched in front of the user.
+ * 一次只服务一个目的。端点用同一套读数回答一个目的的各条链路，故屏幕上显示的目的永远是答案所属的目的。
  */
 
 const transitStore = useTransitStore()
@@ -52,42 +38,26 @@ const {
   refreshReading,
 } = storeToRefs(transitStore)
 
-/** The two purposes a chain is recorded under, in the words the home screen uses. */
+/** 两个通勤目的，用与首页相同的词。 */
 const PURPOSES: PurposeOption[] = [
   { purpose: 'morning', label: '上班' },
   { purpose: 'evening', label: '下班' },
 ]
 
-/** Which purpose is on screen. */
 const purpose = shallowRef<CommuteChainPurpose>('morning')
-/** A pick the user made on this visit; null while the page follows the commute window. */
+/** 本次访问中使用者做的选择；为 null 时本页跟随通勤时段。 */
 const manualPurpose = shallowRef<CommuteChainPurpose | null>(null)
 
-/**
- * The purpose the configured commute window implies: 上班 while the profile reports
- * the work leg, 下班 while it reports the way home, and 上班 outside both windows —
- * there is no window to follow then, and the chip shows which purpose is on screen
- * rather than the page hiding a choice behind a default.
- *
- * With NO stored window the same default applies and the LABEL says why: this chip
- * used to read 「默认按通勤时段选定」 for a user who had never saved any hours, which
- * credits a window that does not exist.
- */
+/** 通勤时段蕴含的目的；没有时段可跟随时也取这个默认，由标签说明原因。 */
 const autoPurpose = computed<CommuteChainPurpose>(() =>
   (commuteProfile.value?.mode === 'home' ? 'evening' : 'morning'))
 
 const autoPurposeLabel = computed(() => {
   const follow = autoPurpose.value === 'evening' ? '下班' : '上班'
   const windowState = commuteProfile.value?.windowState
-  // Four facts, four sentences, and the last two are not decoration: a profile nobody
-  // has read may not credit the commute window either — 「默认按通勤时段选定」 is a
-  // claim about a stored row, and only an ANSWER can support it. The payload carries
-  // which of them it is (`windowState`), so this chip never infers it from the
-  // mode: 'auto' is shared by 「outside the configured window」 and 「no window
-  // configured」, and a page that could not tell them apart printed the first for the
-  // second. `unchosen` is the third of those answers — the row exists but its four
-  // times were never chosen — and it owes the same sentence as `unset`: there is no
-  // window for the page to have followed.
+  // 四种事实，四句话：未被读过的 profile 也不得记功给通勤时段——那是对一行已存记录的断言，
+  // 只有答案能支持它。载荷说明是哪种事实（windowState），故此处不从 mode 推断：
+  // 'auto' 同时表示「时段之外」与「未配置时段」，而 unchosen 与 unset 同句（没有窗口可跟随）。
   if (windowState === 'stored') return `默认按通勤时段选定：${follow}`
   if (windowState === 'unset' || windowState === 'unchosen') return `通勤时段未设置，默认：${follow}`
   return `默认：${follow}`
@@ -99,42 +69,30 @@ function onPickPurpose(value: unknown): void {
   purpose.value = picked
 }
 
-/** The chains as the endpoint answered them, and the purpose they answer for. */
+/** 端点的答案，以及它回答的是哪个目的。 */
 const chains = shallowRef<CommuteChainDeductions['chains']>([])
 const feedPurpose = shallowRef<CommuteChainPurpose | null>(null)
 const loading = shallowRef(true)
-/** The read that failed with nothing on screen for this purpose. */
+/** 这个目的在屏幕上没有任何东西时失败的那次读取。 */
 const loadError = shallowRef<string | null>(null)
-/** A re-read that failed while an older answer is still on screen. */
+/** 屏幕上仍有旧答案时失败的那次重读。 */
 const reloadError = shallowRef<string | null>(null)
-/** The anchor's own state, as 设置's row holds it; null while it has not been read. */
+/** 锚点自己的状态，如设置的行所持有；未读取时为 null。 */
 const anchorSaved = shallowRef<boolean | null>(null)
 
-/** True only once the answers on screen belong to the purpose on screen. */
 const hasFeed = computed(() => feedPurpose.value === purpose.value)
 const cards = computed(() => (hasFeed.value ? chains.value.map(chainCardOf) : []))
 const emptyState = computed(() => emptyStateOf({ purpose: purpose.value, anchorSaved: anchorSaved.value }))
 
 /**
- * Read the purpose's chains, each already walked against live readings.
+ * 读取该目的的链路，每条都已对着实时读数走过一遍。
  *
- * A read that fails is reported differently depending on what the page is holding:
- * with nothing for this purpose it is the page's own load failure (stated, with the
- * retry that is the only thing that can fix it); with an older answer still on
- * screen it keeps that answer and says the read failed — blanking it would take
- * away the reading the user is looking at, and what is on screen is still dated by
- * each card's own 最后更新, so its age is visible rather than implied.
+ * 读取失败按页面手里有什么分别报告：这个目的下什么都没有时是页面自己的加载失败（说明并提供重试）；
+ * 旧答案仍在屏幕上时保留该答案并说明读取失败——把它清空会拿走用户正在看的读数。
  *
- * LATEST READ WINS. More than one read can be open at once — the interval's
- * re-read and a purpose switch, or the interval's re-read and a press's re-read —
- * and HTTP answers do not come back in the order they were asked. An older answer
- * landing last would replace an answer the page has already shown, which is the
- * jump F10 rules out (「不允许…跳变」): margins computed from readings of two
- * different ages would then be on screen as one set. So each read takes a sequence
- * number and only the newest one may write. That also covers the answer for a
- * purpose the user has left while it was in flight: it is not this page's answer,
- * and rendering it under the new chip would state one purpose's margins as
- * another's.
+ * 最新的一次读取胜出。同时可以有多次读取在途（定时的重读与切换目的，或定时的重读与一次按下的重读），
+ * 而 HTTP 答案不按询问顺序返回：旧答案最后落地会替换页面已展示的答案。故每次读取取一个序号，
+ * 只有最新的一次可写。这同时也涵盖用户已离开的那个目的的答案。
  */
 let readSequence = 0
 
@@ -152,11 +110,10 @@ async function loadChains(): Promise<void> {
     if (json.success && Array.isArray(json.data?.chains)) feed = json.data as CommuteChainDeductions
   }
   catch {
-    // Reported below, in the state the page can honestly show for it.
+    // 在下面按页面能诚实呈现的状态报告。
   }
 
-  // A read that has been superseded — by a newer read of the same purpose, or by
-  // the purpose having changed under it — states nothing at all.
+  // 已被取代的读取什么都不陈述：更新的读取已写，或目的已经变了。
   if (sequence !== readSequence) return
   loading.value = false
 
@@ -177,18 +134,11 @@ async function loadChains(): Promise<void> {
 }
 
 /**
- * Whether the anchor this purpose's chains start from has a saved coordinate.
+ * 这个目的的链路将要起步的锚点是否已存坐标。
  *
- * Read for exactly one reason: the page's empty state has to name a cause the user
- * can act on, and an anchor that was never saved is the only cause on this page with
- * a screen behind it (设置). A read that fails leaves the state UNKNOWN, and an
- * unknown is neither saved nor missing — the page then claims nothing about a row
- * nobody read rather than sending the user to repair something that may be in place.
- *
- * A settings row that was never saved is NOT an unknown: an anchor is a column of
- * that row, so 「no row」 means 「no anchor stored」 as a fact, and the state below is
- * `false` — the actionable one. The endpoint states which fact it is
- * (`settingsState`), so this page does not have to guess it from a null.
+ * 只有一处理由读它：空态得点名使用者可行动的成因，而从未保存的锚点是有屏幕在背后（设置）的那一个。
+ * 读取失败留着 UNKNOWN，而未知既非已保存也非缺失：此时对没人读过的行不作断言。
+ * 「没有这一行」不是未知，而是「没有存锚点」这个事实，故为 false——可行动的那一个。
  */
 async function loadAnchorState(): Promise<void> {
   anchorSaved.value = null
@@ -208,28 +158,20 @@ async function loadAnchorState(): Promise<void> {
     anchorSaved.value = typeof lng === 'number' && typeof lat === 'number'
   }
   catch {
-    // Unknown, and stated as unknown.
+    // 未知，且按未知陈述。
   }
 }
 
 /**
- * The lines this page's answers are read from — F11's entry names them.
+ * 本页答案所要读取的线路。
  *
- * The ANSWERS name them and nothing else does: a deduced chain names every leg it
- * walked, and a refused chain names exactly the leg it refused on (a refusal
- * carries no earlier leg's answer, so nothing else on screen is reading anything).
- * A line this page shows nothing about is not named, because the endpoint reads
- * what it is asked for and a number nobody sees is an upstream read spent for
- * nothing.
+ * 由答案自己点名：推导的链路点名它走过的每一段，被拒绝的链路只点名它拒绝的那一段。
+ * 不在屏幕上显示的线路不点名，因为端点读的是它所问之物。
  *
- * A SUBWAY id carries both directions while an answer does not say which way its
- * leg runs, so both of that line's directions are named: naming one would leave the
- * leg's own direction un-refreshed while the control still reported 已刷新.
+ * 地铁 id 携带两个方向，而答案不说它的段跑哪个方向，故两个方向都点名：只点一个会让该段自己的方向未刷新，
+ * 而控件仍报告「已刷新」。
  *
- * The city is the one being browsed, which is the only value this page has: the
- * answer deliberately does not echo the legs it was walked from, so a chain recorded
- * in another city is a mismatch this side cannot see (the server reads each leg in
- * the city the leg was stored with; only this request's city would be the page's).
+ * 城市是正在浏览的那个：答案刻意不回显它走过的段。
  */
 const refreshTargets = computed<RefreshLiveTarget[]>(() => {
   const seen = new Set<string>()
@@ -253,20 +195,14 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => {
   return targets
 })
 
-/** The lines one press may actually name: the endpoint bounds how many a single attempt covers. */
+/** 一次按下能真正点名的线路数：端点限定了单次尝试覆盖的上限。 */
 const refreshNamed = computed(() => refreshTargets.value.slice(0, REFRESH_MAX_LINES))
 
 /**
- * The state line under the button — the store's own words, plus this page's one
- * rule about them.
+ * 按钮下的状态行。
  *
- * The targets are drawn from the chains this page read, so whether that read has
- * ANSWERED is this page's fact to hand over (`targetsRead`): while the chains are
- * still arriving this page has not learned what it is showing, and the store's
- * 「暂无正在读取车况的线路」 is a claim about a list nobody obtained yet. Every
- * other state the store reports — a refusal with its remaining seconds, an
- * upstream that answered nothing, a connection that is gone — is rendered as it
- * comes, so a press is never answered with silence.
+ * 目标取自本页读到的链路，故那次读取是否**已作答**是本页要交出的事实（targetsRead）：
+ * 链路仍在到达时本页还不知道自己在显示什么。store 报告的其余状态都照原样渲染，按下从不会被沉默作答。
  */
 const refreshStatus = computed(() => refreshStatusTextOf({
   inFlight: refreshInFlight.value,
@@ -277,13 +213,9 @@ const refreshStatus = computed(() => refreshStatusTextOf({
   targetsRead: !loading.value,
 }))
 
-/** The reading the last press obtained, as the freshness line reports it. */
 const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
 
-/**
- * Tone of the state line. The words carry the state; the tone only backs them up,
- * so nothing here is the only signal of anything.
- */
+/** 状态行的色调。词承载状态，色调只作辅助，故此处绝不是任何东西的唯一信号。 */
 const refreshStatusClass = computed(() => {
   if (refreshOutcome.value === 'throttled') return 'text-amber-400'
   if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
@@ -293,25 +225,19 @@ const refreshStatusClass = computed(() => {
   return 'text-slate-400'
 })
 
-/** Ids the button points at, so the state is read out together with the control. */
 const refreshDescribedBy = computed(() => refreshStatus.value
   ? 'refresh-freshness refresh-status'
   : 'refresh-freshness')
 
 /**
- * True for the whole of a press: the request that spends the window, and the
- * re-read that shows what it obtained. A press landing between the two would ask
- * the server a second time inside the window the first one just spent.
+ * 一次按下的全程为 true：花掉窗口的那次请求，以及展示它取得之物的那次重读。
+ * 落在两者之间的按下会在刚花掉的窗口内再问服务端一次。
  */
 const refreshing = shallowRef(false)
 
 /**
- * Pressed: ask through the ONE request that owns the cooldown, then re-read the
- * answers so they show what that request obtained.
- *
- * Only a press that obtained a reading re-reads them: a refusal or a failure
- * carried nothing, and re-reading then would only ask for the numbers already on
- * screen.
+ * 按下：经由拥有冷却期的那**一个**请求去问，然后重读答案以展示它取得之物。
+ * 只有取得读数的那次按下才重读：拒绝或失败什么都没携带。
  */
 async function onRefresh(): Promise<void> {
   refreshing.value = true
@@ -325,18 +251,15 @@ async function onRefresh(): Promise<void> {
 }
 
 /**
- * Keep the answers moving without being a second refresh entry.
+ * 让答案持续更新，但不成为第二个刷新入口。
  *
- * This asks for what the server already holds and spends no upstream read of its
- * own while the server's reading cache is warm, which is why the cadence is longer
- * than that cache rather than shorter. The manual entry above is what spends a real
- * re-read, through the one window both screens share.
+ * 它索要服务端已持有的东西，在服务端的读取缓存还热时不花上游读取，故节奏比该缓存更长。
+ * 上面的手动入口才是花掉一次真实重读的地方。
  */
 useIntervalFn(() => {
   void loadChains()
 }, 20_000)
 
-// The purpose drives both reads: the chains of that purpose, and that purpose's own anchor.
 watch(purpose, () => {
   loadError.value = null
   reloadError.value = null
@@ -345,17 +268,13 @@ watch(purpose, () => {
 }, { immediate: true })
 
 onMounted(() => {
-  // Which window the user is in decides the purpose this page opens on.
+  // 使用者所处的时段决定本页打开时的目的。
   transitStore.fetchCommuteProfile()
 })
 </script>
 
 <template>
   <div class="space-y-2.5 pb-12 sm:space-y-5">
-    <!-- What this page answers, and where it stops: the chain ends at its last leg's
-         alight station, so there is no destination and no total arrival minute, and
-         saying so is the difference between a page that is missing a number and one
-         that does not have it. -->
     <div class="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5">
       <div class="flex flex-wrap items-center gap-2">
         <span class="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
@@ -391,9 +310,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- F11's entry on this page. Both screens ask through the same request, so the
-         window a press spends is shared rather than one per screen; the state line
-         is this control's other job, and a refusal is never silent. -->
+    <!-- 两个屏幕经同一个请求索要，故一次按下花掉的窗口是共享的。 -->
     <section
       aria-label="数据刷新"
       class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:rounded-3xl sm:p-4"
@@ -402,11 +319,9 @@ onMounted(() => {
         <p id="refresh-freshness" class="text-xs text-slate-400 lg:text-base">
           {{ refreshFreshness.text }}
         </p>
-        <!-- The state line. Only the coarse state sits inside the live region: the
-             seconds are rendered beside it, because a countdown in a live region
-             queues one announcement per second of the wait. The region is rendered
-             before it has anything to say — one created together with its first
-             word is not announced at all by some screen readers. -->
+        <!-- 状态行。只有粗粒度状态坐在 live region 里：秒数渲染在它旁边，
+         因为 live region 里的倒计时会按秒排队播报。region 在没有话可说时就渲染，
+         与第一个词一同创建的 region 在某些屏幕阅读器上根本不播报。 -->
         <p
           id="refresh-status"
           class="text-xs lg:text-base"
@@ -430,8 +345,7 @@ onMounted(() => {
       </button>
     </section>
 
-    <!-- A re-read that failed while an older answer is still on screen: the answer
-         stays, and the failure is stated rather than the page going blank. -->
+    <!-- 屏幕上仍有旧答案时失败的重读：答案留着，陈述失败而不是让页面变空。 -->
     <p
       v-if="reloadError"
       role="alert"
@@ -441,8 +355,6 @@ onMounted(() => {
       <span>{{ reloadError }}</span>
     </p>
 
-    <!-- The three states of having nothing to show: still reading, the read failed,
-         or this purpose genuinely has no chain recorded. -->
     <ChainLoadState
       v-if="!hasFeed && loading"
       :loading="true"

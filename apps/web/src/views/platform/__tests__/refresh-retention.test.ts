@@ -51,12 +51,12 @@ vi.mock('../components/platform-header.vue', async () => {
   }
 })
 
-/** The instants the live responses report as obtained. 2023-11-14, local tz in the assertions. */
+/** live 响应所报的取得时刻。2023-11-14，断言中用本地时区。 */
 const STAMP_A = 1_700_000_010_000
 const STAMP_A2 = 1_700_000_030_000
 const STAMP_B = 1_700_000_060_000
 
-/** One followed route with both directions, as the store holds it. */
+/** 一条两个方向的关注线路，如 store 所持有。 */
 const FAVOURITE: Record<string, unknown> = {
   id: 'fav-1',
   userId: 'default_user',
@@ -68,7 +68,7 @@ const FAVOURITE: Record<string, unknown> = {
   displayOrder: 0,
 }
 
-/** A per-line detail: direction 0 serves 共用站/甲站/乙站, direction 1 serves 共用站/丙站. */
+/** 某线路的详情：方向 0 途经 共用站/甲站/乙站，方向 1 途经 共用站/丙站。 */
 function detailBody(direction: 0 | 1): Record<string, unknown> {
   return {
     lineId: direction === 0 ? 'bus_027_1' : 'bus_027_2',
@@ -92,7 +92,7 @@ function detailBody(direction: 0 | 1): Record<string, unknown> {
   }
 }
 
-/** One targeted live answer: a vehicle priced for the requested stop, stamped by its source. */
+/** 一个定位的 live 答案：为所请求站定价的一辆车，盖有来源时刻。 */
 function liveBody(lineId: string, stationOrder: number, stamp: number, travelSec: number) {
   return {
     success: true,
@@ -114,7 +114,7 @@ function liveBody(lineId: string, stationOrder: number, stamp: number, travelSec
   }
 }
 
-/** A promise a test resolves itself, so one round of answers can be held open. */
+/** 由测试自行兑现的 promise，使一轮答案可被挂起。 */
 function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((settle) => {
@@ -124,8 +124,8 @@ function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
 }
 
 /**
- * Script the live route per lineId: each round consumes the next scripted step
- * (a value, or a deferred promise to hold open); past the script, nothing.
+ * 按 lineId 为 live 路由编排脚本：每轮消耗下一个脚本步骤（一个值，或一个要挂起的 deferred promise）；
+ * 脚本用尽后什么都不答。
  */
 function liveRounds(script: Record<string, Array<unknown>>): (request: RecordedRequest) => unknown {
   const round: Record<string, number> = {}
@@ -138,7 +138,7 @@ function liveRounds(script: Record<string, Array<unknown>>): (request: RecordedR
   }
 }
 
-/** The shared station's fixed readings: 120 s and 300 s priced by their own source. */
+/** 共用站的固定读数：120 s 与 300 s，各由自身来源定价。 */
 const READ_A_1 = liveBody('bus_027_1', 1, STAMP_A, 120)
 const READ_A_2 = liveBody('bus_027_2', 1, STAMP_A, 300)
 
@@ -159,7 +159,7 @@ async function mountPlatform(live: (request: RecordedRequest) => unknown): Promi
   return host
 }
 
-/** Drive the station picker the way a real select does: v-model writes, then change fires. */
+/** 像真实 select 那样驱动选站器：v-model 先写值，再发 change。 */
 async function selectStation(host: MountedHost, name: string): Promise<void> {
   const stub = host.node(item => item.tag === 'platform-header-stub', 'station header stub')
   const write = stub.props['onUpdate:modelValue']
@@ -173,30 +173,29 @@ async function selectStation(host: MountedHost, name: string): Promise<void> {
 }
 
 /**
- * Land the deterministic precondition: both direction rows for 共用站 on screen.
- * The switch itself is a refresh with rows in play, so by the time it returns
- * the screen holds two rows stamped STAMP_A — the state every scenario starts from.
+ * 铺垫确定性的前提：共用站的两条方向行都在屏。该切换本身就是一次带行的刷新，故它返回时屏幕持有
+ * 两条盖 STAMP_A 的行——每个场景的起点。
  */
 async function showBothRowsAtSharedStation(host: MountedHost): Promise<void> {
   await selectStation(host, '共用站')
   expect(rowTerminals(host)).toHaveLength(2)
 }
 
-/** The terminal spans, one per rendered row — the row count as the user sees it. */
+/** 终到站区间，每个渲染行一个——用户看到的行数。 */
 function rowTerminals(host: MountedHost): string[] {
   return host
     .nodes((item: HostElement) => item.tag === 'span' && item.text.includes('开往'))
     .map(item => item.text.trim())
 }
 
-/** The minute values on screen — empty whenever no row carries a number. */
+/** 屏幕上的分钟值——没有行携带数字时为空。 */
 function minuteSpans(host: MountedHost): string[] {
   return host
     .nodes((item: HostElement) => item.tag === 'span' && /^\d+$/.test(item.text.trim()))
     .map(item => item.text.trim())
 }
 
-/** 「HH:MM:SS」 in the reader's own zone — the same shape the freshness line prints. */
+/** 读者自己时区下的「HH:MM:SS」——与新鲜度行印出的形状相同。 */
 function clockOf(at: number): string {
   const d = new Date(at)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -218,12 +217,11 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     }))
     await showBothRowsAtSharedStation(host)
 
-    // A same-station re-read: the refresh whose behaviour is under test.
+    // 同站重读：行为受测的那次刷新。
     await selectStation(host, '共用站')
     await host.flush()
 
-    // In flight: the SAME two rows are still on screen, minutes included, and
-    // the board says an update is running instead of trading the list away.
+    // 在途：**同一**两行仍在屏幕上，含分钟，且报告板说更新正在进行，而非把列表换掉。
     expect(rowTerminals(host), 'the rows must survive the in-flight refresh')
       .toHaveLength(2)
     expect(minuteSpans(host)).toEqual(expect.arrayContaining(['2', '5']))
@@ -235,7 +233,7 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     gate2.resolve(liveBody('bus_027_2', 1, STAMP_A2, 600))
     await host.flush()
 
-    // The new read lands into the kept rows.
+    // 新的读取落到被保留的行里。
     expect(minuteSpans(host)).toEqual(expect.arrayContaining(['4', '10']))
     expect(host.text()).not.toContain('正在刷新…')
     host.unmount()
@@ -245,20 +243,18 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     const gate1 = deferred<unknown>()
     const gate2 = deferred<unknown>()
     const host = await mountPlatform(liveRounds({
-      // The default station is whichever localeCompare picks; direction 1 may
-      // never be asked. Both gates are resolved either way — an unanswered
-      // gate holds nothing that is awaited.
+      // 默认站是 localeCompare 选出的那一个；方向 1 可能从不被请求。两个门无论如何都被兑现——
+      // 未被应答的门不持有任何被 await 的东西。
       bus_027_1: [gate1.promise],
       bus_027_2: [gate2.promise],
     }))
 
-    // Nothing to show yet: the loading body is the honest state.
+    // 还什么都不可显示：加载体是诚实的形态。
     expect(host.text()).toContain('正在加载车况数据...')
     expect(rowTerminals(host)).toEqual([])
     expect(minuteSpans(host)).toEqual([])
 
-    // Direction 0's default station is its order-3 stop (乙站); direction 1's
-    // shared-station answer would only be consumed if the default were 共用站.
+    // 方向 0 的默认站是其 order-3 站（乙站）；方向 1 的共用站答案只有在默认是共用站时才会被消耗。
     gate1.resolve(liveBody('bus_027_1', 3, STAMP_A, 120))
     gate2.resolve(READ_A_2)
     await host.flush()
@@ -277,23 +273,22 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     await showBothRowsAtSharedStation(host)
     const stampText = `最后更新 ${clockOf(STAMP_A)}`
 
-    // The refresh never reaches an answer: every live request dies on the wire.
+    // 刷新永不到达答案：每个 live 请求都死在线上。
     host.server.on(/\/api\/transit\/lines\/.+\/live/, () => {
       throw new Error('upstream down')
     })
     await selectStation(host, '共用站')
     await host.flush()
 
-    // The rows stay, and each states the failure with the board's own wording.
+    // 行留下，且各自以报告板自己的措辞陈述失败。
     expect(rowTerminals(host), 'a failed refresh must not trade the rows away')
       .toHaveLength(2)
     expect(host.text()).toContain('无法获取')
     expect(host.text()).toContain('数据暂不可用')
-    // The board states the refresh failed, in the refresh family's own wording —
-    // never left to be inferred from the rows.
+    // 报告板以刷新家族自己的措辞陈述刷新失败——绝不留给行去推断。
     expect(host.text()).toContain('刷新失败')
     expect(host.text()).not.toContain('正在加载车况数据')
-    // The instant on screen still describes the read the rows came from.
+    // 屏幕上的时刻仍在描述行所来自的那次读取。
     expect(host.text()).toContain(stampText)
     host.unmount()
   })
@@ -311,8 +306,7 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     await selectStation(host, '共用站')
     await host.flush()
 
-    // In flight the instant is untouched — never stamped at request time —
-    // and the busy word sits beside it, not instead of it.
+    // 在途时该时刻不被触碰——绝不在请求时盖章——且忙碌词在它旁边，而不是取代它。
     expect(host.text()).toContain(stampText)
     expect(host.text()).toContain('正在刷新…')
     expect(host.text()).not.toContain(clockOf(STAMP_A2))
@@ -321,7 +315,7 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     gate2.resolve(liveBody('bus_027_2', 1, STAMP_A2, 600))
     await host.flush()
 
-    // Only the read that produced the NEW rows moves the line.
+    // 只有产出**新**行的那次读取会移动该行。
     expect(host.text()).toContain(`最后更新 ${clockOf(STAMP_A2)}`)
     expect(host.text()).not.toContain(stampText)
     expect(host.text()).not.toContain('正在刷新…')
@@ -336,12 +330,11 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     }))
     await showBothRowsAtSharedStation(host)
 
-    // 甲站 is served by one direction only, and its answer is held open.
+    // 甲站只由一个方向服务，其答案被挂起。
     await selectStation(host, '甲站')
     await host.flush()
 
-    // In flight the board holds NOTHING of either station: the previous
-    // station's rows left with the station, and the old stamp went with them.
+    // 在途时报告板不持有两个站中的任何一个：前一个站的行随站而去，旧盖章也随之而去。
     expect(host.text()).toContain('正在加载车况数据...')
     expect(rowTerminals(host)).toEqual([])
     expect(minuteSpans(host)).toEqual([])
@@ -350,7 +343,7 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     gateB.resolve(liveBody('bus_027_1', 2, STAMP_B, 300))
     await host.flush()
 
-    // The new station's single row, with its own read instant.
+    // 新站的单行，带它自己的读取时刻。
     expect(rowTerminals(host)).toEqual(['开往甲乙方向'])
     expect(minuteSpans(host)).toContain('5')
     expect(host.text()).toContain(`最后更新 ${clockOf(STAMP_B)}`)

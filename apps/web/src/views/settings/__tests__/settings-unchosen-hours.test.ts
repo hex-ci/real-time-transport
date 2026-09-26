@@ -27,7 +27,7 @@ import CommuteHoursForm from '../components/commute-hours-form.vue'
 
 const START = DEFAULT_COMMUTE_HOURS
 
-/** The wire answer of a row whose four times were never chosen. */
+/** 四个时刻从未选过的行的线上答案。 */
 function unchosenRow(anchors: Record<string, unknown> = { homeLat: 39.9, homeLng: 116.4 }): unknown {
   return {
     success: true,
@@ -42,7 +42,7 @@ function unchosenRow(anchors: Record<string, unknown> = { homeLat: 39.9, homeLng
   }
 }
 
-/** A row that carries its four chosen times. */
+/** 一条携带其四个已选时刻的行。 */
 function storedRow(): unknown {
   return {
     success: true,
@@ -68,7 +68,7 @@ async function mount(component: Parameters<typeof mountComponent>[0], settings: 
   return host
 }
 
-/** The 通勤时段 card's collapsed trigger, whose text is the summary the user reads. */
+/** 通勤时段卡片折叠的触发器，其文本即用户读到的摘要。 */
 function collapsedHoursTrigger(host: MountedHost): HostElement {
   return host.node(
     item => item.tag === 'button' && host.textOf(item).includes('通勤时段'),
@@ -76,7 +76,7 @@ function collapsedHoursTrigger(host: MountedHost): HostElement {
   )
 }
 
-/** The four `type="time"` inputs of the hours editor, in the order the form renders them. */
+/** 时段编辑器的四个 `type="time"` 输入，按表单渲染它们的顺序。 */
 function timeInputs(host: MountedHost): HostElement[] {
   return host.nodes(item => item.tag === 'input' && item.props.type === 'time')
 }

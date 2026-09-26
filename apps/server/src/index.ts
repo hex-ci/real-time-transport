@@ -23,7 +23,6 @@ async function main() {
       }
     }
     catch {
-      // ignore
     }
 
     const forceExitTimer = setTimeout(() => {
@@ -34,7 +33,6 @@ async function main() {
       await app.close()
     }
     catch {
-      // ignore
     }
     finally {
       clearTimeout(forceExitTimer)

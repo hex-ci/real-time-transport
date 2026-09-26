@@ -27,28 +27,23 @@ import {
 import { OPERATING, READ_AT, chainView, conclusion, leg, refusal, refreshAnswer } from './chain-fixtures'
 
 /**
- * The chain page's wiring, held by BEHAVIOUR.
+ * 链路页的接线，由**行为**守住。
  *
- * This file used to assert that identifiers appear in the page's source, which is
- * a guard that passes in both the fixed and the broken state: `refreshTargets`
- * being present says nothing about what it derives, and a page that refreshed
- * nothing at all would still have been green. So the page is now MOUNTED — see
- * `chain-page-harness.ts`, which renders it through Vue's runtime-core without a
- * DOM — and what is asserted is what a user gets: the requests the page makes, the
- * words it prints, and which answer wins when two of them race.
+ * 本文件曾断言标识符出现在页面源码中——这种守卫在修好与损坏两种状态下都通过：`refreshTargets`
+ * 存在并不能说明它推导出什么，且一个什么都不刷新的页面也会是绿的。故现在**挂载**页面（见
+ * `chain-page-harness.ts`，经 Vue 的 runtime-core 渲染而不需 DOM），断言的是用户得到的东西：
+ * 页面发出的请求、它印出的文字、以及两个答案相竞时谁胜。
  *
- * A handful of rules are still asserted against the source, and their names say so:
- * the nav and router entries (registry data, not behaviour), the two design guards
- * that are lexical by nature (font-size ladder, safe-area ownership), and the purity
- * rules the source must hold whatever it renders (no vendor name, no removed
- * contract field). Everything else below drives the page.
+ * 仍有少数规则按源码断言，且其名称已说明：nav 与 router 条目（注册表数据而非行为）、两条本质上
+ * 词法的设计守卫（字号阶梯、安全区归属）、以及源码无论渲染什么都必须持有的纯净规则（无厂商名、
+ * 无已移除的契约字段）。其余的一切都在驱动页面。
  */
 
 function read(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 }
 
-/** The file with its explanatory prose removed, so code is what is asserted. */
+/** 去掉说明性文字的文件，故被断言的是代码。 */
 function codeOf(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -78,20 +73,20 @@ const page = read('../index.vue')
 const router = read('../../../router/index.ts')
 const nav = read('../../../components/header-nav/main.vue')
 
-/** Every .vue file the page is made of — the surface the design guards judge. */
+/** 构成本页的每个 .vue 文件——设计守卫所评判的表面。 */
 const SFC = { 'index.vue': page, ...COMPONENTS }
 
-/** A chain answer for one purpose, as the endpoint sends it. */
+/** 某个目的的一条链路答案，如端点所发送。 */
 function chainsOf(chains: Array<ReturnType<typeof chainView>>, purpose = 'morning'): unknown {
   return { success: true, data: { purpose, chains } }
 }
 
-/** The setting row 设置's own response, with only the fields the page reads. */
+/** 设置行 `设置` 自己的响应，只含页面读取的字段。 */
 function settings(coords: Record<string, number> = {}): unknown {
   return { success: true, data: coords }
 }
 
-/** The state line, as the page renders it. */
+/** 状态行，如页面所渲染。 */
 function statusLineOf(page: MountedChainPage): string {
   return page.textOf(page.node(item => item.props.id === 'refresh-status', 'state line'))
 }
@@ -130,9 +125,8 @@ describe('F11 has one entry here, and what it names comes from the answers on sc
 
     await pressRefresh(page)
 
-    // A SUBWAY id carries both directions while the answer does not say which way
-    // its leg runs, so naming one would leave the leg's own direction un-refreshed
-    // while the control still reported 已刷新.
+    // 地铁 id 携带两个方向，而答案没说它的段跑哪个方向，故点名其中一个会让该段自己的方向未刷新，
+    // 而控件仍报告「已刷新」。
     expect(refreshedLines(page)).toEqual([
       'bus_027_1_0@027',
       'subway_027_88_0@027',
@@ -157,16 +151,14 @@ describe('F11 has one entry here, and what it names comes from the answers on sc
 
     await pressRefresh(page)
 
-    // A refusal carries no earlier leg's answer, so the refusing leg is the ONLY
-    // line that chain is reading.
+    // 拒绝不携带前一段的答案，故发出拒绝的那段是该链路唯一在读取的线路。
     expect(refreshedLines(page)).toEqual(['bus_027_1_0@027', 'bus_027_9_0@027'])
     page.unmount()
   })
 
   it('names nothing at all when it is showing no answer to re-read', async () => {
     const page = await mountChainPage({
-      // A refusal with no leg at all: this chain names no line, so the page has
-      // nothing to ask for and the control is not pressable.
+      // 完全没有段的拒绝：该链路不点名任何线路，故页面没有可请求的，控件也不可按。
       routes: [/commute-chains\/deductions/, () => chainsOf([chainView(refusal('no-legs'))])],
     })
 
@@ -204,8 +196,7 @@ describe('F11 has one entry here, and what it names comes from the answers on sc
 
     await pressRefresh(page)
 
-    // A refusal carried nothing, so asking for the numbers again would only fetch
-    // what is already on screen.
+    // 拒绝什么都没携带，故再次索要数字只会取回屏幕上已有的东西。
     expect(page.store.refreshOutcome).toBe('throttled')
     expect(page.server.seen(/commute-chains\/deductions/)).toHaveLength(before)
     page.unmount()
@@ -241,10 +232,10 @@ describe('the state line is the store\'s, and it is announced without the second
         inFlight: false,
         outcome: page.store.refreshOutcome,
         waitSeconds: page.store.refreshWaitSecondsLeft,
-        // One line, and the endpoint's cap covers it.
+        // 一条线路，端点的上限覆盖它。
         wanted: 1,
         covered: 1,
-        // The chains this page reads have answered by the time a press is possible.
+        // 本次按下可能时，本页读取的链路都已作答。
         targetsRead: true,
       })
       expect(expected, scenario.name).not.toBeNull()
@@ -266,8 +257,7 @@ describe('the state line is the store\'s, and it is announced without the second
     await pressRefresh(page)
 
     const region = page.node(item => item.props.role === 'status', 'live region')
-    // A live region whose text changed every second would announce the refusal
-    // thirteen times, so the countdown is rendered beside the state, not inside it.
+    // 文本每秒都变的 live region 会把拒绝播报十三次，故倒计时渲染在状态旁，而非其中。
     expect(page.textOf(region)).toBe('刷新太频繁')
     expect(page.textOf(region)).not.toMatch(/\d/)
     expect(statusLineOf(page)).toContain('13 秒后可刷新')
@@ -280,10 +270,8 @@ describe('the state line is the store\'s, and it is announced without the second
       routes: [/commute-chains\/deductions/, () => first.promise],
     })
 
-    // The store's 「暂无正在读取车况的线路」 is true of a list that HAS been read
-    // and named no line to ask for. While the chains are still arriving this page
-    // has not learned what it is showing, so it hands `targetsRead: false` over and
-    // the control states nothing.
+    // store 的「暂无正在读取车况的线路」对**已**读取且未点名任何线路的列表为真。链路仍在到达时，
+    // 本页尚未得知它在显示什么，故交 `targetsRead: false`，控件什么都不陈述。
     expect(statusLineOf(page)).toBe('')
 
     first.resolve(chainsOf([]))
@@ -343,10 +331,8 @@ describe('the answers come from one purpose at a time', () => {
     await pickPurpose(page, 'evening')
     expect(answers.map(entry => entry.purpose)).toEqual(['morning', 'evening'])
 
-    // The purpose the user LEFT answers after the switch: it is not this page's
-    // answer any more. Accepting it would end the read the evening answer is still
-    // in — and the page would then say 「这个时段还没有换乘链」 about a purpose it had
-    // not finished asking about.
+    // 用户**离开**的目的在切换后作答：它不再是本页的答案。接受它会终结晚间答案仍在进行的读取——
+    // 页面随后会对一个它尚未问完的目的说「这个时段还没有换乘链」。
     answers[0]!.deferred.resolve(chainsOf([chainView(conclusion([leg({ seq: 0 })]), { name: '早上的链路' })], 'morning'))
     await page.flush()
     expect(page.text()).not.toContain('早上的链路')
@@ -360,12 +346,9 @@ describe('the answers come from one purpose at a time', () => {
   })
 
   it('never lets a slower older answer overwrite a newer one', async () => {
-    // Reads overlap: a purpose switch while a read is in flight, then a switch back
-    // before either has answered. Three reads, and the FIRST of them is for the
-    // purpose now on screen — so left unsequenced its answer (the oldest) lands last
-    // and replaces the one the user is already looking at. That jump is what F10
-    // rules out. (The periodic re-read racing a press is the same race with a timer
-    // as its trigger instead of a tap.)
+    // 读取重叠：一次读取在途时切换目的，再在任一作答前切回。三次读取，而其中**第一次**是为现在
+    // 屏幕上的目的——故若不排序，它的答案（最旧的）最后落地，替换用户已在看的那一个。F10 排除的
+    // 正是这次跳变。（周期性重读与一次按下相竞是同一场竞赛，只是触发者从点击换成定时器。）
     const answers: Array<{ purpose: string, deferred: Deferred<unknown> }> = []
     const page = await mountChainPage({
       routes: [/commute-chains\/deductions/, (request) => {
@@ -435,9 +418,8 @@ describe('the facts an answer is made of reach the screen', () => {
     expect(text).toContain('第 2 段 · 快线 1 路')
     expect(text).toContain('已过末班')
     expect(text).toContain('最后更新')
-    // The refusal card holds no answer of any kind — no margin, no minute, no
-    // vehicle. (The page's own standfirst says what a margin IS; that is copy
-    // about the feature, not a number attributed to this chain.)
+    // 拒绝卡片不持有任何种类的答案——无余量、无分钟、无车辆。（页面自己的导语所说的是余量**是**什么，
+    // 那是关于本特性的文案，不是归给本链路的数字。）
     const card = page.textOf(page.node(item => item.tag === 'article', 'chain card'))
     expect(card, 'a refusal is not a smaller answer').not.toContain('余量')
     expect(card).not.toContain('乘这一班')
@@ -462,7 +444,7 @@ describe('the facts an answer is made of reach the screen', () => {
     for (const id of ['provider-vehicle-secret-1', 'provider-vehicle-gone-2', 'provider-vehicle']) {
       expect(text, `the page rendered ${id}`).not.toContain(id)
     }
-    // The withheld margin is not printed beside the vehicle being boarded, either.
+    // 不印余量，也不印在正在上的车辆旁。
     expect(text).toContain('改乘下一班')
     expect(text).not.toContain('余量 -')
     page.unmount()
@@ -481,7 +463,7 @@ describe('the facts an answer is made of reach the screen', () => {
     const text = page.text()
     expect(text).toContain('12 分钟后到下车站')
     expect(text).toContain('20 分钟后到下车站')
-    // 12 + 20 = 32 is the total a tail sum would print, and it appears nowhere.
+    // 12 + 20 = 32 是尾部合计会印的总数，它不出现于任何地方。
     expect(text).not.toContain('32')
     page.unmount()
   })
@@ -493,8 +475,8 @@ describe('the facts an answer is made of reach the screen', () => {
       ])],
     })
     expect(unset.text()).toContain('未设置「公司」位置')
-    // 设置 is an index plus four pages, so the affordance names the page that owns the cause
-    // (位置锚点), not the index: the user is one tap from the row they have to repair.
+    // `设置` 是一个索引加四个页面，故该可供性点名拥有该成因的页面（位置锚点）而非索引：
+    // 用户距要修复的那一行只差一次点击。
     expect(unset.nodes(item => item.tag === 'a').map(item => item.props.href)).toEqual(['/settings/anchors'])
     unset.unmount()
 
@@ -513,14 +495,14 @@ describe('the empty state names the cause the user can act on, read from 设置\
     const page = await mountChainPage({
       routes: [
         [/commute-chains\/deductions/, () => chainsOf([])],
-        // 设置's row holds 公司 only: the morning chain starts from 家, which is unset.
+        // `设置` 的行只持有「公司」：上班链路从「家」起步，而它未设置。
         [/api\/transit\/settings/, () => settings({ workLat: 31, workLng: 121 })],
       ],
     })
 
     expect(page.text()).toContain('还没有换乘链')
     expect(page.text()).toContain('未设置「家」位置')
-    // The anchor cause's own screen, straight to the row rather than through 设置's index.
+    // 锚点成因自己的屏幕，直达该行而不经 `设置` 的索引。
     expect(page.nodes(item => item.tag === 'a').map(item => item.props.href)).toEqual(['/settings/anchors'])
     expect(page.server.seen(/api\/transit\/settings/)).toHaveLength(1)
     page.unmount()
@@ -530,7 +512,7 @@ describe('the empty state names the cause the user can act on, read from 设置\
     const page = await mountChainPage({
       routes: [
         [/commute-chains\/deductions/, () => chainsOf([])],
-        // 设置's row holds 家 only: the evening chain starts from 公司, which is unset.
+        // `设置` 的行只持有「家」：晚间链路从「公司」起步，而它未设置。
         [/api\/transit\/settings/, () => settings({ homeLat: 39.9, homeLng: 116.4 })],
       ],
     })
@@ -543,9 +525,8 @@ describe('the empty state names the cause the user can act on, read from 设置\
   })
 
   it('claims nothing about an anchor state nobody could read, and offers the screen that claims nothing either', async () => {
-    // An unread row is neither saved nor missing, so no anchor sentence and no anchor link.
-    // The recording page is not a claim about that row — a chain is recorded there whatever
-    // the anchor holds — so it is the one affordance this state keeps.
+    // 未读的行既非已保存也非缺失，故没有锚点句、没有锚点链接。录制页不是对那行的断言——
+    // 无论锚点持有什么，链路都记录在那里——故它是本状态保留的唯一可供性。
     const page = await mountChainPage({
       routes: [
         [/commute-chains\/deductions/, () => chainsOf([])],
@@ -573,15 +554,15 @@ describe('the house design rules', () => {
 
     await pickPurpose(page, 'evening')
 
-    // Clicking one is what switches the purpose, and the group says so.
+    // 点击其一即切换目的，该组也如此陈述。
     const after = purposeRadios(page)
     expect(after.filter(radio => radio.props['aria-checked'] === true).map(radio => radio.props.value)).toEqual(['evening'])
     page.unmount()
   })
 
   it('gives the purpose radios the repo\'s 44px mobile touch target (min-h-11), as 设置\'s own controls do', async () => {
-    // The repo's mobile convention for touch targets is 44px (`settings/index.vue`
-    // cites Apple HIG); WCAG 2.2 SC 2.5.8's 24px minimum is met either way.
+    // 本仓库移动端触摸目标的约定是 44px（`settings/index.vue` 引 Apple HIG）；
+    // WCAG 2.2 SC 2.5.8 的 24px 下限无论如何都满足。
     const page = await mountChainPage({
       routes: [/commute-chains\/deductions/, () => chainsOf([])],
     })
@@ -600,7 +581,7 @@ describe('the house design rules', () => {
       expect(code, `${name} uses an arbitrary font size`).not.toContain('text-[')
       for (const match of code.matchAll(/(?:^|[\s"'`])text-([a-z0-9]+)/g)) {
         const token = match[1]!
-        // Colours and alignments are not sizes; only a size token is judged.
+        // 颜色与对齐不是尺寸；只评判尺寸 token。
         if (!/^(?:xs|sm|base|lg|xl|md|[0-9])/.test(token)) continue
         expect(allowed.has(token), `${name} uses text-${token}`).toBe(true)
       }
@@ -608,9 +589,8 @@ describe('the house design rules', () => {
   })
 
   it('leaves the iOS safe-area insets where App.vue applies them (a structural rule)', () => {
-    // `<main>` adds the top and bottom insets to the page gutter for every route.
-    // A viewport-fixed element would escape that gutter and would have to carry an
-    // inset of its own, so this page has none.
+    // `<main>` 为每个路由把上下内边距加到页面留白上。视口固定元素会逃出该留白，
+    // 必须自带上内边距，故本页没有。
     for (const [name, source] of Object.entries(SFC)) {
       expect(codeOf(source), `${name} pins something to the viewport`)
         .not.toMatch(/(?:^|[\s"'`])(?:fixed|sticky)(?:[\s"'`]|$)/m)
@@ -637,8 +617,8 @@ describe('the house design rules', () => {
   })
 
   it('keeps the contract\'s removed fields out of the source (a source-level rule)', () => {
-    // 「没有目的地、没有尾段接驳、没有总到达时间」 — a field that came back would be a
-    // number nobody measured, and it would not show up in any rendered assertion.
+    // 「没有目的地、没有尾段接驳、没有总到达时间」——回来的字段会是一个没人测量过的数字，
+    // 且不会出现在任何渲染断言里。
     for (const [name, source] of Object.entries({ ...MODULES, ...SFC, index: page })) {
       expect(codeOf(source), name).not.toContain('tailConnectionSeconds')
       expect(codeOf(source), name).not.toContain('arriveInMinutes')
@@ -650,11 +630,9 @@ describe('the house design rules', () => {
     expect(audit.pairs.length).toBeGreaterThan(0)
     expect(audit.violations).toEqual([])
 
-    // The surface this audit exists for: a CHECKED radio pill composites
-    // `cyan-500/20` over `slate-800/80` over the page, and it is LIGHTER than the
-    // `slate-800` card it sits on — so an audit that checks every colour against
-    // one hand-picked surface is checking a surface some text never uses, and the
-    // pill's own background is invisible to it.
+    // 本审计存在所针对的表面：被选中的单选药丸把 `cyan-500/20` 叠在 `slate-800/80` 上再叠到页面，
+    // 比它所在的 `slate-800` 卡片更亮——故拿每个颜色对一个手挑表面检查的审计，检查的是某些文本
+    // 从不使用的表面，而药丸自己的背景对它不可见。
     const pill = audit.surfaces.find(surface =>
       surface.layers.some(layer => layer.startsWith('data-[state=checked]:bg-')))
     expect(pill, 'the checked pill is a surface this page paints and the audit must composite it').toBeDefined()
@@ -662,33 +640,29 @@ describe('the house design rules', () => {
     expect(card, 'the header card surface is not audited').toBeDefined()
     expect(luminance(rgbaOf(pill!.hex))).toBeGreaterThan(luminance(rgbaOf(card!.hex)))
 
-    // And the failure this rebuild must now catch: `bg-slate-700` under 12px
-    // `text-slate-400` is below AA — a lightened BACKGROUND, which an audit that
-    // only ever looks at `text-*` tokens cannot see at all.
+    // 以及本次重建现在必须抓住的失败：12px `text-slate-400` 下的 `bg-slate-700` 低于 AA——
+    // 一个被提亮的**背景**，只盯 `text-*` token 的审计完全看不见。
     expect(contrastOfHex('#94a3b8', '#334155')).toBeLessThan(AA_NORMAL_TEXT)
 
-    // The colour the page must not drift into: slate-500 fails at 12px even on the
-    // darkest surface this page paints, so no surface rescues it.
+    // 页面不得漂移成的颜色：slate-500 即使在本页涂绘的最暗表面上，12px 也不合格，故没有表面能救它。
     expect(contrastOfHex('#64748b', PAGE_BASE)).toBeLessThan(AA_NORMAL_TEXT)
   })
 })
 
 /**
- * The default-purpose chip, held on the three facts it can state.
+ * 默认用途芯片，按其可陈述的三个事实守住。
  *
- * It used to say 「默认按通勤时段选定：上班」 whenever the profile was not reporting the
- * evening leg — which includes a user who has never saved any commute hours, and a
- * profile nobody has read. Both credit a stored window that does not exist (or was
- * never looked at), and the payload carries which fact it is (`windowState`), so the
- * three are stated separately here rather than inferred from the mode.
+ * 它曾在 profile 未上报晚间段时就说「默认按通勤时段选定：上班」——这包括从未保存过任何通勤时段的
+ * 用户，以及一个没人读过的 profile。两者都为一个不存在（或从未被看过）的存储窗口记功，而载荷携带了
+ * 它究竟是哪个事实（`windowState`），故三者在此分别陈述，而非从 mode 推断。
  */
 describe('默认用途芯片说的是它读到的事实', () => {
-  /** The chip's text, found by the id the page gives it. */
+  /** 芯片的文本，按页面给它的 id 找到。 */
   function chipText(page: MountedChainPage): string {
     return page.textOf(page.node(item => item.props.id === 'purpose-default', 'the default-purpose chip'))
   }
 
-  /** The page with a profile route answering whatever the case needs. */
+  /** 由 profile 路由应答用例所需内容的页面。 */
   async function mountedWithProfile(profile: unknown | (() => never)): Promise<MountedChainPage> {
     return mountChainPage({
       routes: [
@@ -710,7 +684,7 @@ describe('默认用途芯片说的是它读到的事实', () => {
     const text = chipText(page)
     expect(text).toContain('未设置')
     expect(text, 'the chip credits a commute window nobody configured').not.toContain('按通勤时段选定')
-    // The default is still a real default, and it is stated as one.
+    // 默认仍是真正的默认，也如实地陈述。
     expect(text).toContain('上班')
     page.unmount()
   })
@@ -745,8 +719,8 @@ describe('默认用途芯片说的是它读到的事实', () => {
   })
 
   it('没读到的通勤时段：不声称窗口选定了它', async () => {
-    // The third fact. A profile that never answered is neither stored nor unset, and a
-    // chip that credits the window here is making a claim about a row nobody read.
+    // 第三种事实。从未作答的 profile 既非已存储也非已设置，此处为一个窗口记功的芯片
+    // 是在对一行没人读过的东西作断言。
     const page = await mountedWithProfile({ success: false, error: '读取失败' })
 
     const text = chipText(page)

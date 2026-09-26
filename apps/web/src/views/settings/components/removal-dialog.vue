@@ -11,9 +11,9 @@ import {
 } from 'reka-ui'
 
 defineProps<{
-  /** Whether the dialog is showing; the view owns this (it tracks the target). */
+  /** 对话框是否显示；由视图拥有它（视图跟踪目标）。 */
   open: boolean
-  /** Name of the line being unfollowed. */
+  /** 正在被取消关注的那条线路的名字。 */
   lineName: string | null
   removing: boolean
   error: string | null
@@ -26,9 +26,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <!-- Removal confirmation. Unfollowing is irreversible from the UI (the line
-       must be searched for again), so it takes an explicit confirm rather than
-       firing on a single tap inside the expanded row. -->
+  <!-- 取消关注确认。取消关注从界面上看是不可逆的（这条线路要重新搜索才能找到），所以要一次
+       明确的确认，而不是在展开的行里点一下就直接执行。 -->
   <AlertDialogRoot :open="open" @update:open="(v) => { if (!v) emit('cancel') }">
     <AlertDialogPortal>
       <AlertDialogOverlay class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm" />
@@ -47,10 +46,8 @@ const emit = defineEmits<{
           >
             保留
           </AlertDialogCancel>
-          <!-- Plain button, NOT AlertDialogAction: that component is a
-               DialogClose, so its own click handler closed the dialog and
-               cleared the pending target before this handler could read it.
-               See confirmRemoval. -->
+          <!-- 普通按钮，不是 AlertDialogAction：那个组件是一个 DialogClose，它自己的点击处理会在这个
+       处理读到待处理目标之前就关掉对话框、清掉目标。见 confirmRemoval。 -->
           <button
             type="button"
             class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"

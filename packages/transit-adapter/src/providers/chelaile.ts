@@ -25,12 +25,11 @@ function getAesKey(): Buffer {
 }
 
 /**
- * Destination-board label (「开往 X」) for one upstream direction record.
+ * 某条上游方向记录的终点牌文案（「开往 X」）。
  *
- * Single source for the rule: search and detail both derive the label, so they
- * must accept the same field chain in the same order. Duplicating the chain
- * let them drift (one accepted `endStn`, the other did not), which showed up as
- * the same direction being named differently in the search row and the selector.
+ * 这条规则只能有一处实现：搜索与详情都由此推导，字段链的接受顺序
+ * 也必须一致 —— 各写一份副本会让同一个方向在搜索行与选择器里叫
+ * 不同的名字。
  */
 function destinationLabel(raw: { endSn?: unknown, endStn?: unknown, destinationName?: unknown }): string {
   const terminal = raw.endSn || raw.endStn || raw.destinationName || '终点站'
@@ -76,12 +75,9 @@ function aesDecrypt(ciphertextB64: string): string {
 }
 
 /**
- * Upstream crowding tag, verbatim:
- * `{"dispatch":false,"imageUrlKey":"拥挤度_5","sort":5,"title":"拥挤"}`.
- *
- * A vehicle carries exactly one crowding tag, and the upstream states the level
- * in `title`. Nothing else on the object is evidence: the key's number is not a
- * level, and `sort` / `dispatch` have no confirmed meaning.
+ * 上游拥挤度标签。一辆车恰好带一个拥挤度标签，级别写在 `title` 里：
+ * 对象上其它字段都不是证据 —— 键里的数字不是级别，`sort` / `dispatch`
+ * 的含义未经确认。
  */
 export interface ChelaileBusTag {
   imageUrlKey?: string
@@ -91,26 +87,13 @@ export interface ChelaileBusTag {
 }
 
 /**
- * The upstream's own WORD for a crowding level, matched by EXACT EQUALITY.
+ * 上游对拥挤级别给出的「原文单词」，按精确相等匹配。
  *
- * MEASURED EVIDENCE — live upstream, 2026-09-25, 20 detail reads / 159 vehicles
- * on the four followed lines. The (key, title) pairs the payloads really carried:
+ * 查表用标签而不是键：键的枚举按构造就不可能完整（没采样到的键会被
+ * 静默降级），而只有标签能承载一个我们从未见过的级别。
  *
- *   拥挤度_1  → 不拥挤   ×113   every sampled line
- *   拥挤度_3  → 拥挤     ×30    the two busiest lines
- *   拥挤度_5  → 拥挤     ×7     only on 010-1-0 / 010-1-1
- *   拥挤度_2 / 拥挤度_4  ×0     never observed
- *
- * The keys are recorded as evidence of what was seen, NOT as the lookup, because
- * the observed keys are not contiguous: `_5` exists and `_4` was never seen. A
- * key-enumerating table is blind by construction — every key nobody happened to
- * sample is downgraded to 「未知」 even when its own `title` states the level in
- * the very same object, which is exactly how `拥挤度_5`/拥挤 was served before
- * this rule. Only the label can carry a level we have never seen.
- *
- * The negated form is its own exact string: `不拥挤` is matched as itself, never
- * as 「拥挤」 found inside it. Matching the copy loosely (a `title.includes`
- * test) reported 14 buses the upstream had labelled 不拥挤 as crowded.
+ * 否定形式是它自己的精确字符串：`不拥挤` 按自身匹配，绝不当成其中
+ * 含有的「拥挤」。
  */
 const CONGESTION_BY_TAG_TITLE: Record<string, CongestionLevel> = {
   不拥挤: 'low',
@@ -120,12 +103,10 @@ const CONGESTION_BY_TAG_TITLE: Record<string, CongestionLevel> = {
 export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
   if (!tags || tags.length === 0) return 'unknown'
   for (const tag of tags) {
-    // Selected by the presence of a known title, never by position: a bus whose
-    // first tag is the non-crowding 无障碍 tag still gets the crowding reading
-    // behind it, and a tag whose title nobody has measured is passed over.
-    // `Object.hasOwn` keeps a title like 「constructor」 out of the prototype's
-    // members; an absent or unmeasured title stays `unknown` — the honest answer
-    // for a word nobody has measured.
+    // 按「标题已知」选中，绝不按位置：第一个标签是非拥挤的 无障碍 标签时
+    // 仍要取它后面的拥挤读数；标题未被测量过的标签则跳过。
+    // `Object.hasOwn` 挡住 「constructor」 这类原型成员；标题缺失或未测量
+    // 时保持 `unknown` —— 对一个没人测量过的词，这才是诚实的答案。
     const title = tag?.title
     const level = typeof title === 'string' && Object.hasOwn(CONGESTION_BY_TAG_TITLE, title)
       ? CONGESTION_BY_TAG_TITLE[title]
@@ -136,23 +117,14 @@ export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
 }
 
 /**
- * Whether a line-detail payload holds a RECORD of the line at all.
+ * line-detail 载荷里到底有没有这条线路的记录。
  *
- * The endpoint answers 200 with a well-formed envelope for an id it has never
- * heard of: `jsonr.data` comes back without a `line` object and without a
- * station list. That is a MISS, not a reading — and the TWO reads of this same
- * endpoint must agree on it. They did not: `getLineDetail` already refused such
- * a payload while `getLiveStatus` built a complete empty reading out of it, so
- * `GET /lines/:id` answered 404 while `GET /lines/:id/live` answered 200 with
- * `{buses: [], dataSource: 'chelaile', isDegraded: false}` — byte-identical to
- * a real line with no vehicle in transit, and a client could not tell
- * 「这条线路不存在」 from 「此刻没车」.
- *
- * The line's name and its stop list are its IDENTITY: both are static, and a
- * line that exists answers with them however few vehicles are running. Vehicles
- * are deliberately NOT part of this test — a line with no vehicle is a real and
- * frequent reading — so the live read adds them as a clause of its own: a
- * payload that carries vehicles is proof the upstream knows this line.
+ * 接口对从未听说过的 id 也回 200 和一个格式完整的信封：`jsonr.data`
+ * 既没有 `line` 对象也没有站点列表。那是未命中，不是读数 —— 同一个
+ * 接口的两次读取必须在这一致。线路名与站点表是它的身份：两者都是
+ * 静态的，存在的线路无论有没有车都会给出它们。车辆刻意不参与这个
+ * 判据（无车的线路是真实且常见的读数），所以 live 读取另行加一条：
+ * 载荷里有车就说明上游知道这条线路。
  */
 function holdsLineRecord(data: any): boolean {
   const rawLine = data?.line ?? {}
@@ -164,9 +136,8 @@ export class ChelaileProvider implements ITransitProvider {
   readonly name: DataSourceType = 'chelaile'
 
   /**
-   * Per-line route geometry cache. jxPath is a static road polyline that never
-   * changes for a given (cityId, lineId), so we resolve it once and keep the
-   * total length + per-station cumulative road distances in memory.
+   * 逐线路的道路几何缓存。jxPath 对给定的 (cityId, lineId) 是不变的
+   * 静态道路折线，所以只解析一次，把总长度与逐站累计距离留在内存里。
    */
   private routeGeomCache = new Map<string, {
     routeLengthMeters: number
@@ -174,23 +145,16 @@ export class ChelaileProvider implements ITransitProvider {
   } | null>()
 
   /**
-   * Resolve the real road polyline for a line via the jxPath trajectory URL.
+   * 通过 jxPath 轨迹 URL 取这条线路的真实道路折线。
    *
-   * The `tra` point string is `lng,lat[,tag];...`. Points carrying a numeric
-   * `tag` (1..N-1) mark each STATION's position along the road, so their
-   * cumulative arc-length gives meter-accurate per-station distances. We
-   * therefore build stationDistances directly from the tagged markers rather
-   * than projecting the (GCJ-02, off-road) station coordinates.
+   * `tra` 点串形如 `lng,lat[,tag];...`。带数字 `tag`（1..N-1）的点标出
+   * 每个车站在道路上的位置，因此它们的累计弧长给出米级精度的逐站
+   * 距离；站点距离直接由这些标记点算出，而不是把（GCJ-02、离路）的
+   * 站点坐标投影上去。每个顶点都走与其他读取同一条规则
+   * （`statedCoordinate`）：任一轴为 0、或坐标对有一半未写出，都是上游
+   * 从未放置的顶点，一个这样的顶点就让整条折线无从表述 —— 答案为 null。
    *
-   * A vertex is a coordinate and goes through the SAME rule as every other read
-   * (`statedCoordinate`): a zero on either axis, or a half of the pair the
-   * payload never stated, is a vertex the upstream never placed. One such vertex
-   * leaves the whole polyline unstateable — its arc-length would be measured
-   * through a point this line's road never reaches, and the tagged markers would
-   * be spread along that imaginary leg — so the answer is null, exactly as for a
-   * trajectory that could not be fetched.
-   *
-   * Returns null on any failure so callers degrade to even-spacing gracefully.
+   * 任何失败都返回 null，调用方即可优雅降级为等距。
    */
   private async fetchRouteGeometry(
     cityId: string,
@@ -204,14 +168,13 @@ export class ChelaileProvider implements ITransitProvider {
     }
 
     try {
-      // jxPath URL is exposed on the (already-signed) line detail response.
       const detail = preloadedDetail ?? await this.request('/bus/line!encryptedLineDetail.action', {
         cityId,
         lineId,
       })
       const jxPath: string | undefined = detail.jxPath || detail.line?.jxPath
       if (!jxPath) {
-        // Line genuinely has no trajectory: negative-cache is fine.
+        // 线路确实没有轨迹：写负缓存是合适的。
         this.routeGeomCache.set(key, null)
         return null
       }
@@ -236,11 +199,8 @@ export class ChelaileProvider implements ITransitProvider {
         return null
       }
 
-      // Parse "lng,lat[,tag]" points into [lat, lng] plus cumulative arc-length.
-      //
-      // Each vertex goes through the coordinate rule (`statedCoordinate`); one
-      // it cannot place makes the whole road unstateable, so the negative cache
-      // is written here exactly as for a line with no trajectory at all.
+      // 把 "lng,lat[,tag]" 点解析成 [lat, lng] 与累计弧长。任一点
+      // 无法放置就让整条道路无从表述，与完全没有轨迹同样处理（负缓存）。
       const points: Array<[number, number]> = []
       const tags: Array<number | undefined> = []
       for (const seg of tra.split(';')) {
@@ -261,15 +221,15 @@ export class ChelaileProvider implements ITransitProvider {
         return null
       }
 
-      // Tagged markers: tag=1 is the origin station (cum 0), tag=k is station
-      // k-1 (0-indexed). The final station has no tag -> append routeLength.
+      // 标记点：tag=1 是始发站（累计 0），tag=k 是第 k-1 站（从 0 数）。
+      // 终点站没有 tag —— 补上 routeLength。
       const tagged: number[] = []
       for (let i = 0; i < tags.length; i++) {
         if (tags[i] !== undefined) tagged.push(cum[i]!)
       }
       let stationDistances: number[]
       if (tagged.length >= 2 && tagged.length >= stationCount - 1) {
-        // Use the authoritative road markers; clamp to monotonic and cap at L.
+        // 采用权威的道路标记点，并夹成单调不减。
         stationDistances = [...tagged]
         for (let i = 1; i < stationDistances.length; i++) {
           if (stationDistances[i]! < stationDistances[i - 1]!) {
@@ -279,7 +239,6 @@ export class ChelaileProvider implements ITransitProvider {
         stationDistances.push(routeLengthMeters)
       }
       else {
-        // No usable markers: fall back to even spacing across stationCount.
         stationDistances = Array.from(
           { length: stationCount },
           (_, i) => (routeLengthMeters * i) / Math.max(1, stationCount - 1),
@@ -291,7 +250,7 @@ export class ChelaileProvider implements ITransitProvider {
       return geom
     }
     catch {
-      // Transient failure: do NOT negative-cache so the next poll retries.
+      // 瞬时失败：不写负缓存，使下一次轮询重试。
       return null
     }
   }
@@ -353,8 +312,8 @@ export class ChelaileProvider implements ITransitProvider {
         cityCode,
       })).filter((l: LineSummary) => {
         if (!l.lineId) return false
-        // Chelaile subway entries often lack station sequences (empty stops).
-        // Drop them: UniversalSubwayEngine provides complete subway results.
+        // 车来了的地铁条目常常没有站点序列（stops 为空），直接丢掉：
+        // 地铁结果由 UniversalSubwayEngine 完整提供。
         if (l.lineName.includes('地铁') && !l.startStop && !l.endStop) return false
         return true
       })
@@ -379,9 +338,8 @@ export class ChelaileProvider implements ITransitProvider {
       const rawLine = data.line || {}
       const rawStations = data.stations || []
 
-      // The upstream answered about no line at all — see `holdsLineRecord`. The
-      // stop list is read into `rawStations` above only past this check, so a
-      // miss cannot travel further as an empty-but-well-formed line.
+      // 上游根本没答出这条线路 —— 见 `holdsLineRecord`：未命中不能
+      // 作为一条「格式完整但为空」的线路继续往下走。
       if (!holdsLineRecord(data)) {
         return null
       }
@@ -391,14 +349,11 @@ export class ChelaileProvider implements ITransitProvider {
         return {
           id: String(s.sId || `stop_${idx + 1}`),
           name: String(s.sn || `站点 ${idx + 1}`),
-          // The stop's ordinal, and the list's own position where the payload
-          // states none this app can read: F10 locates a stored station BY its
-          // order, and a NaN or 0 there names no stop at all. See
-          // `statedStopOrder`.
+          // 站序取载荷给出的那个，读不出来时退回列表自身的位置：
+          // F10 按站序定位已存站点，NaN 或 0 指不出任何站（`statedStopOrder`）。
           order: statedStopOrder(s.order, idx + 1),
-          // The stop's own position, and only when the payload stated one: a
-          // stop the upstream placed nowhere stays unplaced rather than being
-          // pinned at (0, 0). See `statedCoordinate`.
+          // 站点自身的位置，且只有载荷声明了才有：上游没有放置的站点
+          // 保持未放置，而不是钉在 (0, 0)（`statedCoordinate`）。
           lat: statedCoordinate(s.lat),
           lng: statedCoordinate(s.lng),
           interchanges: metros,
@@ -408,7 +363,6 @@ export class ChelaileProvider implements ITransitProvider {
       const otherlines = data.otherlines || []
       const otherDirectionLineId = otherlines[0]?.lineId ? String(otherlines[0].lineId) : undefined
 
-      // Resolve the real road polyline (jxPath) for meter-accurate positioning.
       const geom = await this.fetchRouteGeometry(cityId, lineId, stops.length, data)
 
       return {
@@ -456,26 +410,23 @@ export class ChelaileProvider implements ITransitProvider {
       const rawStations = data.stations || []
       const totalStations = rawStations.length || 1
 
-      // The upstream answered about NO LINE: no identity in the payload (see
-      // `holdsLineRecord`) and no vehicle either. Nothing here is a reading, and
-      // answering `{buses: []}` from it made 「这条线路不存在」 byte-identical to
-      // 「此刻没车」 — the same payload the detail read of this id already refuses
-      // with 404. A payload holding vehicles is left alone even when it carries no
-      // name: the vehicles are proof the upstream knows this line.
+      // 上游没答出这条线路：载荷里没有身份（见 `holdsLineRecord`），也没有
+      // 车辆。这里没有一样是读数，而据此回 `{buses: []}` 会让「这条线路
+      // 不存在」与「此刻没车」字节相同。带着车辆的载荷即使没有名字也照收：
+      // 车辆就是上游认识这条线路的证据。
       if (!holdsLineRecord(data) && rawBuses.length === 0) {
         return null
       }
 
-      // Route length from jxPath lets us turn distanceToWaitStn (distance to
-      // the TERMINAL) into distanceFromStart (authoritative continuous
-      // position). Cached after the first call, so this is free per poll.
+      // jxPath 的路长把 distanceToWaitStn（到终点站的距离）换算成
+      // distanceFromStart（权威的连续位置）。首次调用后即缓存，后续轮询免费。
       const geom = await this.fetchRouteGeometry(cityId, lineId, totalStations, data)
       const routeLen = geom?.routeLengthMeters
       const sd = geom?.stationDistances
 
       const buses: LiveBus[] = rawBuses.map((b: any, idx: number) => {
-        // Pass through only what the upstream actually reports; missing fields
-        // stay undefined instead of being fabricated (0.5 progress, fake coords).
+        // 只透传上游真正报出的字段；缺失的保持 undefined，不伪造
+        // （比如 0.5 的 progress 或编造的坐标）。
         const orderNum = Number(b.order)
         const speedNum = Number(b.speed)
         const distNum = Number(b.distanceToWaitStn)
@@ -483,28 +434,24 @@ export class ChelaileProvider implements ITransitProvider {
         const lngNum = Number(b.lng)
 
         const hasOrder = Number.isFinite(orderNum) && b.order !== undefined && orderNum > 0
-        // In chelaile's wire protocol, b.order is the UPCOMING station the vehicle is heading towards.
-        // Therefore, the station the vehicle last passed is orderNum - 1.
+        // 按车来了的线上协议，b.order 是车辆正前往的下一站，所以它刚
+        // 经过的那一站是 orderNum - 1。
         const order = hasOrder ? Math.max(1, orderNum - 1) : undefined
         const nextOrder = hasOrder ? Math.min(totalStations, orderNum) : undefined
 
         const hasDist = Number.isFinite(distNum) && distNum >= 0
-        // -1 is chelaile's sentinel for "already past the requested targetOrder";
-        // pass it through so the arrivals endpoint can exclude such buses.
+        // -1 是车来了「已过目标站」的哨兵值，原样透传，使到达接口
+        // 能排除这类车。
         const hasDistRaw = Number.isFinite(distNum)
         const mileageNum = Number(b.mileage)
         const hasMileage = Number.isFinite(mileageNum) && mileageNum > 0
 
-        // When targetOrder is requested, chelaile provides target-specific travel time & distance.
         const travel = options?.targetOrder && Array.isArray(b.travels)
           ? b.travels.find((t: any) => Number(t.order) === options.targetOrder)
           : undefined
-        // ZERO is the upstream's own fact, not a missing value: when the vehicle
-        // is STANDING at the requested stop the source reports travelTime 0
-        // (observed with distanceToWaitStn 0 and speed ~0). Keeping only > 0 threw
-        // that away and sent the row into this app's position/dwell estimate,
-        // which printed a minute for a bus at the platform. A negative value is
-        // chelaile's 「已过目标站」 sentinel, which is not a duration.
+        // 0 是上游自己的事实，不是缺值：车辆正停在请求的站上时，源自己
+        // 给出 travelTime 0。只保留 > 0 会丢掉它，把这一行推给本应用的
+        // 位置/停站估计；负值（-1）是「已过目标站」的哨兵，不是时长。
         const targetTravelTime = travel ? Number(travel.travelTime) : undefined
         const targetTravelTimeSec = targetTravelTime !== undefined
           && Number.isFinite(targetTravelTime)
@@ -512,9 +459,6 @@ export class ChelaileProvider implements ITransitProvider {
           ? targetTravelTime
           : undefined
 
-        // Authoritative continuous distanceFromStart:
-        // 1) Prefer raw b.mileage (vehicle odometer from start in meters, provided by chelaile)
-        // 2) Fallback to targetStationDist - distNum or routeLen - distNum
         let distanceFromStart: number | undefined
         if (hasMileage) {
           distanceFromStart = mileageNum
@@ -578,10 +522,6 @@ export class ChelaileProvider implements ITransitProvider {
     }
   }
 
-  /**
-   * Full realtime city dictionary.
-   * Response envelope: { data: { allRealtimeCity: [{ cityName, cityId, pinyin, supportSubway }] } }
-   */
   async getCityList(): Promise<Array<{ code: string, name: string, pinyin: string, hasMetro: boolean }>> {
     try {
       const res = await fetch('https://web.chelaile.net.cn/cdatasource/citylist?type=allCities', {

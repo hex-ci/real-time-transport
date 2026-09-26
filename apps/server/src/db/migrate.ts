@@ -47,8 +47,8 @@ async function up(): Promise<void> {
       continue
     }
     const raw = await readFile(join(MIGRATIONS_DIR, file), 'utf-8')
-    // Only the part above "-- migrate:down" is the forward migration; running the
-    // whole file would execute the rollback section too and undo what just ran.
+    // 只有 "-- migrate:down" 之前的部分是正向迁移；执行整个文件会连回滚段一起跑，
+    // 把刚执行的改动再撤销回去。
     const sql = stripDownSection(raw)
     console.log(`apply: ${file}`)
     // 事务内执行：迁移中途失败时不留半应用状态

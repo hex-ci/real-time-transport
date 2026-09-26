@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * Removal confirmation for one recorded chain.
+ * 一条已录链路的删除确认。
  *
- * Deleting is not reversible from the UI: the legs were typed in one by one, and
- * getting them back means recording the chain again. So it takes an explicit confirm
- * rather than firing on a single tap inside the row.
+ * 删除在界面上不可撤销：每一段都是逐条录入的，要恢复就得重新录入。
+ * 故它要求显式确认，而不是在行内单击即触发。
  */
 import { TriangleAlert } from '@lucide/vue'
 import {
@@ -18,9 +17,9 @@ import {
 } from 'reka-ui'
 
 defineProps<{
-  /** Whether the dialog is showing; the card owns this (it tracks the target). */
+  /** 对话框是否显示；由卡片持有（它跟踪目标）。 */
   open: boolean
-  /** Name of the chain being deleted. */
+  /** 正在删除的链路名。 */
   chainName: string | null
   removing: boolean
   error: string | null
@@ -49,9 +48,8 @@ const emit = defineEmits<{
           <AlertDialogCancel class="min-h-[44px] rounded-xl border border-slate-700 bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-slate-700 active:scale-95">
             保留
           </AlertDialogCancel>
-          <!-- A plain button, NOT AlertDialogAction: that component is a DialogClose,
-               whose own click handler closes the dialog before this one runs, so the
-               card would read a cleared target and never send the DELETE. -->
+          <!-- 普通 button，刻意不用 AlertDialogAction：后者是 DialogClose，它自己的点击
+               处理会先关闭对话框，卡片随后读到已清空的目标，永远发不出 DELETE。 -->
           <button
             type="button"
             class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"

@@ -6,23 +6,18 @@ import { haversineMeters } from '@real-time-transport/shared/geo'
 import type { Station } from '@real-time-transport/shared'
 
 /**
- * The nearest stop a line has to the user's fix — and the rule that decides
- * which stops may be measured at all.
+ * 线路距用户定位最近的站点，以及决定哪些站可以被测量的规则。
  *
- * A stop is a candidate only for a position the payload actually stated. A zero
- * on either axis is the ABSENCE of a coordinate on this app's GCJ-02 datum (no
- * placed stop sits at 0), so measuring from one would price a walk to a point in
- * the Atlantic and make an unplaced platform the nearest thing to the user. That
- * rule lives ONCE, in `statedCoordinate`, and this file holds both halves of
- * using it here: the store reads its coordinates through it, and the answers that
- * follow are the honest ones — a nearest stop when one is placed, and NONE when
- * none is, rather than a fallback to the first stop in the list.
+ * 只有载荷真正陈述了坐标的站才是候选。任一轴为零即本应用 GCJ-02 基准下**没有**坐标
+ * （没有已放置的站会落在 0），从它测量会把步行算到大西洋上的一点，让未放置的站台成为离用户
+ * 最近的东西。该规则只存在一处（`statedCoordinate`），本文件钉住使用它的两半：store 通过它读
+ * 坐标，由此得到的答案是诚实的——有已放置的站就给出最近站，否则**没有**，而不是退回列表第一站。
  */
 
-/** The fix the tests stand at, via the store's own development override. */
+/** 测试所在的位置，经由 store 自己的开发覆写注入。 */
 const FIX = { lat: 39.9, lng: 116.4 }
 
-/** A stop of the line on screen, with no position at all unless one is given. */
+/** 屏幕上线路的一个站，未给定则完全没有位置。 */
 function stop(id: string, name: string, lat?: number, lng?: number): Station {
   const s: Station = { id, name, order: 1, interchanges: [] }
   if (lat !== undefined) s.lat = lat
@@ -31,11 +26,10 @@ function stop(id: string, name: string, lat?: number, lng?: number): Station {
 }
 
 /**
- * Load the store under a PINNED GPS-override environment.
+ * 在固定 GPS 覆写环境下加载 store。
  *
- * `VITE_GPS_SIMULATION` is the store's own stand-in for a device fix, so the
- * nearest-stop computation can be exercised without a browser; the module reads
- * the flag at import time, hence the pinned env and the fresh module registry.
+ * `VITE_GPS_SIMULATION` 是 store 自己对设备定位的替代，使最近站计算可在无浏览器下演练；
+ * 模块在 import 时读取该标志，故需要固定环境与全新的模块注册表。
  */
 async function freshStore(env: Record<string, string> = {}) {
   vi.stubEnv('VITE_GPS_SIMULATION', 'false')
@@ -47,7 +41,7 @@ async function freshStore(env: Record<string, string> = {}) {
   return useLocationStore()
 }
 
-/** A store tracking the fixed development position. */
+/** 跟踪固定开发位置的 store。 */
 function storeAtFix(over: Record<string, string> = {}) {
   return freshStore({
     VITE_GPS_SIMULATION: 'true',
@@ -73,9 +67,7 @@ describe('the nearest stop is chosen from the stops that state a position', () =
     store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.5), near])
 
     expect(store.nearestStation?.id).toBe('s2')
-    // The app's own definition of the distance, plus a bound derived from the
-    // geometry so the number is checked and not merely re-computed: 0.01° of
-    // longitude at 39.9°N is 1113.2 m/° × cos(39.9°) ≈ 854 m.
+    // 距离的定义取自应用自身，并加一个由几何推出的界，使该数被检查而非仅被重算。
     expect(store.nearestDistanceM).toBe(Math.round(haversineMeters(FIX.lat, FIX.lng, near.lat!, near.lng!)))
     expect(store.nearestDistanceM).toBeGreaterThan(840)
     expect(store.nearestDistanceM).toBeLessThan(870)
@@ -83,10 +75,8 @@ describe('the nearest stop is chosen from the stops that state a position', () =
 
   it('reports NO nearest stop when no stop of the line states a position', async () => {
     const store = await storeAtFix()
-    // Neither stop may be measured: the first states no coordinate, the second
-    // states a zero — the same absence on this datum, and not a point at (0, 0).
-    // A store that measured either one would answer with the nearer-looking of
-    // them and present an unplaced platform as the nearest thing to the user.
+    // 两个站都不能被测量：第一个没有坐标，第二个坐标为零——本基准下同一种缺失。
+    // 测量其中一个的 store 会给出看起来更近的那个，把未放置的站台呈现为离用户最近的东西。
     store.updateNearestStation([stop('s1', '甲站'), stop('s2', '乙站', 0, 0)])
 
     expect(store.nearestStation).toBeNull()
@@ -94,8 +84,7 @@ describe('the nearest stop is chosen from the stops that state a position', () =
   })
 
   it('reports nothing at all before a fix exists, whatever the pool holds', async () => {
-    // No fix: there is nothing to measure FROM, so the answer is none rather than
-    // a stop measured against nowhere.
+    // 没有定位就无可测量，答案是「无」，而不是对着虚空量出的某站。
     const store = await freshStore()
     store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.41)])
 
@@ -105,7 +94,7 @@ describe('the nearest stop is chosen from the stops that state a position', () =
 })
 
 describe('the coordinate rule is READ here, not spelled again', () => {
-  /** Source with comments stripped: this file's prose may state the rule. */
+  /** 去掉注释的源码：本文件的叙述可以陈述该规则。 */
   function source(file: string): string {
     return readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -114,9 +103,8 @@ describe('the coordinate rule is READ here, not spelled again', () => {
 
   it('routes the store\'s stop reads through the shared helper', () => {
     const store = source('stores/location.store.ts')
-    // `!st.lat || !st.lng` is the rule re-written by hand: a second copy that can
-    // drift from `statedCoordinate`, which is where every other read of an
-    // upstream coordinate in this app gets its answer.
+    // `!st.lat || !st.lng` 是手写重述的规则：第二份副本会与 `statedCoordinate` 漂移，
+    // 而本应用其他每一处上游坐标读取都以它为准。
     expect(store, 'the store spells the zero-is-not-a-position rule itself')
       .not.toMatch(/!st\.(lat|lng)/)
     expect(store, 'the store does not read a stop coordinate through the shared rule')

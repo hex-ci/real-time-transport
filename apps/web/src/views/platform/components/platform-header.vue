@@ -12,7 +12,7 @@ const emit = defineEmits<{
   (e: 'change'): void
 }>()
 
-/** The selected platform; the view owns it because departures reload on change. */
+/** 所选站台；由视图持有，因为发车随它切换而重载。 */
 const stationName = defineModel<string>({ required: true })
 </script>
 

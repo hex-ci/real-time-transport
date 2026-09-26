@@ -3,9 +3,8 @@ import { AmapGisService } from '../index.js'
 import { WALK_ETA_MAX_ENTRIES } from '../services/amap-gis.service.js'
 
 /**
- * GCJ-02 coordinates — the app's normalized system and what this service sends
- * upstream (the conversion happens at the HTTP boundary, see
- * `amap-gis-coordinate-contract.test.ts`): a user anchor, and a stop ~2 km away.
+ * GCJ-02 坐标 —— 应用的归一化坐标系，也是本服务发给上游的坐标系
+ * （转换在 HTTP 边界完成，见 `amap-gis-coordinate-contract.test.ts`）。
  */
 const ANCHOR = { lng: 116.403640, lat: 39.910710 }
 const STOP = { lng: 116.392540, lat: 39.924299 }
@@ -16,12 +15,12 @@ type Upstream = 'route' | 'network-error' | 'qps-limit' | 'no-route'
 
 let reply: Upstream = 'route'
 
-/** Wall clock the service reads: a poll moves it on, so TTLs can be crossed. */
+/** 服务读取的墙上时钟：每次轮询推进它，因此可以跨过 TTL。 */
 let clock = 0
 
 /**
- * Counted stand-in for the Amap upstream. Tests assert the CALL COUNT, not only
- * equal return values, so a cache cannot pass by accident.
+ * 计数版的高德上游替身。测试断言调用次数，而不只是返回值相等，
+ * 使缓存无法侥幸通过。
  */
 function stubUpstream(): string[] {
   const urls: string[] = []
@@ -39,7 +38,6 @@ function stubUpstream(): string[] {
   return urls
 }
 
-/** One home-screen poll for a single anchor/stop pair. */
 function poll(amap: AmapGisService, anchor = ANCHOR, stop = STOP) {
   clock += 1000
   return amap.getWalkingEta(anchor.lng, anchor.lat, stop.lng, stop.lat)
@@ -87,19 +85,16 @@ describe('AmapGisService.getWalkingEta caching', () => {
     const amap = new AmapGisService('test-key')
 
     await poll(amap)
-    // ~0.4 m east: both anchors land in the same 5-decimal cell, so drifting GPS
-    // inside one cell is served rather than re-priced. (A 5-decimal cell is ~1 m
-    // wide, so an equally small change can also cross a boundary and cost a
-    // fresh price.)
+    // 向东约 0.4 m：两个锚点落在同一个 5 位小数格子里，所以格内漂移的
+    // 定位会被直接供给而不是重新定价。（5 位小数格约 1 m 宽，同样小
+    // 的变化也可能跨格并花掉一次新定价。）
     await poll(amap, { lng: ANCHOR.lng + 0.000004, lat: ANCHOR.lat })
     expect(urls).toHaveLength(1)
 
-    // Another cell, then another stop: neither may reuse the entry...
     await poll(amap, { lng: ANCHOR.lng, lat: ANCHOR.lat + 0.0001 })
     await poll(amap, ANCHOR, { lng: STOP.lng + 0.0001, lat: STOP.lat })
     expect(urls).toHaveLength(3)
 
-    // ...and each of those keeps its own entry.
     await poll(amap, { lng: ANCHOR.lng, lat: ANCHOR.lat + 0.0001 })
     await poll(amap, ANCHOR, { lng: STOP.lng + 0.0001, lat: STOP.lat })
     expect(urls).toHaveLength(3)
@@ -114,7 +109,7 @@ describe('AmapGisService.getWalkingEta caching', () => {
     reply = 'network-error'
     const afterFailure = await poll(amap)
 
-    // It did retry upstream, so this is the fallback and not a fresh hit.
+    // 它确实重试了上游，所以这是兜底而不是一次新命中。
     expect(urls).toHaveLength(2)
     expect(afterFailure).toEqual(good)
   })
@@ -149,8 +144,8 @@ describe('AmapGisService.getWalkingEta caching', () => {
     clock += 24 * 3600 * 1000
     reply = 'no-route'
 
-    // A valid "no walking route" answer is the current truth: a day-old leg for
-    // a route that no longer exists must not be served in its place.
+    // 合法的「无步行路线」回答就是当下的事实：一条已不存在的路线
+    // 不该被一天前的腿顶替。
     await expect(poll(amap)).resolves.toBeNull()
     expect(urls).toHaveLength(2)
   })
@@ -172,17 +167,17 @@ describe('AmapGisService.getWalkingEta caching', () => {
     const urls = stubUpstream()
     const amap = new AmapGisService('test-key')
 
-    // 110 m apart, as a moving user's fixes are: a distinct key every poll.
+    // 相隔 110 m，就像移动中用户的定位：每次轮询都是一个新键。
     for (let i = 0; i <= WALK_ETA_MAX_ENTRIES; i++) {
       await poll(amap, { lng: ANCHOR.lng, lat: ANCHOR.lat + i * 0.001 })
     }
     expect(urls).toHaveLength(WALK_ETA_MAX_ENTRIES + 1)
 
-    // The oldest anchor was shed to make room, so it is priced again...
+    // 最早的锚点已被淘汰腾位，所以它会被再次定价……
     await poll(amap, ANCHOR)
     expect(urls).toHaveLength(WALK_ETA_MAX_ENTRIES + 2)
 
-    // ...while the newest one is still served from the cache.
+    // ……而最新的那一个仍从缓存供给。
     await poll(amap, { lng: ANCHOR.lng, lat: ANCHOR.lat + WALK_ETA_MAX_ENTRIES * 0.001 })
     expect(urls).toHaveLength(WALK_ETA_MAX_ENTRIES + 2)
   })
@@ -190,11 +185,10 @@ describe('AmapGisService.getWalkingEta caching', () => {
 
 describe('AmapGisService.getWalkingEta: a path the payload does not price is no route', () => {
   /**
-   * Answers the walking request with ONE `route.paths[0]`, spelled the way the
-   * upstream spells it — both numbers as strings. A real route carries a price on
-   * both axes; a path missing either one states no price this app can use, and
-   * `0` (a number the upstream CAN state: two coincident points are priced at one
-   * second) is not a stand-in for it.
+   * 用一条 `route.paths[0]` 回答步行请求，写法与上游一致 —— 两个数
+   * 都是字符串。真实路线在两个轴上都带价；缺任一个的路径没有本应用
+   * 可用的价格，而 `0`（上游确实能写出的数：两个重合的点定价为一秒）
+   * 不是它的替身。
    */
   function pathReply(path: Record<string, unknown>): void {
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -204,7 +198,7 @@ describe('AmapGisService.getWalkingEta: a path the payload does not price is no 
     })))
   }
 
-  /** One priced request against a FRESH service, so no cached entry can answer for it. */
+  /** 对全新服务实例的一次定价请求，使任何缓存条目都无法替它作答。 */
   function pollOnce(): Promise<Awaited<ReturnType<AmapGisService['getWalkingEta']>>> {
     clock += 1000
     return new AmapGisService('test-key').getWalkingEta(ANCHOR.lng, ANCHOR.lat, STOP.lng, STOP.lat)
@@ -216,11 +210,9 @@ describe('AmapGisService.getWalkingEta: a path the payload does not price is no 
   })
 
   it('keeps a zero DURATION priced: two coincident points are a legal 0-second walk', async () => {
-    // The other half of 「zero is a number the payload can state」. A distance of
-    // 0 is a real coincidence of the two points, and so is a duration of 0 — so
-    // the priced-zero branch is pinned on BOTH axes. Reading a stated 0 as 「no
-    // price」 would drop a legal walk, exactly as inventing one for a missing
-    // value would.
+    // 「0 是载荷能写出的数」的另一半：距离 0 与时长 0 都是两点真实
+    // 重合，所以零价分支在两个轴上都钉住。把写出的 0 读作「无价格」
+    // 会丢掉一次合法的步行，正如同为缺值凭空造一个价格一样。
     pathReply({ distance: '540', duration: '0' })
     await expect(pollOnce()).resolves.toEqual({ distanceMeters: 540, durationSeconds: 0 })
   })
@@ -236,9 +228,8 @@ describe('AmapGisService.getWalkingEta: a path the payload does not price is no 
   })
 
   it('reports no route when the payload states a non-numeric duration', async () => {
-    // A field the payload CARRIED but did not spell as a number is still no
-    // price: `Number('abc')` is NaN, and NaN printed as a walk time is worse than
-    // an absent route.
+    // 载荷「带了」但没有写成数字的字段仍不是价格：`Number('abc')` 是
+    // NaN，而把 NaN 当作步行时间印出来比没有路线更糟。
     pathReply({ distance: '540', duration: 'abc' })
     await expect(pollOnce()).resolves.toBeNull()
   })

@@ -10,30 +10,24 @@ import {
 import OverviewPage from '../index.vue'
 
 /**
- * The home screen's share of §4.1's own rule: a followed-lines read that FAILED is not an
- * empty followed-lines list.
+ * 首页在 §4.1 规则中的那一份：**失败**的关注线路读取不是空的关注线路列表。
  *
- * 设置's index row learned this first (its count says 「未读到」 instead of a number nobody
- * obtained), and the home screen is the surface where the same failure does the most damage:
- * `fetchFavorites` leaves an empty array behind when the read fails, the cards are built from
- * that array, and an empty card list renders 「当前城市（北京市）还没有关注线路」 with a link
- * telling the user to go and follow lines — lines they already follow. The cause and the
- * action are both wrong, and the fix belongs to the read's own state rather than to the words.
+ * `设置` 的索引行最先学到这一点，而首页是同一失败为害最大的表面：读取失败时 `fetchFavorites`
+ * 留下一个空数组，卡片由该数组构建，空卡片列表会渲染「当前城市（北京市）还没有关注线路」并附一个
+ * 让用户去关注线路的链接——那些线路他们已经在关注。成因与动作都错，修复属于读取自身的状态而非措辞。
  *
- * The PAGE is mounted, not the empty-state component, because the claim being tested is the
- * page's: which state it passes down is exactly what a component-level test cannot see. That
- * mount reuses 设置's DOM-free harness (Vue's runtime-core into plain objects, no jsdom) — this
- * repo has one such harness and a second copy would drift from it.
+ * 挂载的是**页面**而非空态组件，因为被测断言是页面的：它向下传递哪个状态，正是组件级测试看不到的。
+ * 该挂载复用 `设置` 的无 DOM 装置（Vue 的 runtime-core 渲染为普通对象，无 jsdom）——本仓库只有
+ * 这一个此类装置，第二份副本会与之漂移。
  *
- * `useRouter` is the one piece of app plumbing the page reaches for (it navigates to a line's
- * detail), and it is mocked: nothing here navigates.
+ * `useRouter` 是页面触及的唯一应用管道（它导航到线路详情），被 mock：此处什么都不导航。
  */
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: () => {} }),
 }))
 
-/** One followed line of the active city, as the store reads them. */
+/** 当前城市的一条关注线路，如 store 所读。 */
 function favourite(): Record<string, unknown> {
   return {
     id: 'fav-1',
@@ -47,15 +41,13 @@ function favourite(): Record<string, unknown> {
 }
 
 /**
- * What the followed-lines read answers, held in a BOX rather than passed as a value, so a
- * test can repair the endpoint mid-run and prove that the page's retry really re-reads.
+ * 关注线路读取所答，保存在一个**盒子**而非作为值传入，使测试能中途修好端点并证明页面的重试真的重读。
  */
 interface FavouritesAnswer { value: 'ok' | 'empty' | 'fail' }
 
 /**
- * The reads the page makes on mount, with the one that decides this test under the test's
- * control. Everything else answers something harmless: this file is about the words an
- * unreadable list produces, not about the cards.
+ * 页面在挂载时发出的读取，其中决定本测试的那个由测试控制。其余都答无害的内容：
+ * 本文件关乎不可读列表产生的措辞，而非卡片。
  */
 function routes(answer: FavouritesAnswer): Route[] {
   return [
@@ -78,7 +70,7 @@ async function mountOverview(answer: FavouritesAnswer): Promise<MountedHost> {
   return host
 }
 
-/** The failed read's retry control, or a thrown error naming what was missing. */
+/** 失败读取的重试控件，或一个点名缺失之物的抛错。 */
 function retryControl(host: MountedHost): HostElement {
   const found = host.nodes((item: HostElement) => item.tag === 'button' && host.textOf(item).trim() === '重试')[0]
   if (!found) throw new Error('the failed read offered no retry')
@@ -107,7 +99,7 @@ describe('首页：关注线路读不到，不等于一条都没关注', () => {
     const host = await mountOverview(answer)
     expect(host.text()).toContain('未读到关注线路')
 
-    // The endpoint is repaired, then the page is driven the way a user drives it.
+    // 端点被修好，然后页面按用户驱动它的方式被驱动。
     answer.value = 'ok'
     await press(host, retryControl(host))
 
@@ -119,8 +111,7 @@ describe('首页：关注线路读不到，不等于一条都没关注', () => {
   it('读到了但一条都没关注：这才是「还没有关注线路」，并指向那一页', async () => {
     const host = await mountOverview({ value: 'empty' })
 
-    // The route answered an empty list, so the empty state is now a fact about what is
-    // stored — and the link is the action for THAT fact.
+    // 路由答了空列表，故空态现在是一个关于**已存储内容**的事实——而该链接是那个事实的动作。
     const text = host.text()
     expect(text).toContain('还没有关注线路')
     expect(text).not.toContain('未读到关注线路')

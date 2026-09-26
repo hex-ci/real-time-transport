@@ -5,14 +5,11 @@ import type { OperatingStatus } from '@real-time-transport/shared'
 import { operatingBadgeOf, operatingLabelOf, operatingTextOf } from '../operating-copy'
 
 /**
- * F3's operating line, as text.
+ * F3 的运营行，以文本形式。
  *
- * The wording is pure logic, so it is tested here rather than left to a browser
- * pass (this app has no DOM test harness). What matters is the one thing F3 is
- * strict about: 「未到首班」「已过末班」 and 「运营中但没有车」 are three different
- * facts, and no two of them may read alike. The source guards at the end hold
- * the other half — that the sentence this feature replaced (「暂无来车」) is no
- * longer what a board says when it could state something true.
+ * 措辞是纯逻辑，故在此测试（本应用无 DOM 测试台）。要点是 F3 严格对待的一件事：
+ * 「未到首班」「已过末班」「运营中但没有车」是三个不同的事实，任意两者不得读起来一样。
+ * 末尾的源码守卫钉住另一半——本特性替掉的句子（「暂无来车」）不再是屏幕上能陈述真话时的答案。
  */
 
 function status(partial: Partial<OperatingStatus> & { state: OperatingStatus['state'] }): OperatingStatus {
@@ -20,15 +17,10 @@ function status(partial: Partial<OperatingStatus> & { state: OperatingStatus['st
 }
 
 /**
- * The file with its explanatory prose removed, so a rule about CODE is not
- * tripped by a comment that names the very thing it explains was removed.
+ * 去掉说明性文字的文件，使关于**代码**的规则不被「恰好点出它所要解释之物」的注释触发。
+ * 下方的缺失性检查读它而非原始文件。
  *
- * The absence checks below read this rather than the raw file: a future comment
- * explaining why a board no longer says 「暂无来车」 would otherwise fail the
- * suite that keeps it out of the copy.
- *
- * `//` alone is only stripped when it does not follow a colon, so a string
- * literal holding a `ws://` or `https://` URL survives and stays scannable.
+ * `//` 仅在不跟在冒号后时才剥离，因此含 `ws://`、`https://` 的字符串字面量得以保留、仍可扫描。
  */
 function codeOf(source: string): string {
   return source
@@ -66,26 +58,24 @@ describe('the operating line names the state the line is actually in', () => {
   })
 
   it('never leaves a dangling separator when the time it refers to is unknown', () => {
-    // Only reachable from an inconsistent payload, but the line is what the user
-    // reads: 「已过末班 · 」 would be a missing value dressed as a value.
+    // 只会由不一致的载荷到达，但该行是用户读到的内容：「已过末班 · 」会把缺失的值装扮成值。
     expect(operatingTextOf(status({ state: 'after_last', lastDeparture: null }))).toBe('已过末班')
     expect(operatingTextOf(status({ state: 'before_first', firstDeparture: null }))).toBe('未到首班')
   })
 
   it('falls back to the plain sentence only when there is no status at all', () => {
-    // No feed, no status: nothing about service hours is known, so nothing is
-    // claimed — this is the one case 「暂无来车」 is still the whole truth.
+    // 无 feed 即无状态：运营时段一概未知，因此不作任何断言——只有这里「暂无来车」仍是完整的真话。
     expect(operatingTextOf(null)).toBe('暂无来车')
     expect(operatingTextOf(undefined)).toBe('暂无来车')
   })
 
   it('names the same state in a badge as in a full line', () => {
-    // A badge is the same fact with the time left out, never a different verdict.
+    // 徽标是去掉时间的同一事实，绝非另一个判决。
     expect(operatingLabelOf(status({ state: 'before_first' }))).toBe('未到首班')
     expect(operatingLabelOf(status({ state: 'after_last' }))).toBe('已过末班')
     expect(operatingLabelOf(status({ state: 'operating' }))).toBe('运营中')
     expect(operatingLabelOf(status({ state: 'unknown' }))).toBe('运营时间未知')
-    // The badge text of each state opens its full line, so the two cannot drift.
+    // 每个状态的徽标文本是其整行的开头，故两者无法漂移。
     for (const s of ['before_first', 'operating', 'after_last', 'unknown'] as const) {
       expect(operatingTextOf(status({ state: s }))).toContain(operatingLabelOf(status({ state: s })))
     }
@@ -108,7 +98,7 @@ describe('the boards state the operating fact instead of the generic sentence', 
   it('no longer answers the station board with a literal 「暂无来车」', () => {
     expect(codeOf(platform)).not.toContain('暂无来车')
     expect(codeOf(board)).not.toContain('暂无来车')
-    // 「待发车/停运」 said both things at once, which is the conflation F3 removes.
+    // 「待发车/停运」同时说了两件事，正是 F3 要拆开的那种混同。
     expect(codeOf(board)).not.toContain('待发车/停运')
   })
 })
@@ -119,7 +109,6 @@ describe('the live badge claims a real vehicle only from a real vehicle', () => 
 
   const hero = read('../views/line-detail/components/line-hero.vue')
 
-  /** Everything between the SFC's own <template> tags: what reaches the screen. */
   function templateOf(sfc: string): string {
     const start = sfc.indexOf('<template>')
     const end = sfc.lastIndexOf('</template>')
@@ -134,9 +123,8 @@ describe('the live badge claims a real vehicle only from a real vehicle', () => 
     const service = operatingLabelOf(status({ state: 'operating' }))
     const vehicle = operatingBadgeOf(true, status({ state: 'operating' }))
     expect(vehicle).not.toBe(service)
-    // 营运中 vs 运营中 differed by one character and by nothing at all over TTS,
-    // so neither reader could tell the two facts apart. The real-vehicle word
-    // must not be built out of the service-hours word at all.
+    // 「营运中」与「运营中」仅一字之差、对 TTS 毫无区别，两个读者都无法区分这两个事实。
+    // 真实车辆的词绝不能由运营时段的词拼出。
     expect(vehicle).not.toContain(service.replace('中', ''))
   })
 
@@ -147,10 +135,8 @@ describe('the live badge claims a real vehicle only from a real vehicle', () => 
   })
 
   it('never lets generated vehicles outrank a state that is known to be unknown', () => {
-    // The exact contradiction the badge used to publish: the engine places its
-    // trains inside an internal simulation window, so the list is non-empty while
-    // the state answer on the same screen says 运营时间未知. A known unknown
-    // must not be outranked by data this app generated.
+    // 徽标曾发布的正是这个矛盾：引擎把列车放在内部模拟窗口内，故列表非空，
+    // 而同屏的状态回答是「运营时间未知」。已知的未知不得被本应用生成的数据压过。
     const unknown = status({ state: 'unknown', firstDeparture: null, lastDeparture: null })
     expect(operatingBadgeOf(false, unknown)).toBe('运营时间未知')
     expect(operatingBadgeOf(false, unknown)).not.toBe('有车在途')
@@ -159,7 +145,7 @@ describe('the live badge claims a real vehicle only from a real vehicle', () => 
 
   it('takes its word from this module rather than hard-coding it in the template', () => {
     expect(hero).toContain('operatingBadgeOf')
-    // The kind of vehicle is read off the payload's own declared source.
+    // 车辆类型取自载荷自己声明的来源。
     expect(hero).toContain('vehicleProvenanceOf')
     expect(templateOf(hero), 'the hero template states 有车在途 itself').not.toContain('有车在途')
   })

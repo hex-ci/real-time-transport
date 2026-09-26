@@ -13,26 +13,22 @@ import { CatchDecisionSchema } from '../schemas/gis.js'
 import type { DepartureState } from '../departure.js'
 
 /**
- * F1's departure conclusion, at its boundaries.
- *
- * The formula is pure on purpose: every decision the reference row states is
- * decided here, so the two boundaries that carry real risk — the wait tolerance
- * and the point where this bus stops being catchable — are pinned by tests
- * rather than by reading the UI. `walk` and every ETA are SECONDS of real
- * upstream data; a conclusion is withheld (null) rather than guessed.
+ * F1 的出门结论，在其边界上。
+ * 公式刻意是纯的：参考行陈述的每个判定都在此完成，故两个真正带风险的边界
+ * （等待容忍值、这班车开始赶不上的那一点）由测试钉住，而不是靠阅读 UI。
+ * `walk` 与所有 ETA 都是真实上游数据的秒；算不出结论就扣留（null）而不猜。
  */
 
-/** 6 minutes of real walking, the worked example in the PRD's reference line. */
+/** 6 分钟真实步行，取自 PRD 参考行的算例。 */
 const WALK_6_MIN = 6 * 60
 
-/** Minutes on the wire, as a card displays them. */
+/** 按卡片展示口径换算的分钟数。 */
 function minutes(n: number): number {
   return n * 60
 }
 
 describe('F1 departure advice: the wait tolerance T decides 现在就走', () => {
   it('leaves now when the slack is exactly the tolerance', () => {
-    // eta 9 min - walk 6 min = 3 = T: the boundary belongs to 现在就走.
     const a = departureAdvice({ walkSeconds: WALK_6_MIN, nextArrivalSeconds: minutes(9) })
     expect(a?.state).toBe('hurry')
     expect(a?.leaveInMinutes).toBe(0)
@@ -53,7 +49,6 @@ describe('F1 departure advice: the wait tolerance T decides 现在就走', () =>
   it('says 赶不上这班 when the bus arrives before the walk is done', () => {
     const a = departureAdvice({ walkSeconds: WALK_6_MIN, nextArrivalSeconds: minutes(5) })
     expect(a?.state).toBe('missed')
-    // There is no departure time to give for a bus already lost.
     expect(a?.leaveInMinutes).toBeNull()
   })
 
@@ -79,7 +74,7 @@ describe('F1 departure advice: the wait tolerance T decides 现在就走', () =>
 
   it('defaults the tolerance to 3 minutes', () => {
     expect(DEFAULT_WAIT_TOLERANCE_MINUTES).toBe(3)
-    // Same input as the exact-boundary case above: the default IS what decides it.
+    // 与上面恰好边界的用例同一输入：判定它的正是那个默认值。
     const a = departureAdvice({ walkSeconds: WALK_6_MIN, nextArrivalSeconds: minutes(9) })
     expect(a?.state).toBe('hurry')
   })
@@ -145,8 +140,7 @@ describe('F1 departure advice: the minutes match what the card shows', () => {
   })
 
   it('decides on the rounded minutes the user reads, not on raw seconds', () => {
-    // 5 min 29 s reads as 5; a 5 min 40 s walk reads as 6. The verdict must
-    // match the numbers on screen: 5 - 6 < 0.
+    // 结论必须与屏上数字一致：5 分 29 秒读作 5、5 分 40 秒读作 6，故 5 - 6 < 0。
     const a = departureAdvice({ walkSeconds: 340, nextArrivalSeconds: 329 })
     expect(a?.walkMinutes).toBe(6)
     expect(a?.nextArrivalMinutes).toBe(5)
@@ -166,9 +160,8 @@ describe('F1 departure advice: the three verdicts reuse the catch-the-bus vocabu
   })
 
   it('carries a departure time only where one exists', () => {
-    // The verdict's own shape keeps 「还没有答案」 out of the row: comfortable
-    // always has a time to give, missed never does, and neither is a null that
-    // could be rendered as an answer.
+    // 结论自身的形状把「还没有答案」挡在行外：comfortable 必有时刻、missed 必无，
+    // 两者都不是会被渲染成答案的 null。
     const comfortable = departureAdvice({ walkSeconds: WALK_6_MIN, nextArrivalSeconds: minutes(12) })!
     expect(comfortable.state).toBe('comfortable')
     expect(typeof comfortable.leaveInMinutes).toBe('number')

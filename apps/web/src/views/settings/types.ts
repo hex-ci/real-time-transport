@@ -1,82 +1,70 @@
 import type { Station } from '@real-time-transport/shared'
 
 /**
- * 设置's view models for F10's chain editor.
+ * 设置 的视图模型，供通勤链路的编辑器使用。
  *
- * The engine's own answer types (`CommuteChain*`) are the CONTRACT's and stay where
- * they are; what lives here is only what the editor needs to offer a choice and to
- * read a stored chain back.
+ * 引擎自己的答案类型（`CommuteChain*`）属于契约，留在原处；这里只有编辑器提供选择
+ * 与回读一条已存链路所需的东西。
  */
 
 /**
- * Why a chosen line's stop list is not there to pick from — three different facts
- * that must not be worded as one:
+ * 所选线路的站点列表为何不在可选之列——三种不同的事实，不能措辞成同一种：
  *
- * - `ready`       the list is here; a (station, order) pair can be checked against it
- * - `loading`     not read yet; it may still arrive
- * - `unavailable` the API answered for this direction and listed no stops at all
- * - `unfollowed`  the line is not among the followed routes, so no list can be read
- *                 for it — the state a stored chain's leg lands in after its line is
- *                 unfollowed, and the one cause that will not fix itself by waiting
+ * - `ready`       列表在此，一对 (站名, 站序) 可对着它核对
+ * - `loading`     还没读到，仍可能到达
+ * - `unavailable` API 为本方向作答，且一个站都没列
+ * - `unfollowed`  线路不在已关注线路中，故无从读到任何列表——已存链路的一段在其线路
+ *                 被取消关注后落入的状态，也是唯一不会靠等待自愈的成因
  */
 export type ChainStopsState = 'ready' | 'loading' | 'unavailable' | 'unfollowed'
 
 /**
- * A stop as a CHOICE: its name AND its order in the one line+direction it was picked
- * from.
+ * 作为**选择**的站点：它的站名**与**它在被选中的那一个线路+方向里的站序。
  *
- * Both halves or it is not a stop. 线上同名站不止一个 (PRD), so a name alone does not
- * locate one: a value carried as a name and resolved back against the list with a
- * `find(name)` becomes the FIRST of its occurrences, silently — the user sees the pair
- * they picked in the trigger while the record holds another, and nothing on screen
- * contradicts it. The pair is therefore the value everywhere a stop is chosen.
+ * 两半俱全才是一个站。线上同名站不止一个，故仅有站名定位不到某一站：以名字携带、
+ * 再用 `find(name)` 解析回列表的值会静默变成该名字的**首个**出现——用户在选择器里看到
+ * 他挑的那一对，而记录里是另一个，屏上也没有任何东西反驳它。故凡是选择站点之处，
+ * 值都是这一对。
  */
 export interface StationChoice {
   name: string
   /**
-   * The stop's position in that line+direction's own numbering, or null when the pair
-   * is half-recorded (a name with no order). Never filled in by guessing.
+   * 该站在那一个线路+方向自己的编号里的位置；这一对只记了一半（有站名无站序）时为 null。
+   * 绝不靠猜测填补。
    */
   order: number | null
 }
 
 /**
- * One line+direction a ride leg may name.
+ * 一段行程可以命名的线路+方向。
  *
- * The source is the user's FOLLOWED routes of the active city, one entry per
- * direction, and that choice is deliberate:
+ * 来源是当前城市用户**已关注**的线路，每个方向一条，这个选择是刻意的：
  *
- * - the editor's job is to guarantee a (station, order) pair is real, which needs the
- *   line's OWN stop list — and this page already loads exactly that list, per
- *   direction, for the pins above. A second source for the same fact could disagree
- *   with the picker the user just used;
- * - a chain records the lines the user actually rides; those are the followed ones.
- *   A search box here would let a chain name a line the home screen knows nothing
- *   about, for no gain — the user follows what they ride;
- * - the pair's locator is per direction: a bus route's two directions are two
- *   upstream line ids, and a subway's two directions number the same stations
- *   oppositely. One entry per direction is what lets the user pick the numbering they
- *   mean.
+ * - 编辑器的职责是保证一对 (站名, 站序) 真实，这需要线路**自己的**站点列表——而本页
+ *   已经为每个方向、为上面的站点选择器加载了正是那份列表。同一事实的第二个来源，
+ *   可能与用户刚用过的选择器不一致；
+ * - 链路记录的是用户真正乘坐的线路；那些就是已关注的线路。在此放一个搜索框会让链路命名
+ *   一条首页一无所知的线路，却毫无收益——用户关注的就是他乘坐的；
+ * - 这一对的定位符是逐方向的：公交线路的两个方向是两个 lineId，而地铁的两个方向对同一批站
+ *   反向编号。每个方向一条，才让用户挑到他想要的那套编号。
  *
- * The cost is stated rather than hidden: a line that is not followed cannot be
- * recorded as a leg, so the editor names the followed-lines card when there is
- * nothing to choose from.
+ * 代价被陈述而非隐藏：未被关注的线路无法被记录为一段，故没有可选之物时，
+ * 编辑器会点名关注线路那张卡片。
  */
 export interface ChainLineOption {
-  /** Identifies the option: the followed route's id plus the direction it rides. */
+  /** 标识这个选项：已关注线路的 id 加上它行驶的方向。 */
   key: string
   /**
-   * The direction this option's stop list is numbered for, or null when it cannot be
-   * read at all — the state a stored leg's line lands in once that line is no longer
-   * followed, where which direction it was recorded from is exactly what is unknowable.
+   * 该选项的站点列表为其编号的方向；完全读不出来时为 null——已存链路的一段在其线路不再
+   * 被关注后落入的状态，此时它当初录自哪个方向正是不可知的东西。
    */
   direction: 0 | 1 | null
   lineId: string
   lineName: string
   cityCode: string
-  /** The upstream's own 「开往 X」 for this direction, or null when it stated none. */
+  /** 数据源为该方向给出的「开往 X」；它没有陈述时为 null。 */
   directionLabel: string | null
-  /** This direction's stops in travel order. Empty unless `stops` is `ready`. */
+  /** 该方向的站点，按行驶顺序。`stops` 不为 `ready` 时为空。 */
   stations: Station[]
   stops: ChainStopsState
 }

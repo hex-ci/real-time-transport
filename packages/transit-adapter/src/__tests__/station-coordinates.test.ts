@@ -3,26 +3,17 @@ import type { LineDetail } from '@real-time-transport/shared'
 import { AmapGisService, ChelaileProvider, UniversalSubwayEngine } from '../index.js'
 
 /**
- * A stop is placed only where the payload placed it.
+ * 站点只在载荷放置它的地方被放置。
  *
- * Each provider reads a stop's coordinates out of a payload, and a payload that
- * omits the field states no position — it does not state (0, 0), which is a real
- * point in the Atlantic and, once written, is indistinguishable from one the
- * upstream really sent. A zero on EITHER axis is that same absence rather than a
- * position, because no placed stop on this app's GCJ-02 datum sits at 0 — the
- * rule lives in `statedCoordinate`, and every read below applies it. This file
- * pins the reads that turn a stated absence into one: chelaile's encrypted line
- * detail and the jxPath road trajectory on it, Amap's static stop list, Amap's
- * nearby radar, and the subway engine's derived geometry and train positions. A
- * stop — and a road vertex — the payload marks with a zero reads as unplaced on
- * every one of them.
+ * 载荷省略坐标字段就是没有位置 —— 不是 (0, 0)：那是大西洋上的一个真实
+ * 点，写进去就与上游真发来的坐标无法区分。任一轴为 0 同样是缺省而不是
+ * 位置，因为本应用的 GCJ-02 基准上没有任何已放置的站点落在 0 上；规则
+ * 在 `statedCoordinate` 里，下面每一次读取都套用它。
  *
- * The payload's own stop numbering, when it states one, is the authority a
- * stored leg is located BY; a stop's position in the list is the fallback for a
- * field the payload did not state.
+ * 载荷自己给出的站序是已存腿所依据的权威；列表中的位置只是载荷未声明
+ * 该字段时的兜底。
  *
- * 甲路 / 乙路 / 丙路 are placeholders: no real route, station or upstream id
- * appears here, and no upstream is reachable — every read is a stub.
+ * 甲路 / 乙路 / 丙路 是占位符；下面每一次读取都是桩，不触达上游。
  */
 
 afterEach(() => {
@@ -32,20 +23,18 @@ afterEach(() => {
 })
 
 /**
- * Freeze the clock at a Beijing wall-clock time.
+ * 把时钟冻结在某个北京墙上时刻。
  *
- * The subway engine reads ITS time of day to place trains, so a test about where
- * a train is must fix the moment it is asked about: the same line answers
- * 「nothing in flight」 at 02:00 and a train in every segment at 08:00.
+ * 地铁引擎按它自己的时刻放置列车，所以「车在哪」的测试必须固定被问的
+ * 那一刻：同一条线路在 02:00 答「没有在途车」，在 08:00 每个区间都有车。
  */
 function freezeAtBeijing(hhmm: string): void {
   const [hh, mm] = hhmm.split(':').map(Number)
   vi.useFakeTimers({ toFake: ['Date'] })
-  // 00:00 UTC is 08:00 Beijing: the engine shifts by +8 h internally.
+  // 00:00 UTC 即北京 08:00：引擎内部平移 +8h。
   vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, (hh ?? 0) - 8, mm ?? 0)))
 }
 
-/** An Amap v3 success envelope around one `buslines` entry. */
 function stubAmapBusline(stops: Array<Record<string, unknown>>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
@@ -70,7 +59,6 @@ function stubAmapBusline(stops: Array<Record<string, unknown>>): void {
   }))
 }
 
-/** An Amap v3 success envelope around a POI radar answer. */
 function stubAmapPois(pois: Array<Record<string, unknown>>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
@@ -79,7 +67,6 @@ function stubAmapPois(pois: Array<Record<string, unknown>>): void {
   }))
 }
 
-/** A chelaile line-detail answer, spelled the way the provider reads it. */
 function stubChelaileLine(stations: Array<Record<string, unknown>>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
@@ -92,7 +79,7 @@ function stubChelaileLine(stations: Array<Record<string, unknown>>): void {
           data: {
             line: { name: '1路', direction: 0, firstTime: '05:00', lastTime: '23:00' },
             stations,
-            // No jxPath: this line's road geometry is not what these tests read.
+            // 没有 jxPath：这些测试读的不是这条线路的道路几何。
           },
         },
       }),
@@ -109,13 +96,10 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // The stop the payload placed is placed, unchanged.
     expect(detail?.stops[0]).toMatchObject({ name: '甲路', order: 1, lat: 39.9, lng: 116.4 })
-    // The stop it left unplaced carries NO coordinate — and a zero on either
-    // axis is that same absence, not a position (see `statedCoordinate`).
     expect(detail?.stops[1]?.lat).toBeUndefined()
     expect(detail?.stops[1]?.lng).toBeUndefined()
-    // The stop itself is still answered: only its position is absent.
+    // 该站本身仍被答出：缺的只是它的位置。
     expect(detail?.stops[1]).toMatchObject({ name: '乙路', order: 2 })
   })
 
@@ -128,9 +112,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // `order` is what a stored leg is located BY, so a field the payload did not
-    // spell as a positive whole number is answered from the stop's own position
-    // in the list — which IS the sequence by construction — rather than as NaN.
     expect(detail?.stops.map(s => [s.name, s.order])).toEqual([['甲路', 1], ['乙路', 2], ['丙路', 3]])
   })
 
@@ -142,10 +123,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // The payload's numbering is the authority when it states one — a stored leg
-    // is located BY order, and this platform is the payload's stop 7 even though
-    // it is the second element. Falling back to the list position here would name
-    // a stop no list of the line contains.
     expect(detail?.stops.map(s => [s.name, s.order])).toEqual([['甲路', 5], ['乙路', 7]])
   })
 
@@ -157,9 +134,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // No placed stop on this app's GCJ-02 datum sits at 0, so a zero is the
-    // absence written as a number and reads as the absence, not as a position
-    // 19 000 km away.
     expect(detail?.stops[0]?.lat).toBeUndefined()
     expect(detail?.stops[0]?.lng).toBeUndefined()
     expect(detail?.stops[1]).toMatchObject({ lat: 39.9, lng: 116.4 })
@@ -173,8 +147,7 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // A field the payload carried but did not spell as a number states no
-    // position; a numeric string is a number the payload stated.
+    // 载荷带了但没有写成数字的字段不表示位置；数字字符串是载荷写出的数。
     expect(detail?.stops[0]?.lat).toBeUndefined()
     expect(detail?.stops[0]?.lng).toBeUndefined()
     expect(detail?.stops[1]).toMatchObject({ lat: 39.9, lng: 116.4 })
@@ -189,7 +162,6 @@ describe('a stop is placed only where the payload placed it', () => {
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
     expect(line?.stations[0]).toMatchObject({ name: '甲路', order: 1, lat: 39.9, lng: 116.4 })
-    // Amap omits `location` for a stop it could not place. Absent stays absent.
     expect(line?.stations[1]?.lat).toBeUndefined()
     expect(line?.stations[1]?.lng).toBeUndefined()
     expect(line?.stations[1]).toMatchObject({ name: '乙路', order: 2 })
@@ -204,8 +176,7 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
-    // Half a pair, a non-numeric half and an empty half are all 「no position」:
-    // none of them becomes a zero.
+    // 半个坐标对、非数字的一半与空的一半都是「没有位置」，都不会变成 0。
     for (const stop of line?.stations ?? []) {
       expect(stop.lat, stop.name).toBeUndefined()
       expect(stop.lng, stop.name).toBeUndefined()
@@ -220,8 +191,8 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
-    // The array spells the same pair as the string, so it is read the same way —
-    // and an array with only a longitude is half a pair, like any other.
+    // 数组与字符串写的是同一个坐标对，所以读法相同 ——
+    // 只带半个经度的数组同样是半个坐标对。
     expect(line?.stations[0]).toMatchObject({ lat: 39.9, lng: 116.4 })
     expect(line?.stations[1]?.lat).toBeUndefined()
     expect(line?.stations[1]?.lng).toBeUndefined()
@@ -237,9 +208,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
-    // A zero is not a position on this app's GCJ-02 datum, so a pair carrying one
-    // half at 0 is the absence of a coordinate rather than the point on the
-    // Greenwich meridian or the equator it would otherwise be read as.
     for (const stop of line?.stations.slice(0, 3) ?? []) {
       expect(stop.lat, stop.name).toBeUndefined()
       expect(stop.lng, stop.name).toBeUndefined()
@@ -258,7 +226,7 @@ describe('a stop is placed only where the payload placed it', () => {
     expect(pois[0]).toMatchObject({ name: '甲路(公交站)', lat: 39.9, lng: 116.4, distanceMeters: 120 })
     expect(pois[1]?.lat).toBeUndefined()
     expect(pois[1]?.lng).toBeUndefined()
-    // Still a station name at a stated distance, which is what this radar is for.
+    // 它仍是一个带已声明距离的站名，而这个雷达要读的正是后者。
     expect(pois[1]).toMatchObject({ name: '乙路(公交站)', distanceMeters: 300 })
   })
 
@@ -269,8 +237,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
 
-    // The radar is read for a name at a stated distance; a POI it positions at 0
-    // is one it could not place, not one on the equator.
     expect(pois[0]?.lat).toBeUndefined()
     expect(pois[0]?.lng).toBeUndefined()
     expect(pois[0]).toMatchObject({ name: '甲路(公交站)', distanceMeters: 120 })
@@ -283,9 +249,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
 
-    // `Number(poi.distance || 0)` answers a real-looking `0` for a POI Amap did
-    // not measure — a claim that the user is standing on the platform, rendered
-    // as 「0m」 by the hint that reads it. Absence travels as absence.
     expect(pois[0]?.distanceMeters).toBeUndefined()
   })
 
@@ -296,9 +259,8 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
 
-    // The other half of 「a stated number is a reading」: 0 metres is a legal
-    // answer (the POI sits on the measured point), so the absence needs an
-    // encoding of its own rather than a zero — one rule, read in `statedNumber`.
+    // 「写出的数就是读数」的另一半：0 米是合法答案（POI 就在测点上），
+    // 所以缺省需要自己的编码而不是 0 —— 这条规则在 `statedNumber` 里。
     expect(pois[0]?.distanceMeters).toBe(0)
   })
 
@@ -311,9 +273,6 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
-    // `busstops` arrives in stop order, so a stop's position in it IS its real
-    // position. A `sequence` that is not a positive whole number would otherwise
-    // travel as NaN or 0 and name a stop no list contains.
     expect(line?.stations.map(s => [s.name, s.order])).toEqual([['甲路', 1], ['乙路', 2], ['丙路', 3]])
   })
 
@@ -325,18 +284,13 @@ describe('a stop is placed only where the payload placed it', () => {
 
     const line = await new AmapGisService('test-key').getLineByName('北京', '1路')
 
-    // `sequence` is what the payload numbers its own list with, and it is what
-    // travels: this platform is the payload's stop 7 even though it is the second
-    // element of `busstops`. The list position answers only for a `sequence` the
-    // payload did not state.
     expect(line?.stations.map(s => [s.name, s.order])).toEqual([['甲路', 5], ['乙路', 7]])
   })
 })
 
 /**
- * A two-stop line whose FIRST stop the upstream could not place. Every train the
- * model generates is in the one segment, so the position it reports is always
- * that stop's own.
+ * 一条两站线路，其中第一站是上游放不下的那一站。模型生成的每一列车
+ * 都在唯一的那一个区间里，所以它报出的位置永远是那一站自己的。
  */
 function lineWithUnplacedFirstStop(): LineDetail {
   return {
@@ -344,8 +298,7 @@ function lineWithUnplacedFirstStop(): LineDetail {
     lineName: '地铁88号线',
     direction: 0,
     directionName: '开往 乙路',
-    // The window covers the engine's whole normalized day, so the answer below
-    // does not depend on when the suite runs.
+    // 窗口覆盖引擎归一化后的整个日范围，所以下面的答案与套件何时运行无关。
     firstBusTime: '01:00',
     lastBusTime: '30:00',
     cityCode: '027',
@@ -359,28 +312,21 @@ function lineWithUnplacedFirstStop(): LineDetail {
 
 describe('a subway line whose stop list has an unplaced stop states no geometry', () => {
   it('leaves the cumulative profile and the route length unstated', async () => {
-    // Frozen inside a peak window, where the headway (210 s) is shorter than the
-    // trip (2 × 135 s) — so a train is always in flight and the assertions below
-    // cannot pass by finding an empty fleet.
+    // 冻结在高峰窗口内，发车间隔短于全程走行时间，所以总有车在途，
+    // 下面的断言不会因为车队为空而通过。
     freezeAtBeijing('08:00')
-    // The profile is index-aligned with the stop list, so one unplaced stop
-    // leaves the whole line's geometry unstateable: a distance measured through a
-    // stand-in point would be a number about a track the line does not run on.
     const engine = new UniversalSubwayEngine(new AmapGisService(''), undefined, async () => lineWithUnplacedFirstStop())
     const live = await engine.getLiveStatus('subway_027_88', 0, '027')
 
     expect(live).not.toBeNull()
-    // A train the model could place somewhere is the case this pins: an empty
-    // fleet would make the position assertions below vacuous.
+    // 本用例钉的是模型确实放得下车的那个情形：车队为空会让下面的
+    // 位置断言变得空洞。
     expect(live!.buses.length).toBeGreaterThan(0)
-    // Every train's position is the unplaced stop's, so every train is unplaced —
-    // and none of them sits at (0, 0).
     for (const bus of live!.buses) {
       expect(bus.lat).toBeUndefined()
       expect(bus.lng).toBeUndefined()
     }
-    // The model still runs: order, progress and the timetable are unaffected by a
-    // missing coordinate.
+    // 模型照常运行：缺一个坐标不影响 order、progress 与时刻表。
     for (const bus of live!.buses) {
       expect(typeof bus.order).toBe('number')
       expect(typeof bus.travelTimeSec).toBe('number')
@@ -396,8 +342,6 @@ describe('a subway line whose stop list has an unplaced stop states no geometry'
     const unplaced = await new UniversalSubwayEngine(new AmapGisService('test-key'))
       .getLineDetail('subway_027_88', 0, '027')
 
-    // The stop is answered and the geometry is not: one unplaced stop leaves the
-    // whole index-aligned profile unstateable.
     expect(unplaced?.stops).toHaveLength(2)
     expect(unplaced?.stationDistances).toBeUndefined()
     expect(unplaced?.routeLengthMeters).toBeUndefined()
@@ -415,10 +359,6 @@ describe('a subway line whose stop list has an unplaced stop states no geometry'
 
   it('states no geometry for a stop the list marks with a zero', async () => {
     freezeAtBeijing('08:00')
-    // A stored row may carry (0, 0) for a stop the upstream never placed. No
-    // placed stop on this app's GCJ-02 datum sits at 0, so the row states no
-    // position for it, and the index-aligned profile is unstateable for exactly
-    // that reason.
     const zeroed: LineDetail = {
       ...lineWithUnplacedFirstStop(),
       stops: [
@@ -430,12 +370,11 @@ describe('a subway line whose stop list has an unplaced stop states no geometry'
     const live = await engine.getLiveStatus('subway_027_88', 0, '027')
 
     expect(live).not.toBeNull()
-    // A train the model could place somewhere is the case this pins: an empty
-    // fleet would make the assertions below vacuous.
+    // 本用例钉的是模型确实放得下车的那个情形：车队为空会让下面的
+    // 断言变得空洞。
     expect(live!.buses.length).toBeGreaterThan(0)
-    // A train's position is its stop's own, so a stop the row marks at 0 leaves
-    // the train with no position rather than one on the equator — and no
-    // distance measured through a point the line does not run on.
+    // 列车的位置就是它所在站的位置，所以被标成 0 的站让列车没有
+    // 位置，而不是落在赤道上。
     for (const bus of live!.buses) {
       expect(bus.lat).toBeUndefined()
       expect(bus.lng).toBeUndefined()
@@ -445,11 +384,10 @@ describe('a subway line whose stop list has an unplaced stop states no geometry'
 })
 
 /**
- * A three-stop line, every stop placed, to read a train's position against.
+ * 一条三站线路，每站都已放置，用来对照读取列车的位置。
  *
- * The window covers the engine's whole normalized day and the minute is frozen
- * inside a peak headway window, so the fleet and the segment each train occupies
- * do not depend on when the suite runs.
+ * 窗口覆盖引擎归一化后的整个日范围，且时刻冻结在高峰间隔窗口内，
+ * 所以车队与每列车所在的区间都与套件何时运行无关。
  */
 function lineWithThreePlacedStops(): LineDetail {
   return {
@@ -470,14 +408,12 @@ function lineWithThreePlacedStops(): LineDetail {
 }
 
 /**
- * A placed train states a position; that is the half of the rule this pins.
+ * 已放置的列车会给出位置 —— 这是本文件所钉规则的另一半。
  *
- * The engine answers a train that is AT a stop with that stop's own coordinate —
- * the same stop its `order` names — so an unplaced train can only ever be a train
- * at an unplaced stop (the case the geometry suite above pins). Without the case
- * below, an engine that never reported a position at all would still satisfy
- * every assertion in that suite: 「undefined for everything」 passes a test that
- * only ever asks for undefined.
+ * 引擎对停在站上的列车给出该站自己的坐标，也就是它的 `order` 所指的
+ * 那一站，所以未放置的列车只可能是停在未放置站点上的列车（上面的几何
+ * 套件钉的就是这一例）。没有下面这一例，一个从不报位置的引擎也能满足
+ * 那个套件的每一条断言：「处处 undefined」能通过只问 undefined 的测试。
  */
 describe('a train states the position of the stop it is at', () => {
   it('carries the stop\'s own coordinate for every train the model places', async () => {
@@ -488,9 +424,8 @@ describe('a train states the position of the stop it is at', () => {
 
     expect(live).not.toBeNull()
     expect(live!.buses.length).toBeGreaterThan(0)
-    // Both segments of the line are occupied at this minute, so the loop below
-    // reads a train at a stop other than 甲路 rather than one that happens to sit
-    // at the origin.
+    // 这一分钟线路的两个区间都有车，所以下面的循环会读到停在甲路以外的
+    // 列车，而不是碰巧停在始发站的那一辆。
     expect(new Set(live!.buses.map(b => b.order))).toEqual(new Set([1, 2]))
     for (const bus of live!.buses) {
       const stop = line.stops[bus.order! - 1]!
@@ -501,10 +436,9 @@ describe('a train states the position of the stop it is at', () => {
 
   it('carries a placed stop\'s coordinate even when another stop is unplaced', async () => {
     freezeAtBeijing('08:00')
-    // The unplaced stop is the LAST one, so the trains above are still at placed
-    // stops: one unplaced stop removes no position from another stop's train, and
-    // it leaves the line's geometry unstateable for the reason `stopPositions`
-    // states — the two answers are about different things.
+    // 未放置的是最后一站，所以上面的列车仍停在已放置的站点上：一个未
+    // 放置的站点不会拿走别的站点上列车的位置，它只让整条线路的几何无从
+    // 表述 —— 两个答案说的是不同的事。
     const line: LineDetail = {
       ...lineWithThreePlacedStops(),
       stops: [
@@ -526,12 +460,12 @@ describe('a train states the position of the stop it is at', () => {
   })
 })
 
-/** The trajectory URL the stub detail advertises, and no other host is reachable. */
+/** 桩详情所声明的轨迹 URL；其它主机都不可达。 */
 const JXPATH_URL = 'https://traj.example/road'
 
 /**
- * A chelaile line detail carrying a jxPath trajectory, and the raw trajectory it
- * points at — both served by ONE stub, because both are reads of the same line.
+ * 一个带 jxPath 轨迹的车来了 line detail，以及它指向的原始轨迹 —— 由
+ * 同一个桩提供，因为两者都是同一条线路的读取。
  */
 function stubChelaileTrajectory(tra: string): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -556,7 +490,7 @@ function stubChelaileTrajectory(tra: string): void {
       }
     }
     if (href === JXPATH_URL) {
-      // Answered as raw text, wrapped in the upstream's own delimiters.
+      // 以原始文本作答，带上游自己的分隔符。
       return {
         ok: true,
         status: 200,
@@ -568,20 +502,16 @@ function stubChelaileTrajectory(tra: string): void {
 }
 
 /**
- * A road polyline is placed only where its vertices are.
+ * 道路折线只在它的顶点被放置的地方被放置。
  *
- * `tra` spells its vertices `lng,lat[,tag]`, and their cumulative arc-length is
- * what locates every station on the road. ONE vertex the payload never placed is
- * therefore enough to make the stretch meaningless — an arc-length measured
- * through it is a distance along a road the line does not run on, and the tagged
- * station markers would be spread along that imaginary leg — so the geometry is
- * answered as unstateable and the caller keeps its even-spacing fallback, exactly
- * as it does when the trajectory cannot be fetched at all.
+ * `tra` 的顶点写法是 `lng,lat[,tag]`，它们的累计弧长定位道路上的每一站，
+ * 所以一个上游从未放置的顶点就足以让那段路失去意义 —— 穿过它量出的弧长
+ * 谈的是一条线路并不走的道路 —— 因此几何答作无从表述，调用方保留它的
+ * 等距兜底，与完全取不到轨迹时一样。
  *
- * The placed-everywhere case is the positive control: 「no geometry, ever」 is as
- * wrong as 「a zero is a position」, and the three unplaceable fixtures below pin
- * each axis and a missing half separately, because a rule applied to one half of
- * the pair would still leave the other half unread.
+ * 「处处已放置」是阳性对照：「永远没有几何」与「0 是位置」一样错。下面
+ * 三个无法放置的夹具分别钉住两个轴与缺失的一半，因为只对一半生效的规则
+ * 仍会漏读另一半。
  */
 describe('a road polyline is placed only where its vertices are', () => {
   it('states a geometry the trajectory placed on every vertex', async () => {
@@ -598,9 +528,6 @@ describe('a road polyline is placed only where its vertices are', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // A longitude of 0 is the Greenwich meridian, thousands of kilometres from
-    // any vertex of this line's road, so the vertex states no position — the same
-    // absence a stop carries when nobody placed it.
     expect(detail?.routeLengthMeters).toBeUndefined()
     expect(detail?.stationDistances).toBeUndefined()
   })
@@ -610,8 +537,6 @@ describe('a road polyline is placed only where its vertices are', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // A latitude of 0 is the equator, which this app's datum never places a
-    // vertex on either.
     expect(detail?.routeLengthMeters).toBeUndefined()
     expect(detail?.stationDistances).toBeUndefined()
   })
@@ -621,9 +546,8 @@ describe('a road polyline is placed only where its vertices are', () => {
 
     const detail = await new ChelaileProvider().getLineDetail('line_1', 0, '027')
 
-    // Half a pair is no position, and it must not be completed with a zero: a
-    // vertex the payload left half-stated leaves the whole road unstateable for
-    // the same reason a zero does.
+    // 半个坐标对就是没有位置，且绝不能用 0 补齐：载荷只写出一半的顶点
+    // 让整条道路无从表述，与写出 0 同理。
     expect(detail?.routeLengthMeters).toBeUndefined()
     expect(detail?.stationDistances).toBeUndefined()
   })

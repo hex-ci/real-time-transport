@@ -25,27 +25,22 @@ import {
 import ChainsPage from '../chains.vue'
 
 /**
- * F10's chain editor, held by BEHAVIOUR.
+ * F10 的链路编辑器，由**行为**守住。
  *
- * 设置's 通勤链路 page is MOUNTED (see `settings-harness.ts`: Vue's runtime-core rendered into
- * plain objects, no jsdom) and driven the way a user drives it — press the control,
- * pick from the pickers, read the words and the request that comes out. What is
- * asserted is therefore what the user gets, including the rule that is easy to get
- * wrong: a bus route's stored line id has already fixed its direction, so a lesser
- * alight order is a leg entered backwards, while a subway line id carries BOTH
- * directions and the very same descending pair is a real ride.
+ * `设置` 的通勤链路页被**挂载**（见 `settings-harness.ts`：Vue 的 runtime-core 渲染为普通对象，
+ * 无 jsdom）并按用户驱动它的方式驱动——按控件、从选择器里挑、读印出的文字与发出的请求。故被断言的是
+ * 用户得到的东西，包括那条容易弄错的规则：公交线路已存的 id 已固定其方向，故更小的下车站序是录反的段，
+ * 而地铁线路 id 同时携带**两个**方向，同样降序的一对是真实可乘的一程。
  *
- * The contrast audit at the end is the chain page's own (`chain-contrast.ts`), pointed at
- * EVERY SFC of this screen (`SETTINGS_SFC`) rather than at this card's files alone: 12px
- * text must be readable on the surface it actually sits on — in the state it actually sits
- * there — composited from the source rather than assumed.
+ * 末尾的对比度审计是链路页自己的（`chain-contrast.ts`），指向本屏的**每个** SFC（`SETTINGS_SFC`）
+ * 而非仅这张卡的文件：12px 文字必须在它**真正**所在的表面上、真正所在的状态下可读——由源码合成而非假定。
  */
 
 function read(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 }
 
-/** The file with its explanatory prose removed, so code is what is asserted. */
+/** 去掉说明性文字的文件，故被断言的是代码。 */
 function codeOf(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -61,10 +56,10 @@ const DRAFT = read('../chain-draft.ts')
 const TYPES = read('../types.ts')
 const PATTERN = read('../../platform/components/platform-header.vue')
 
-/** The 设置 directory (`views/settings`), walked as a directory so nothing can escape the audit. */
+/** 设置目录（`views/settings`），按目录遍历，使任何东西都逃不出审计。 */
 const SETTINGS_DIR = fileURLToPath(new URL('..', import.meta.url))
 
-/** Every `.vue` under a directory, subdirectories included (`__tests__` holds none). */
+/** 某目录下每个 `.vue`，含子目录（`__tests__` 不含）。 */
 function sfcFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = `${directory}/${entry.name}`
@@ -74,53 +69,46 @@ function sfcFiles(directory: string): string[] {
 }
 
 /**
- * The chain editor's own files: what this card's source guards read.
+ * 链路编辑器自己的文件：本卡源码守卫所读的东西。
  *
- * The station picker it reuses (`station-pin-picker.vue`) is deliberately NOT here — it is a
- * control of the whole screen, not of this card, and it is judged where it lives: by the
- * contrast audit at the end, which runs over every SFC of this page (see `SETTINGS_SFC`).
- * Nothing in this file judges it otherwise, so a claim that these five files are its judges
- * would be false.
+ * 它复用的选站器（`station-pin-picker.vue`）刻意**不**在此——它是整个屏幕的控件而非本卡的，
+ * 它在它所处之处被评判：末尾跑遍本页每个 SFC 的对比度审计。本文件不以其他方式评判它。
  */
 const SFC = {
   'commute-chain-card': CARD,
   'chain-form': FORM,
   'chain-leg-fields': LEG,
   'chain-removal-dialog': DIALOG,
-  // The page the editor is rendered on. It used to be 设置's one page (`index.vue`); the
-  // split in §4.1 moved this card to its own page, so the page-level guards below follow it
-  // there rather than judging a screen the card no longer appears on.
+  // 渲染编辑器的页面。它曾是 `设置` 的单页（`index.vue`）；§4.1 的拆分把这张卡移到自己的页面，
+  // 故下面的页级守卫随它到那里，而非评判一个该卡不再出现的屏幕。
   'chains.vue': read('../chains.vue'),
 }
 
 /**
- * EVERY SFC of the 设置 screen — the index, the four sub-pages, and the cards they render.
+ * `设置` 屏的**每个** SFC——索引、四个子页面、以及它们渲染的卡片。
  *
- * The contrast audit runs over all of them, not over the chain card's four files alone: the
- * screen is one surface, and a lightened background or a darkened text in the followed-lines
- * card, the anchors card, the hours card or the picker they share is exactly as unreadable
- * there. WALKING the directory (rather than listing files) is what keeps a page or a card
- * added later from silently escaping the rule: the split into an index plus four sub-pages
- * is exactly the change an enumeration would have let walk out of the audit's scope.
+ * 对比度审计跑遍它们全部，而非仅链路卡那四个文件：整个屏幕是一个表面，关注线路卡、锚点卡、时段卡
+ * 或它们共用的选择器里被提亮的背景或被压暗的文字，在那里同样不可读。**遍历**目录（而非列出文件）
+ * 使日后新增的页面或卡片无法静默逃出该规则——拆成索引加四个子页面正是一个枚举会让其走出审计范围的改动。
  */
 const SETTINGS_SFC: Record<string, string> = Object.fromEntries(
   sfcFiles(SETTINGS_DIR).map(path => [basename(path), readFileSync(path, 'utf8')]),
 )
 
-// ---------- the lines a leg may ride ----------
+// ---------- 一段可以乘坐的线路 ----------
 
 function station(name: string, order: number): Record<string, unknown> {
   return { id: `${name}-${order}`, name, order, interchanges: [] }
 }
 
-/** 快线 1 路: a bus route, so its two directions are two upstream line ids. */
+/** 快线 1 路：一条公交线路，故其两个方向是两个上游线路 id。 */
 const BUS_UP = 'bus_027_1'
 const BUS_DOWN = 'bus_027_1_rev'
-/** 地铁 88 号线: ONE line id for both directions, each numbering the same stops oppositely. */
+/** 地铁 88 号线：两个方向共**一个**线路 id，各自反向编号同一批站。 */
 const SUBWAY = 'subway_027_88'
 /**
- * 环线 3 路: a bus route whose own stop list names 东大桥 TWICE — 线上同名站不止一个
- * (PRD), which is exactly why a stop is a (name, order) PAIR and not a name.
+ * 环线 3 路：一条自身站表把 东大桥 列了**两次**的公交线路——线上同名站不止一个（PRD），
+ * 这正是站是 (站名, 站序) **一对**而非一个名字的原因。
  */
 const LOOP_UP = 'bus_027_3'
 const LOOP_DOWN = 'bus_027_3_rev'
@@ -134,7 +122,7 @@ const STOP_LISTS: Record<string, Record<string, unknown>[]> = {
   [`${LOOP_DOWN}#1`]: [station('终点站', 1), station('东大桥', 2), station('北站', 3), station('东大桥', 4), station('南站', 5)],
 }
 
-/** What each direction's own board says it is heading for (「开往 X」). */
+/** 每个方向自己的报告板说它开往何处（「开往 X」）。 */
 const DIRECTION_NAMES: Record<string, string> = {
   [`${BUS_UP}#0`]: '开往建国门',
   [`${BUS_DOWN}#1`]: '开往十里堡',
@@ -162,13 +150,13 @@ const FAVOURITES = [
     lineId: SUBWAY,
     lineName: '地铁 88 号线',
     preferredDirection: 0,
-    // A subway reuses one line id for both ways; the direction is the stop numbering.
+    // 地铁两个方向共用一个线路 id；方向就是站序编号。
     reverseLineId: SUBWAY,
     displayOrder: 1,
   },
 ]
 
-/** 环线 3 路, followed on its own so a repeated stop name can be picked from. */
+/** 环线 3 路，单独关注它以便可以从重复的站名中挑选。 */
 const LOOP_FAVOURITE = {
   id: 'fav-bus-3',
   userId: 'default_user',
@@ -197,7 +185,7 @@ function lineResponder(request: { url: string }): unknown {
   }
 }
 
-/** A stored chain as the API answers one: `seq` is the server's, written from the array's order. */
+/** 一条已存链路，如 API 所答：`seq` 是服务端的，按数组顺序写入。 */
 function stored(body: any, id: string): Record<string, unknown> {
   return {
     ...body,
@@ -208,7 +196,7 @@ function stored(body: any, id: string): Record<string, unknown> {
   }
 }
 
-/** The one leg shape every stored chain below is built from. */
+/** 下面每条已存链路所依据的唯一段形状。 */
 function storedLeg(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     lineId: BUS_UP,
@@ -238,16 +226,15 @@ function storedChain(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 /**
- * The routes 设置 talks to, with the chain collection answering whatever the test
- * supplies. Registered in order, and the LAST match wins, so a test overrides one
- * route by appending its own.
+ * `设置` 所对话的路由，其中链路集合应答测试提供的任何内容。按顺序注册，**最后**匹配者胜出，
+ * 故测试通过追加自己的路由来覆盖某一条。
  */
 function routes(options: {
   chains?: unknown[]
   chainRead?: 'ok' | 'fail'
   favourites?: unknown[]
   chainWrite?: (request: { url: string, method: string, body: any }) => unknown
-  /** Routes registered last, which is what decides — used to change a default answer. */
+  /** 最后注册的路由，即起决定作用的那个——用于改变默认答案。 */
   overrides?: Route[]
 } = {}): Route[] {
   const chains = options.chains ?? []
@@ -285,11 +272,10 @@ function routes(options: {
   return table
 }
 
-/** Mount 通勤链路's own page (`/settings/chains`) with its routes, and let the first reads answer. */
+/** 挂载 通勤链路 自己的页面（`/settings/chains`）及其路由，并让首批读取作答。 */
 async function mountChainEditor(options: Parameters<typeof routes>[0] = {}): Promise<MountedHost> {
-  // 设置 split into an index plus four pages: the chain editor is now the page at
-  // `/settings/chains` (`chains.vue`), and that is what this file mounts. Every behaviour
-  // asserted here is the same card's, on the page that now renders it.
+  // `设置` 拆成索引加四个页面：链路编辑器现在是 `/settings/chains` 的页面（`chains.vue`），
+  // 本文件挂载的就是它。此处断言的每个行为都属于同一张卡，只是在新渲染它的页面上。
   const host = await mountComponent(ChainsPage, {
     routes: routes(options),
     components: { RouterLink: RouterLinkStub },
@@ -299,17 +285,16 @@ async function mountChainEditor(options: Parameters<typeof routes>[0] = {}): Pro
 }
 
 afterEach(async () => {
-  // reka-ui's focus scope schedules one timer as it unmounts, and that timer reads the
-  // document. Let it fire while the harness's stubs are still in place, or it throws
-  // into an empty global scope after the test has finished.
+  // reka-ui 的焦点作用域在卸载时排定一个定时器，而该定时器会读 document。
+  // 让它在装置的桩件仍就位时触发，否则它会在测试结束后抛进空的全局作用域。
   await new Promise(resolve => setTimeout(resolve, 0))
   await new Promise(resolve => setTimeout(resolve, 0))
   vi.unstubAllGlobals()
 })
 
-// ---------- reading and driving the rendered card ----------
+// ---------- 读取与驱动渲染出的卡片 ----------
 
-/** Whether a node sits inside the given subtree. */
+/** 某节点是否位于给定的子树内。 */
 function inside(root: HostElement, node: HostElement): boolean {
   let current: HostElement | null = node
   while (current) {
@@ -320,9 +305,8 @@ function inside(root: HostElement, node: HostElement): boolean {
 }
 
 /**
- * The chain card, located the way its NAME is: by the heading it is labelled by
- * (`aria-labelledby`), never by a copy of that text in an `aria-label` — the copy is what
- * makes a screen reader read 「通勤链路」 twice, once as the region and once as the heading.
+ * 链路卡，按其**名字**定位：按标注它的标题（`aria-labelledby`），绝非按 `aria-label` 里该文本的副本
+ * ——正是那个副本让屏幕阅读器把「通勤链路」读两遍，一次作为区域、一次作为标题。
  */
 function cardOf(host: MountedHost): HostElement {
   return host.node(
@@ -351,12 +335,10 @@ function legFields(host: MountedHost, index: number): HostElement[] {
 }
 
 /**
- * The stations of one leg, as the pickers offer them: the boarding one first.
+ * 某段的两个站，如选择器所提供：上车站在前。
  *
- * A list that came from a FILTERING helper (this, `legFields`, `within`…) is asserted to be
- * non-empty before it is spread into another assertion or looped over: an empty list makes
- * the loop pass for free, which is exactly how two 40px controls once satisfied a 44px rule.
- * Any new check whose subjects come from filtering owes that one line first.
+ * 来自**筛选** helper 的列表（本函数、`legFields`、`within`……）在被展开进另一个断言或循环之前先断言
+ * 非空：空列表会让循环白通过，正是两个 40px 控件曾满足 44px 规则的方式。任何主题来自筛选的新检查都先欠这一行。
  */
 function stationTriggers(host: MountedHost, index: number): HostElement[] {
   return legFields(host, index).filter(item => item.tag === 'button'
@@ -364,14 +346,12 @@ function stationTriggers(host: MountedHost, index: number): HostElement[] {
 }
 
 /**
- * Every size the source states, variant prefixes included.
+ * 源码陈述的每个尺寸，含变体前缀。
  *
- * The utility after the last `:` is the one that decides: a class rule applies to every
- * occurrence of `text-`, so `lg:text-7xl` sets a font size exactly as `text-7xl` does. The
- * pattern therefore must not require a whitespace boundary immediately before `text-`,
- * which is the only way a prefixed off-ladder size could slip through a ladder that read
- * unprefixed classes alone. Tokens that merely BEGIN with a ladder word are dropped, so a
- * colour's family (`text-slate-400`) is not read as a size — the same filter the rule had.
+ * 最后一个 `:` 之后的工具类才起决定作用：一条类规则适用于每次出现 `text-` 之处，故 `lg:text-7xl` 与
+ * `text-7xl` 一样设定字号。因此模式不得要求 `text-` 之前紧邻空白边界，否则带前缀的阶梯外尺寸就能溜过
+ * 一个只读无前缀类的阶梯。仅以阶梯词**开头**的 token 被丢弃，故颜色家族（`text-slate-400`）不会被读成
+ * 尺寸——与该规则原有的过滤一致。
  */
 function fontSizeTokens(source: string): string[] {
   return [...source.matchAll(/(?:^|[\s"'`:=])text-([a-z0-9[\]]+)/g)]
@@ -413,10 +393,9 @@ async function openEditorFor(host: MountedHost, chainName: string): Promise<void
 }
 
 /**
- * Choose one of the lines the select offers, by the label the user reads on it.
+ * 从 select 提供的线路中选择一条，按用户读到的标签。
  *
- * The value is read off the option the label belongs to, so the control is driven the
- * way the browser drives it rather than by this test knowing a key.
+ * 值取自该标签所属的选项，故控件按浏览器驱动它的方式驱动，而非由本测试知道某个键。
  */
 async function chooseLine(host: MountedHost, index: number, label: string): Promise<void> {
   const select = legFields(host, index).find(item => item.tag === 'select')!
@@ -425,8 +404,7 @@ async function chooseLine(host: MountedHost, index: number, label: string): Prom
 }
 
 /**
- * Pick a station through the picker's own popup, asserting the list it shows is the
- * line's own: the option is matched by the name AND the order it must carry.
+ * 经选择器自己的弹层选一个站，并断言它显示的列表是该线路自己的：选项按它必须携带的站名**与**站序匹配。
  */
 async function pickStation(
   host: MountedHost,
@@ -451,10 +429,9 @@ async function save(host: MountedHost): Promise<void> {
 }
 
 /**
- * The leg remove control's own name: the VISIBLE label first, then the leg it removes or
- * the reason it cannot. A name that wholly replaces the visible label — 「删除该段」 on
- * screen, 「删除第 1 段」 in the name — is one a voice-control user reading the visible
- * words out cannot hit (WCAG 2.5.3 Label in Name, Level A).
+ * 段移除控件自己的名字：**可见**标签在前，随后是它移除的段或它不能移除的原因。完全替换可见标签的名字
+ * ——屏幕上「删除该段」、名字里「删除第 1 段」——是语音控制用户念出可见文字也点不中的控件
+ * （WCAG 2.5.3 名称中标签，A 级）。
  */
 function removeNameText(inner: string): string {
   return `删除该段（${inner}）`
@@ -466,8 +443,8 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
     await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
-    // 东大桥 is 第 3 站 and 十里堡 is 第 1 站 on this line id: a bus route's stored id has
-    // already fixed the direction, so this is the pair entered the wrong way round.
+    // 东大桥 是本线路 id 上的第 3 站，十里堡 是第 1 站：公交线路已存的 id 已固定方向，
+    // 故这是录反了的一对。
     await pickStation(host, 0, 'board', '东大桥', 3)
     await pickStation(host, 0, 'alight', '十里堡', 1)
     await save(host)
@@ -481,8 +458,8 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
     const host = await mountChainEditor()
     await openComposer(host)
     await type(host, nameField(host), '早上上班')
-    // ONE line id carries both ways, and 开往平安里 numbers 平安里 第 1 站: boarding 平安里
-    // and alighting 西直门 on this list is a real ride the other way, not an entry error.
+    // 一个线路 id 携带两个方向，而「开往平安里」把平安里编成第 1 站：在此列表上上平安里、下西直门
+    // 是另一个方向的真实一程，不是录入错误。
     await chooseLine(host, 0, '地铁 88 号线 · 开往平安里')
     await pickStation(host, 0, 'board', '平安里', 3)
     await pickStation(host, 0, 'alight', '西直门', 1)
@@ -516,9 +493,8 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
   })
 
   it('半截的站点：只有站名、没有站序的记录在保存时被拒绝', async () => {
-    // A record written before this editor existed (or by a direct write) can hold one
-    // half of the pair, which is exactly the state the read side can only answer with
-    // `station-unset` — the editor surfaces it instead, and refuses to re-save it.
+    // 在本编辑器存在之前（或经直接写入）记录的记录可以只持有这一对的一半，这正是读侧只能以
+    // `station-unset` 作答的状态——编辑器把它表面化，并拒绝重新保存它。
     const host = await mountChainEditor({
       chains: [storedChain({ legs: [storedLeg({ seq: 0, alightStationOrder: null })] })],
     })
@@ -531,10 +507,9 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
   })
 
   it('半截的站点（另一半）：只有站序、没有站名的记录在保存时同样被拒绝', async () => {
-    // The mirror of the case above, which had no test of its own: the pair rule is
-    // symmetric — 「站名与站序要同时选定」 — and a NUMBER without a name locates no station
-    // either, so the same half-record written the other way is refused with its own
-    // sentence rather than being read as a station.
+    // 上一种情形的镜像，它此前没有自己的测试：配对规则是对称的——「站名与站序要同时选定」——
+    // 而没有站名的**数字**也定位不到任何站，故另一半缺的记录写入时同样以它自己的句子被拒绝，
+    // 而非被读成一个站。
     const host = await mountChainEditor({
       chains: [storedChain({ legs: [storedLeg({ seq: 0, boardStationName: null, boardStationOrder: 3 })] })],
     })
@@ -580,11 +555,10 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
     expect(remove.props.disabled).toBe(true)
     expect(remove.props['aria-label']).toBe(removeNameText(LAST_LEG_REASON))
     expect(remove.props.title).toBe(removeNameText(LAST_LEG_REASON))
-    // The visible label is CONTAINED in the name, never replaced by it (2.5.3).
+    // 可见标签被名字**包含**，绝不被它替换（2.5.3）。
     expect(remove.props['aria-label']).toContain(host.textOf(remove))
 
-    // The same rule, stated where the write happens: a draft with no ride leg is
-    // refused rather than sent for the server to reject.
+    // 同一规则，陈述在写入发生之处：没有可乘段的草稿被拒绝，而非送给服务端去拒。
     const empty = { ...emptyChainDraft(), name: '早上上班', legs: [] }
     expect(refuseChainDraft(empty, [])).toEqual({
       legIndex: null,
@@ -601,7 +575,7 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
     const remove = within(host, legBlock(host, 1))
       .find(item => item.tag === 'button' && host.textOf(item).includes('删除该段'))!
     expect(remove.props.disabled).toBe(false)
-    // 「删除该段」 is what the user reads and says out loud; the name has to contain it.
+    // 「删除该段」是用户读到并说出口的；名字必须包含它。
     expect(host.textOf(remove)).toBe('删除该段')
     expect(remove.props['aria-label']).toBe(removeNameText('第 2 段'))
     expect(remove.props.title).toBe(removeNameText('第 2 段'))
@@ -659,10 +633,9 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
   })
 
   it('同名站在站序里出现两次时，写出去的是用户点的那一对（站名 + 站序），不是名字查回来的第一个', async () => {
-    // 环线 3 路 names 东大桥 at 第 2 站 AND at 第 4 站: 线上同名站不止一个 (PRD). A choice
-    // carried as a NAME alone would be resolved back with a `find(name)`, writing the
-    // FIRST occurrence while the trigger displayed that same wrong pair — a pair the
-    // user never picked, and one the screen would not reveal.
+    // 环线 3 路 把 东大桥 列在第 2 站**与**第 4 站：线上同名站不止一个（PRD）。仅以**名字**携带的
+    // 选择会被 `find(name)` 解析回去，写入**首个**出现，而触发器显示同一对错值——用户从未选过的一对，
+    // 且屏幕不会揭示。
     const host = await mountChainEditor({ favourites: [...FAVOURITES, LOOP_FAVOURITE] })
     await openComposer(host)
     await type(host, nameField(host), '早上上班')
@@ -670,14 +643,13 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
     await pickStation(host, 0, 'board', '东大桥', 4)
     await pickStation(host, 0, 'alight', '终点站', 5)
 
-    // The trigger reads back exactly what was picked: 第4站, never the 第2站 a
-    // name-based lookup would have found.
+    // 触发器逐字读回被选中的那一对：第 4 站，绝不是基于名字的查找会找到的第 2 站。
     const triggers = stationTriggers(host, 0)
     expect(triggers, 'the leg rendered no station pickers').toHaveLength(2)
     expect(host.textOf(triggers[0]!)).toContain('东大桥 第4站')
 
-    // And the list's own selected state is the PAIR as well: reopening it announces only
-    // 第4站 as selected. Keyed by name, both 「东大桥」 options would be announced selected.
+    // 列表自己的选中状态同样是**这一对**：重新打开它只宣布第 4 站为选中。
+    // 若按名字为键，两个「东大桥」选项都会被宣布为选中。
     await press(host, triggers[0]!)
     const options = host.nodes(item => item.props.role === 'option')
       .map(item => ({ text: host.textOf(item), selected: item.props['aria-selected'] }))
@@ -699,8 +671,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
   })
 
   it('半截的一对在站里显示为未设置，「未设置」不冒充任何一站', async () => {
-    // A stored record holding only an ORDER (name null) is not a station: the picker
-    // must not render a number as if it located one.
+    // 只持有**站序**（站名为 null）的已存记录不是站：选择器不得把一个数字渲染得像它定位到了某个站。
     const host = await mountChainEditor({
       chains: [storedChain({ legs: [storedLeg({ seq: 0, boardStationName: null, boardStationOrder: 3 })] })],
     })
@@ -724,7 +695,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
 
     expect(recordWrites(host)[0]!.body.legs[0].transferExtraMinutes).toBe(0)
 
-    // The same field, cleared again: 「没配」 must not be written as 「没有额外时间」.
+    // 同一字段再次清空：「没配」绝不能被写成「没有额外时间」。
     const cleared = await mountChainEditor()
     await openComposer(cleared)
     await type(cleared, nameField(cleared), '早上上班')
@@ -748,7 +719,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
     })
     await openEditorFor(host, '早上上班')
 
-    // The stored draft is on screen: name, purpose, the line and both stations.
+    // 已存的草稿在屏幕上：名称、用途、线路与两个站。
     expect(host.textOf(cardOf(host))).toContain('早上上班')
     expect(host.textOf(cardOf(host))).toContain('快线 1 路 · 开往建国门')
     expect(extraField(host, 0).props.value).toBe('0')
@@ -786,10 +757,8 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
     })
     await openEditorFor(host, '早上上班')
 
-    // ONE line id carries both ways, so the leg is placed on the direction whose own
-    // numbering holds its orders — 开往西直门 numbers 平安里 第 1 站, while 开往平安里
-    // numbers it 第 3 站. Loading it onto the other direction would silently flip the
-    // ride the record was written for.
+    // 一个线路 id 携带两个方向，故该段被放到其自身编号持有其站序的那个方向——「开往西直门」把平安里
+    // 编成第 1 站，而「开往平安里」把它编成第 3 站。把它加载到另一个方向会静默翻转该记录所写的那一程。
     const select = legFields(host, 0).find(item => item.tag === 'select')!
     const option = host.node(item => item.tag === 'option'
       && host.textOf(item) === '地铁 88 号线 · 开往西直门', 'the option 地铁 88 号线 · 开往西直门')
@@ -837,7 +806,7 @@ describe('服务端拒绝时如实报错', () => {
 
     expect(host.text()).toContain('下车站的站序必须大于上车站的站序')
     expect(serverErrorText(host)).toBe('下车站的站序必须大于上车站的站序')
-    // The form is still open with the draft in it, so nothing typed has to be typed again.
+    // 表单仍带草稿开着，故无需重新输入任何内容。
     expect(nameField(host)).toBeDefined()
     expect(refusalText(host)).toBeNull()
     host.unmount()
@@ -854,14 +823,13 @@ describe('说过的句子不会留在原地，说着用户已经离开的状态'
     await save(host)
     expect(refusalText(host)).toBe('第 1 段的下车站还没选：选完上车站与下车站才能保存')
 
-    // The user does exactly what the sentence asked. The alight picker now reads
-    // 「建国门 第4站」, so the sentence is no longer true of anything on screen — and a
-    // message that outlives its state is a claim about a screen the user has left.
+    // 用户完全照那句话做了。下车选择器现在读作「建国门 第4站」，故那句话对屏幕上任何东西都不再为真
+    // ——而活得比其状态更久的消息，是关于用户已经离开的屏幕的断言。
     await pickStation(host, 0, 'alight', '建国门', 4)
     expect(host.textOf(stationTriggers(host, 0)[1]!)).toContain('建国门 第4站')
     expect(refusalText(host)).toBeNull()
 
-    // And the next save attempt is still judged: a real problem is stated again.
+    // 且下一次保存尝试仍被评判：真正的问题会再次陈述。
     await save(host)
     expect(refusalText(host)).toBeNull()
     host.unmount()
@@ -929,12 +897,10 @@ describe('空状态与读取失败是两个原因，谁也不遮住谁', () => {
 
 describe('房子里的结构规则', () => {
   it('链路录入是设置里「通勤链路」页上的一张卡片，不是新的一级页面（一条注册表规则：路由是数据；形状换了，规则没换）', () => {
-    // 设置 used to be one 841-line page, and this card sat on it. §4.1 split that page into
-    // an index plus four sub-pages, so the card now sits on `chains.vue` — the page at
-    // `/settings/chains`. What this test holds did not change with the shape: recording a
-    // chain is NOT a first-level entry beside 换乘链路, whose page only reads conclusions.
-    // The split itself is asserted too, because a card left behind on the index would keep
-    // this rule green while the four domains were still crammed into one screen.
+    // `设置` 曾是一个单页，这张卡就在它上面。§4.1 把该页拆成索引加四个子页面，故这张卡现在
+    // 位于 `chains.vue`——`/settings/chains` 处的页面。本测试所守的东西不因形状而变：链路录入**不是**
+    // 换乘链路 旁的一级入口，后者的页面只读结论。拆分本身也被断言，因为留在索引上的卡片会让本规则保持绿，
+    // 而四个域仍挤在一个屏幕上。
     expect(codeOf(read('../chains.vue'))).toContain('<CommuteChainCard')
     expect(codeOf(read('../index.vue'))).not.toContain('<CommuteChainCard')
     expect(codeOf(read('../index.vue'))).not.toContain('<LineOrderList')
@@ -955,13 +921,11 @@ describe('房子里的结构规则', () => {
   })
 
   it('字号只走偶数阶梯（一条词法规则：阶梯写在类名里，带变体前缀的也一样算）', () => {
-    // The pattern reads the utility after the last `:`, so a prefixed size counts — this is
-    // the line that keeps `lg:text-7xl` from slipping past a ladder that only read
-    // unprefixed classes. Both directions are stated: a prefixed off-ladder size is caught,
-    // and a colour (which merely starts with a ladder word) is not read as a size.
+    // 该模式读取最后一个 `:` 之后的工具类，故带前缀的尺寸也被计入——这一行防止 `lg:text-7xl` 溜过
+    // 一个只读无前缀类的阶梯。两个方向都陈述：带前缀的阶梯外尺寸被抓到，而颜色（仅以阶梯词开头）
+    // 不被读成尺寸。
     expect(fontSizeTokens('<span class="lg:text-7xl">')).toEqual(['7xl'])
-    // A colour is not a size however it is prefixed: the ladder reads only the families a
-    // font-size utility can begin with, so the candidates are the size tokens alone.
+    // 颜色无论怎么加前缀都不是尺寸：阶梯只读字号工具类可能以其开头的家族，故候选只有尺寸 token。
     expect(fontSizeTokens('<span class="hover:text-slate-400 text-base md:text-xs">')).toEqual(['base', 'xs'])
 
     const allowed = new Set(['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'])
@@ -977,9 +941,8 @@ describe('房子里的结构规则', () => {
   it('触控目标不小于 44px（房子约定）', async () => {
     const host = await mountChainEditor({ chains: [storedChain()] })
     await openComposer(host)
-    // A line has to be chosen for the two pickers to exist at all: without one the list
-    // below would carry no picker and the loop would pass over nothing, which is how two
-    // 40px controls once satisfied a 44px rule.
+    // 必须先选一条线路，两个选择器才存在：没有它，下面的列表不携带任何选择器，循环将空转通过
+    // ——正是两个 40px 控件曾满足 44px 规则的方式。
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
 
     const pickers = stationTriggers(host, 0)
@@ -1004,8 +967,7 @@ describe('房子里的结构规则', () => {
   })
 
   it('文字在它真正合成的背景上可读（12px 也要 4.5:1）——整张设置页都在检查范围内', () => {
-    // EVERY SFC of this screen, the followed-lines rows and the reused pickers included: a
-    // rule that only read the chain card's files let a regression ship anywhere else on it.
+    // 本屏的**每个** SFC，含关注线路行与复用的选择器：只读链路卡文件的规则会让回归在本屏其他地方发布。
     for (const name of ['index.vue', 'lines.vue', 'schedule.vue', 'anchors.vue', 'chains.vue',
       'back-to-settings.vue', 'anchor-picker.vue', 'commute-hours-card.vue',
       'commute-hours-form.vue', 'station-pin-picker.vue', 'line-order-list.vue', 'removal-dialog.vue']) {
@@ -1016,9 +978,8 @@ describe('房子里的结构规则', () => {
     expect(audit.pairs.length).toBeGreaterThan(0)
     expect(audit.violations).toEqual([])
 
-    // A translucent text colour is measured too — composited over the surface it sits on,
-    // which is the only way `text-sky-400/80` can be read at all. A colour the audit skips
-    // is a colour nothing guards, and this screen paints one.
+    // 半透明文字色也被测量——与它所在的表面合成，这是 `text-sky-400/80` 能被读取的唯一方式。
+    // 审计跳过的颜色就是没有守卫的颜色，而本屏画了这样一个。
     const translucent = audit.pairs.filter(pair => pair.textToken === 'text-sky-400/80')
     expect(translucent, 'the translucent developer-mode note is audited').not.toHaveLength(0)
     expect(translucent.every(pair => pair.ratio >= 4.5), 'its composite is readable').toBe(true)
@@ -1027,22 +988,17 @@ describe('房子里的结构规则', () => {
   it('配对只看同一状态：hover 的文字不跟没加 hover 的背景相乘，真实的那一对反而要审到', () => {
     const audit = auditContrast(SETTINGS_SFC)
 
-    // Every pair is one the screen can actually draw: the surface may only carry states the
-    // text it is paired with also carries. The cross-product this audit used to do paired
-    // `hover:text-slate-950` with the button's base `bg-slate-800` (1.38:1) and `text-slate-200`
-    // with `hover:bg-cyan-500` (1.97:1) — neither can co-occur on screen, so both are refuted
-    // by the pair the state actually draws.
+    // 每一对都是屏幕真正画得出的：表面只可携带与其配对的文字同样携带的状态。本审计曾做的叉积把
+    // `hover:text-slate-950` 与按钮的基础 `bg-slate-800`（1.38:1）配对、把 `text-slate-200` 与
+    // `hover:bg-cyan-500`（1.97:1）配对——两者在屏幕上都无法共存，故都被该状态实际画出的那对驳倒。
     const impossible = audit.pairs
       .filter(pair => !pair.surface.variants.every(variant => pair.textVariants.includes(variant)))
       .map(pair => `${pair.source} ${pair.textToken} on ${pair.surface.hex} [${pair.surface.layers.join(' over ')}]`)
     expect(impossible).toEqual([])
 
-    // The 关注 button lifts to bg-cyan-500 and darkens its text in the same state: TWO states,
-    // 11.87:1 and 8.31:1. Both are audited; nothing else about that button is.
-    //
-    // It is identified by its OWN two classes rather than by being the first match for one of
-    // them: the button moved to `lines.vue` when 设置 was split, and which file the walk of
-    // this directory reaches first is not something this assertion may depend on.
+    // 关注 按钮在同一状态提亮到 bg-cyan-500 并压暗其文字：**两个**状态，11.87:1 与 8.31:1。两者都被审计；
+    // 该按钮别的什么都不被审计。按它**自己的**两个类识别，而非按其中之一的首个匹配：`设置` 拆分时该按钮
+    // 移到了 `lines.vue`，本目录遍历先到哪个文件不是本断言可以依赖的。
     const onButton = audit.pairs.filter(pair =>
       pair.element.includes('bg-slate-800') && pair.element.includes('hover:bg-cyan-500'))
     const base = onButton.find(pair => pair.textToken === 'text-slate-200')
@@ -1085,13 +1041,13 @@ describe('房子里的结构规则', () => {
     await openComposer(host)
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
 
-    // No text field in a leg at all: a hand-typed name is a station nobody can locate,
-    // which is why the pair is picked from the line's own list and never typed.
+    // 段里完全没有文本输入框：手打的站名是一个没人能定位的站，
+    // 这就是这一对从线路自己的列表里选、绝不手打的原因。
     expect(legFields(host, 0).filter(item => item.tag === 'input').map(item => item.props.type))
       .toEqual(['number'])
 
-    // Two pickers over the SAME stop list, so each carries the name that tells it from
-    // the other one for a screen reader: 「上车站」 is not 「下车站」.
+    // 两个选择器对着**同一**站表，故各自携带把自己与另一个区分开的名字供屏幕阅读器用：
+    // 「上车站」不是「下车站」。
     expect(stationTriggers(host, 0).map(item => item.props['aria-label']))
       .toEqual(['上车站', '下车站'])
 
@@ -1112,17 +1068,15 @@ describe('房子里的结构规则', () => {
   })
 
   it('站点还没读到：说的是「还没读到、要等它出现」，不是「暂无站点数据」（两种事实两句话）', async () => {
-    // The read never answers — the request itself fails — so the list is empty because
-    // nothing has been read, NOT because this direction has no stops. 「暂无站点数据」 would
-    // be a claim about the upstream that nobody has made, and waiting is still exactly what
-    // the user can do.
+    // 读取不应答——请求本身失败——故列表为空是因为什么都没读到，**不是**因为本方向没有站。
+    // 「暂无站点数据」会是一个没人做过的关于上游的断言，而等待仍是用户确切能做的事。
     const host = await mountChainEditor({
       overrides: [[/\/api\/transit\/lines\//, () => { throw new Error('offline') }]],
     })
     await openComposer(host)
     await type(host, nameField(host), '早上上班')
-    // The option names the direction by its number: the 「开往 X」 label comes from the very
-    // read that has not answered, so a terminus nobody reported must not be invented.
+    // 选项按其编号命名方向：「开往 X」标签来自那次尚未作答的读取，
+    // 故不得捏造一个没人报告过的终点站。
     await chooseLine(host, 0, '快线 1 路 · 方向 0')
 
     const leg = host.textOf(legBlock(host, 0))
@@ -1137,8 +1091,7 @@ describe('房子里的结构规则', () => {
   })
 
   it('读不到线路站点时，说的是站点数据不到，而不是让人一直等（一条关于原因与它的措辞的规则）', async () => {
-    // The API answers for this direction and lists no stops at all: a state that will
-    // never become a list, so the copy must not read as 「还在读取」.
+    // API 为本方向作答且完全没列站点：一个永远不会变成列表的状态，故文案不得读成「还在读取」。
     const host = await mountChainEditor({
       overrides: [[/\/api\/transit\/lines\//, request => ({
         success: true,
@@ -1161,9 +1114,8 @@ describe('房子里的结构规则', () => {
   })
 
   it('已不再关注的线路不会被悄悄换掉：它在选项里说明自己不在关注列表，并拒绝保存', async () => {
-    // The stored chain rides 快线 1 路, which is no longer followed: its stop list cannot
-    // be read at all, so the pair cannot be verified — which is exactly what the save
-    // must say instead of re-numbering the leg onto some other line.
+    // 已存链路乘 快线 1 路，而它已不再被关注：它的站表完全读不到，故这一对无法核实——
+    // 这正是保存必须说的，而不是把该段重编到某条别的线路上。
     const host = await mountChainEditor({
       favourites: [FAVOURITES[1]!],
       chains: [storedChain()],
@@ -1213,9 +1165,8 @@ describe('房子里的结构规则', () => {
   })
 
   it('线路是在哪里选的，就在那里说明列表来自关注线路：不等到它绑住手才说', async () => {
-    // Only the followed routes are offered, so an unfollowed line is simply absent from the
-    // select — and in the steady state nothing else on the screen would say why. The cost is
-    // stated where the choice is made, not only when it binds.
+    // 只提供关注的线路，故未关注的线路在 select 里干脆缺席——而在稳态下屏幕上没有别的东西会说明原因。
+    // 代价在做出选择之处陈述，而非只在它绑住手时才说。
     const host = await mountChainEditor()
     await openComposer(host)
 
@@ -1237,7 +1188,7 @@ describe('房子里的结构规则', () => {
 })
 
 describe('规则模块本身', () => {
-  /** One line+direction option, so a rule about the options can be read without mounting. */
+  /** 一个「线路+方向」选项，使关于选项的规则无需挂载即可读取。 */
   function option(overrides: Partial<ChainLineOption> = {}): ChainLineOption {
     return {
       key: 'fav-bus-1_0',
@@ -1254,16 +1205,13 @@ describe('规则模块本身', () => {
 
   it('选项的名字只写知道的事：开往 X / 方向 N / 方向未知 / 站序未知（一条关于措辞的单元规则）', () => {
     expect(lineOptionLabel(option())).toBe('快线 1 路 · 开往建国门')
-    // An upstream that stated no terminus has stated none: the number is the only fact the
-    // option still holds, so it is what the label says.
+    // 未陈述终点站的上游就是没陈述：编号是该选项仍持有的唯一事实，故标签说的就是它。
     expect(lineOptionLabel(option({ directionLabel: null }))).toBe('快线 1 路 · 方向 0')
-    // A subway reuses ONE id for both directions, so a stored subway line's direction is
-    // genuinely unknowable — that is what 方向未知 is for.
+    // 地铁两个方向共用一个 id，故已存地铁线路的方向确实不可知——这正是「方向未知」的用途。
     expect(lineOptionLabel(option({ direction: null, directionLabel: null, lineId: SUBWAY, lineName: '地铁 88 号线' })))
       .toBe('地铁 88 号线 · 方向未知')
-    // A bus route's two directions are two ids, so the stored id has already fixed which way
-    // the leg runs: calling the direction unknown would overstate. What cannot be read is the
-    // STOP LIST, and that is what the label says.
+    // 公交线路的两个方向是两个 id，故已存 id 已固定该段走哪个方向：称方向为未知会夸大。
+    // 读不到的是**站表**，而标签说的就是它。
     expect(lineOptionLabel(option({ direction: null, directionLabel: null }))).toBe('快线 1 路 · 站序未知')
   })
 

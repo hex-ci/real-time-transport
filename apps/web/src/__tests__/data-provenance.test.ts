@@ -1,50 +1,52 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import type { DataProvenance } from '@real-time-transport/shared'
+import { DataProvenanceSchema } from '@real-time-transport/shared'
 import { provenanceLabelOf } from '../provenance-copy'
 
 /**
- * F4's mark, as text.
+ * F4 的标记，以文本形式。
  *
- * The wording is pure logic, so it is tested here rather than left to a browser
- * pass (this app has no DOM test harness). Two things matter. First, the mark
- * answers 「这个数字是哪来的」 and the four answers must not read alike. Second —
- * the trap this feature exists to close — an arrival whose provenance is unknown
- * gets NO mark, never the flattering one: 「没有来源」 and 「实时」 are different
- * facts, and the difference is invisible to the user otherwise.
+ * 措辞是纯逻辑，故在此测试而不靠浏览器（本应用无 DOM 测试台）。要点有二。其一，
+ * 标记回答「这个数字是哪来的」，词汇表里的几个答案不能读起来一样。其二——本特性要堵的坑——
+ * 来源未知的到站不得有任何标记，更不能带上好看的那个：「没有来源」与「实时」是两个不同的事实。
  */
 
 describe('the mark names the kind of number, not the vendor behind it', () => {
-  it('renders the plan\'s three marks, plus the one the live bus path needs', () => {
-    // 实时 / 排班推演 / 精确时刻表 are the sanctioned three from the PRD. A bus
-    // minute this app computes from a real position and a real speed is neither a
-    // value upstream sent (so not 实时) nor derived from a schedule (so not
-    // 排班推演); labelling it either way would be a false claim about the number.
+  it('renders the vocabulary\'s three marks', () => {
+    // 实时 / 排班推演 / 精确时刻表 是词汇表里全部的三档：本应用自算的那一档已删除，
+    // 因为没有任何路径产出它。
     expect(provenanceLabelOf('live')).toBe('实时')
     expect(provenanceLabelOf('schedule_simulation')).toBe('排班推演')
     expect(provenanceLabelOf('exact_timetable')).toBe('精确时刻表')
-    expect(provenanceLabelOf('position_estimate')).toBe('位置推算')
+  })
+
+  it('has no wording for the kind the vocabulary dropped', () => {
+    // 类型层由 shared 的 `Record<DataProvenance, true>` 钉子保证；这里是同一事实的运行时面：
+    // 契约拒绝该值，变词函数对它什么都不说。
+    expect(DataProvenanceSchema.safeParse('position_estimate').success).toBe(false)
+    expect(provenanceLabelOf('position_estimate' as DataProvenance)).toBeNull()
   })
 
   it('shows nothing — never 实时 — when the provenance is not stated', () => {
     expect(provenanceLabelOf(null)).toBeNull()
     expect(provenanceLabelOf(undefined)).toBeNull()
-    // The guard, stated as a rule: nothing unknown may render as 实时.
+    // 以规则形式陈述的守卫：任何未知都不得渲染成实时。
     for (const unknown of [null, undefined]) {
       expect(provenanceLabelOf(unknown)).not.toBe('实时')
     }
   })
 
   it('reads every kind differently, so no two can be confused', () => {
-    const labels = (['live', 'position_estimate', 'schedule_simulation', 'exact_timetable'] as const)
+    const labels = (['live', 'schedule_simulation', 'exact_timetable'] as const)
       .map(p => provenanceLabelOf(p))
     expect(labels.every(l => typeof l === 'string' && l.length > 0)).toBe(true)
     expect(new Set(labels).size).toBe(labels.length)
   })
 
   it('does not let the timetable engine\'s output read as live data', () => {
-    // The subway board's rows are generated trains: this is the one confusion F4
-    // is written to prevent.
+    // 地铁屏的行是生成出来的列车：这正是 F4 要防的那种混淆。
     expect(provenanceLabelOf('schedule_simulation')).not.toBe(provenanceLabelOf('live'))
   })
 })
@@ -53,7 +55,6 @@ describe('the marks name no source and carry no marketing register', () => {
   const read = (relative: string) =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 
-  /** Everything between the SFC's own <template> tags: what reaches the screen. */
   function templateOf(sfc: string): string {
     const start = sfc.indexOf('<template>')
     const end = sfc.lastIndexOf('</template>')
@@ -61,12 +62,11 @@ describe('the marks name no source and carry no marketing register', () => {
   }
 
   /**
-   * The string literals of an SFC's <script> blocks.
+   * SFC `<script>` 块里的字符串字面量。
    *
-   * Rendered copy is not only in the template: a literal a script returns or binds
-   * reaches the screen too — the platform board's row status begins as the string
-   * '离线', and a badge word returned from a `computed` is exactly such a literal.
-   * Scanning only `<template>` left all of those unguarded.
+   * 渲染内容不只在 template：script 返回或绑定的字面量同样到达屏幕——站台屏的行状态
+   * 以字符串 '离线' 开始，`computed` 返回的标记词也是这种字面量。只扫 `<template>`
+   * 会让这些都无人看守。
    */
   function scriptLiteralsOf(sfc: string): string {
     const literals: string[] = []
@@ -77,10 +77,9 @@ describe('the marks name no source and carry no marketing register', () => {
   }
 
   /**
-   * The file with its explanatory prose removed, so a rule about CODE is not
-   * tripped by a comment that names the very thing it explains was removed.
-   * `//` is only stripped when it does not follow a colon, so a string literal
-   * holding a URL (`ws://`, `https://`) survives and stays scannable.
+   * 去掉说明性文字的文件，使关于**代码**的规则不被「恰好点出它所要解释之物」的注释触发。
+   * `//` 仅在不跟在冒号后时才剥离，因此含 URL 的字符串字面量（`ws://`、`https://`）
+   * 得以保留、仍可扫描。
    */
   function codeOf(source: string): string {
     return source
@@ -90,11 +89,9 @@ describe('the marks name no source and carry no marketing register', () => {
   }
 
   /**
-   * The string literals of a `.ts` copy module — its `return`s are the marks the
-   * user reads, so those literals ARE the rendered content of such a file. A
-   * `templateOf` on a `.ts` file answers `''`, which is why this guard used to
-   * scan nothing at all for the two copy modules and stayed green with a vendor
-   * name sitting in a rendered string.
+   * `.ts` copy 模块的字符串字面量——它的 `return` 就是用户读到的标记，故这些字面量
+   * 正是这类文件的渲染内容。对 `.ts` 用 `templateOf` 会得到 `''`，两个 copy 模块因此
+   * 曾什么都不扫。
    */
   function literalsOf(source: string): string {
     const literals: string[] = []
@@ -122,16 +119,13 @@ describe('the marks name no source and carry no marketing register', () => {
   }
 
   /**
-   * What a file can put on the user's screen. An SFC contributes its `<template>`
-   * and its `<script>` string literals; a `.ts` copy module contributes its string
-   * literals, which are the whole of what it returns. Comments are excluded in both
-   * cases — the prose explaining that a vendor name was removed must not be read as
-   * that vendor name.
+   * 一个文件能放到用户屏幕上的内容。SFC 贡献 `<template>` 与 `<script>` 字符串字面量；
+   * `.ts` copy 模块贡献其字符串字面量，那就是它返回的全部。两种情形都排除注释——
+   * 说明某厂商名已被删除的文字不该被读成那个厂签名。
    */
   function renderedOf(name: string, source: string): string {
     if (name.endsWith('.ts')) return literalsOf(source)
-    // Comments are stripped from both halves: rendered copy is what reaches the
-    // screen, and an HTML comment does not.
+    // 两半都剥离注释：渲染内容是到达屏幕的东西，HTML 注释不是。
     return `${codeOf(templateOf(source))}\n${scriptLiteralsOf(source)}`
   }
 
@@ -140,10 +134,9 @@ describe('the marks name no source and carry no marketing register', () => {
   )
 
   /**
-   * Vendor and internal-identifier tokens. Checked against what each file renders
-   * — an SFC's template, a `.ts` copy module's string literals — rather than the
-   * whole file: a `<script>` comment may legitimately name the provider the code
-   * integrates. Non-literal code (identifiers, imports) is not rendered either.
+   * 厂商与内部标识符 token。针对每个文件**渲染**的内容检查——SFC 的 template、
+   * `.ts` copy 模块的字符串字面量——而非整个文件：`<script>` 注释可以正当地点名
+   * 代码所集成的提供方。非字面量的代码（标识符、import）也不是渲染内容。
    */
   const FORBIDDEN_TOKENS = ['车来了', '高德', '极数本源', 'chelaile', 'apizero', 'subway_schedule', '接口']
 
@@ -156,11 +149,9 @@ describe('the marks name no source and carry no marketing register', () => {
   })
 
   /**
-   * Transport mechanisms. The user reads a connection STATE, never the plumbing
-   * behind it: 「实时 WebSocket 已连接」 and 「LIVE WS」 put the mechanism itself on a
-   * mobile-first screen, where the only fact worth stating is whether the live feed
-   * is connected. Matched against the rendered strings, so the `wsConnected`
-   * identifier the state is read from is not mistaken for rendered copy.
+   * 传输机制。用户读的是连接**状态**，绝非其下的管道：「实时 WebSocket 已连接」、
+   * 「LIVE WS」把机制本身放上了移动优先的屏幕。针对渲染字符串匹配，因此状态所读的
+   * `wsConnected` 标识符不会被误当作渲染内容。
    */
   const TRANSPORT_MECHANISMS = [/websocket/i, /wss?:\/\//i, /\bWS\b/]
 
@@ -173,8 +164,7 @@ describe('the marks name no source and carry no marketing register', () => {
   })
 
   it('drops the copy that described an internal mechanism or a source', () => {
-    // 上游 / 秒级推演 described the plumbing; 「官方」 was a claim the marks now
-    // carry in the only form this data can substantiate (精确时刻表).
+    // 「上游 / 秒级推演」描述的是管道；「官方」改由标记在唯一能坐实的形式（精确时刻表）里承载。
     for (const [name, source] of Object.entries(files)) {
       for (const retired of ['上游', '秒级', '官方排班推演', '官方时刻', '推演排班']) {
         expect(source, `${name} still says ${retired}`).not.toContain(retired)
@@ -189,30 +179,23 @@ describe('the marks name no source and carry no marketing register', () => {
   })
 
   it('marks each platform row from its own provenance, and words no mark itself', () => {
-    // The board is a row per line/direction, so every row states its own kind —
-    // there is no single list for one word to describe.
+    // 站台屏每行对应一条线路/方向，故每行各陈其类——没有可供一个词描述的单一列表。
     expect(files['platform/components/departure-board.vue']).toContain('provenanceLabelOf')
-    // The kind is read off the source the payload declared, at the branch that
-    // produced the row — the platform view computes no minute of its own, and the
-    // row builder (which now owns those branches) is where the source is applied.
+    // 类型取自载荷声明的来源，就在产出该行的分支上——站台视图不自己算分钟，
+    // 而拥有这些分支的行构造器才是应用来源之处。
     expect(files['platform/index.vue']).toContain('dataSource')
     expect(files['platform/departure-row.ts']).toContain('platformRowProvenanceOf(')
     expect(files['platform/departure-row.ts']).toContain('dataSource')
-    // A mark word written into a template would bypass provenance-copy.ts, the one
-    // place a kind becomes words; 实时 in particular must never be hard-coded.
+    // 写进模板的标记词会绕过 provenance-copy.ts（类型变词的唯一处）；实时尤其不得硬编码。
     const boardTemplate = rendered['platform/components/departure-board.vue']!
-    for (const word of ['实时', '位置推算', '排班推演', '精确时刻表']) {
+    for (const word of ['实时', '排班推演', '精确时刻表']) {
       expect(boardTemplate, `the board template states ${word} itself`).not.toContain(word)
     }
   })
 
   it('decides no mark from the route type or from a component\'s own position', () => {
-    // Provenance comes from the payload. The hero used to guess it from the route
-    // type, which is right only until the aggregator fails over to a source that
-    // answers with a different kind of reading; the lists used to guess it from the
-    // response-level `isExact`, which cannot separate "upstream sent the minute"
-    // from "this app computed it". Read as code, so the comments that explain the
-    // removal do not trip these assertions.
+    // 来源取自载荷，不由线路类型、也不由响应级 `isExact` 猜出；按代码断言，
+    // 故解释删除过程的注释不会触发这些断言。
     expect(codeOf(files['line-detail/components/line-hero.vue']), 'hero still guesses from the route type')
       .not.toContain('detail.type')
     for (const name of [
@@ -223,12 +206,7 @@ describe('the marks name no source and carry no marketing register', () => {
     ] as const) {
       expect(codeOf(files[name]), `${name} still branches on isExact`).not.toContain('.isExact')
     }
-    // The platform board classifies each row from the source its own payload
-    // declared, so it may not read the route type off the line identifier either.
-    // A guess of the hero's old shape — `rule.lineId.startsWith('subway')` — reads
-    // right only while the route type and the answering source agree, and this
-    // board has no second opinion to fall back on. The prefixes are forbidden both
-    // as a sniffed literal and as a comparison on the identifier itself.
+    // 站台屏按每行自身载荷声明的来源分类，因此同样不得从线路标识符嗅探线路类型。
     const platformCode = codeOf(files['platform/index.vue'])
     expect(platformCode, 'platform/index.vue still guesses the route type from the identifier')
       .not.toMatch(/lineId\s*\.\s*startsWith\(/)

@@ -1,39 +1,38 @@
 /**
- * Multi-city support layer.
- * CITY_DICTIONARY (497 cities) is auto-generated from the chelaile realtime city list.
- * HOT_CITY_META enriches the most common cities with amap adcode for GIS features.
+ * 多城市支持层。
+ * HOT_CITY_META 为热门城市人工维护 GIS 元数据；城市全表由上游城市列表生成，禁止手改。
  */
 
 export interface TransitCity {
-  /** chelaile cityId, e.g. '027' for Beijing */
+  /** chelaile cityId，如北京的 '027'。 */
   code: string
   name: string
   pinyin: string
-  /** whether chelaile reports realtime subway support for this city */
+  /** 上游是否报告该城市支持地铁实时。 */
   hasMetro: boolean
-  /** curated hot city (shown at top of picker) */
+  /** 人工维护的热门城市（选择器置顶）。 */
   hot: boolean
 }
 
 export { CITY_DICTIONARY } from './cities.generated.js'
 
-/** Extra metadata for amap GIS calls (adcode) on curated hot cities. */
+/** 热门城市用于 amap GIS 调用的额外元数据。 */
 export interface CityGisMeta {
   code: string
   name: string
-  /** amap adcode, used for v3/bus/linename & v3/place/around city scoping */
+  /** amap adcode，用于 GIS 接口的城市限定。 */
   adcode: string
   pinyin?: string
 }
 
 export const HOT_CITY_META: CityGisMeta[] = [
-  // Tier-1 & Central Municipalities first
+  // 一线城市与直辖市
   { code: '027', name: '北京', adcode: '110000', pinyin: 'beijing' },
   { code: 'amap_120000', name: '天津', adcode: '120000', pinyin: 'tianjin' },
   { code: '034', name: '上海', adcode: '310000', pinyin: 'shanghai' },
   { code: 'amap_440100', name: '广州', adcode: '440100', pinyin: 'guangzhou' },
   { code: 'amap_440300', name: '深圳', adcode: '440300', pinyin: 'shenzhen' },
-  // Major metro regional hubs
+  // 主要区域中心城市
   { code: '004', name: '杭州', adcode: '330100', pinyin: 'hangzhou' },
   { code: '007', name: '成都', adcode: '510100', pinyin: 'chengdu' },
   { code: '000', name: '武汉', adcode: '420100', pinyin: 'wuhan' },
@@ -69,12 +68,12 @@ const CODE_NAME_MAP: Record<string, string> = Object.fromEntries(
   HOT_CITY_META.map(c => [c.code, c.name]),
 )
 
-/** Amap adcode for a city code. Falls back to the code itself for unknown cities. */
+/** 城市码对应的 amap adcode；未知城市回落到城市码本身。 */
 export function getCityAdcode(cityCode: string): string {
   return AD_CODE_MAP[cityCode] || cityCode
 }
 
-/** Curated display name for a city code (undefined for non-curated cities). */
+/** 城市码的人工维护显示名；非热门城市为 undefined。 */
 export function getCuratedCityName(cityCode: string): string | undefined {
   return CODE_NAME_MAP[cityCode]
 }

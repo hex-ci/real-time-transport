@@ -4,19 +4,16 @@ import LineMiniCard from '../components/line-mini-card.vue'
 import type { NearbyLocationState } from '../nearby-notice'
 
 /**
- * What a nearby card actually renders when it has no platform to report.
+ * 附近卡片在没有站台可报时实际渲染的内容。
  *
- * The value-level cases live in `src/__tests__/nearby-notice.test.ts`; this file
- * holds the half a unit test of the copy cannot see — that the card RENDERS the
- * notice for the state it was given, so a prop name, a binding or a branch that
- * stopped reaching the screen is caught here rather than in the browser.
+ * 值层面的用例在 `src/__tests__/nearby-notice.test.ts`；本文件守住文案单元测试看不到的一半——
+ * 卡片为它被给到的状态**渲染**了该提示，使停止到达屏幕的 prop 名、绑定或分支在此而非浏览器里被抓到。
  *
- * Rendered through Vue's runtime-core into plain objects, the way the chain page's
- * harness does: this repo has no DOM harness, and this file adds none — no jsdom,
- * no `@vue/test-utils`, no global test setup.
+ * 经 Vue 的 runtime-core 渲染为普通对象，与链路页的装置相同：本仓库没有 DOM 装置，本文件也不新增
+ * ——无 jsdom、无 `@vue/test-utils`、无全局测试装置。
  */
 
-/** One rendered node, DOM-ish enough for Vue's host operations. */
+/** 一个渲染节点，对 Vue 的宿主操作足够 DOM 化。 */
 class HostElement {
   tag: string
   text: string
@@ -60,11 +57,11 @@ function walk(root: HostElement): HostElement[] {
   return out
 }
 
-/** The card's visible text, whitespace-normalised. */
+/** 卡片的可见文本，已归一化空白。 */
 function textOf(root: HostElement): string {
   return walk(root)
     .map((node) => {
-      // A hoisted static subtree arrives as raw HTML: read it as the text it shows.
+      // 被提升的静态子树以原始 HTML 到达：按它显示的文本读取。
       if (node.tag === '#static') return node.text.replace(/<[^>]*>/g, ' ')
       return node.text
     })
@@ -117,7 +114,7 @@ function createHostRenderer() {
   })
 }
 
-/** Render one card in nearby mode with no row, and hand back its visible text. */
+/** 在附近模式下渲染一张无行的卡片，交回它的可见文本。 */
 async function renderNearbyCard(nearbyLocation: NearbyLocationState): Promise<string> {
   const renderer = createHostRenderer()
   const container = new HostElement('#root')
@@ -134,8 +131,8 @@ async function renderNearbyCard(nearbyLocation: NearbyLocationState): Promise<st
     isSubway: false,
     isPinned: false,
   })
-  // Vitest transforms modules through Vite's pipeline, so an SFC's compiled wrapper
-  // reaches for `useSSRContext()`: an empty context keeps it mounting here.
+  // Vitest 经 Vite 管线转换模块，故 SFC 的编译包装器会取 `useSSRContext()`：
+  // 空上下文使它挂载在此。
   app.provide(ssrContextKey, { modules: new Set<string>() })
   app.mount(container)
   await nextTick()
@@ -156,17 +153,15 @@ describe('the card renders the cause it was given, not a cause it guessed', () =
 
   it('says this line has no platform nearby when a position exists', async () => {
     const text = await renderNearbyCard('fix')
-    // The user granted location and the app has a fix: naming 「开启定位」 here is
-    // the claim this defect was, and it is rendered by the same expression the
-    // browser would use.
+    // 用户已授权定位且应用有定位：此处点名「开启定位」正是本缺陷的断言，
+    // 而它由浏览器会用的同一个表达式渲染。
     expect(text).toContain('已定位，但附近没有该线路的站台')
     expect(text).not.toContain('开启定位')
   })
 
   it('says the browser cannot locate when it has no geolocation at all', async () => {
     const text = await renderNearbyCard('unsupported')
-    // Nothing for this user to enable: the capability is absent, not withheld, so
-    // the sentence says that and names the one thing that would change it.
+    // 此用户没有可开启的东西：能力是缺失而非被拒，故句子如此陈述并点名唯一能改变它的事。
     expect(text).toContain('当前浏览器不支持定位，请换用其他浏览器')
     expect(text, 'a browser with no geolocation was told to enable location')
       .not.toContain('开启定位')

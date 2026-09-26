@@ -1,28 +1,19 @@
 /**
- * The followed lines of the active city, together with each direction's own stop list.
+ * 当前城市已关注线路，以及每个方向自己的站点列表。
  *
- * WHY THIS IS ONE MODULE. 设置 is an index plus four pages, and TWO of them need this same
- * read: 关注线路 offers a board stop out of a direction's stop list, and 通勤链路 offers a
- * line whose (station, order) pair can be checked against it. The requirement is that the
- * two agree — the chain editor's premise is 「this page already loads exactly that list, per
- * direction, for the pins above」 — and one source is the only thing that keeps it true.
- * Two copies of this logic would let a chain leg be offered stops the pin picker on the
- * other page considers unavailable.
+ * 设置是索引加四个页面，其中**两**个需要这同一次读取：关注线路要从方向的站点列表里
+ * 提供一个报站站点，通勤链路要提供一个其 (站名, 站序) 可被核对的线路。要求是两者一致，
+ * 而单一来源是唯一能保住这一点的方法：两份逻辑会让链路的一段拿到另一个页面上的
+ * 站点选择器认为不可用的站点。
  *
- * The code itself did not change when it moved here: same refs, same requests, same
- * laziness. What is `undefined` stays `undefined` (「not read yet」) and what the API
- * answered without stops stays flagged (`stationLoadFailed`), because those are three
- * different facts — reading, unavailable, and read — and the pages word them separately.
- *
- * The composable is per-page state, not app state: no page is kept alive beside another
- * (there is no `keep-alive` and no tab strip), so a page that mounts gets its own lists and
- * its own watcher, and unmounting releases both.
+ * composable 是逐页面状态而非应用状态：没有页面会与另一个并存，故挂载的页面拿到
+ * 自己的列表与自己的侦听器，卸载时两者一起释放。
  */
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { resolveFavoriteLineId } from '@real-time-transport/shared/line-group'
 import type { LineDetail, Station, UserFavoriteLine } from '@real-time-transport/shared'
-import type { ReadState } from '@/read-state'
+import type { ReadState, ReadValue } from '@/read-state'
 import { useCityStore } from '@/stores/city.store'
 import { useTransitStore } from '@/stores/transit.store'
 import type { ChainLineOption } from './types'
@@ -33,29 +24,29 @@ export function useLineStops() {
   const { favoriteOrder } = storeToRefs(transitStore)
 
   /**
-   * Whether the followed set itself has answered yet.
+   * 关注集合本身是否已经作答。
    *
-   * This module OWNS that read, so it owes its callers the read's own state rather than an
-   * array that an empty answer and a failed one leave looking alike: `fetchFavorites`
-   * reports the difference, and a page that swallowed it would render 「暂无关注线路」 for a
-   * list nobody read — the exact lie 设置's index row was split out to stop. `cityFavorites`
-   * is the VALUE; this is whether there is one.
+   * 本模块**拥有**那次读取，故它欠调用方读取自己的状态，而不是一个「空答案」与
+   * 「失败」看起来一模一样的数组。`cityFavorites` 是**值**，这个是有没有值。
    */
   const favoritesRead = shallowRef<ReadState>('reading')
 
   /**
-   * Stops per favourite direction, keyed `${favoriteId}_${direction}`. Loaded
-   * lazily when the user opens a pin picker — a favourite can cover both
-   * directions, each needing its own stop list from its own upstream lineId.
+   * 每个已关注方向的站点，键为 `${favoriteId}_${direction}`，连同产出它们的读取。
+   *
+   * 用户打开站点选择器时才按需加载——一个关注项可以覆盖两个方向，各自需要从自己
+   * 那个 lineId 获取的站点列表。
+   *
+   * 每个方向**一条**记录，持有**读取自己的**状态（`ReadValue`）：没有记录 = 还没作答，
+   * `'unreadable'` = 没答上来，`'read'` 携带 API 答的一切——**空列表也包括**。
+   * 空列表是一次读取的**答案**（该方向确实没有站点：有线路名、没有站表的记录是可达的），
+   * 故不能与仍在途的读取混同。
    */
-  const stationLists = shallowRef<Record<string, Station[]>>({})
-  /** Directions the API answered for but returned no detail for. */
-  const stationLoadFailed = shallowRef<Record<string, boolean>>({})
+  const stationReads = shallowRef<Record<string, ReadValue<Station[]>>>({})
   /**
-   * Direction labels keyed `${favoriteId}_${direction}`, taken from each
-   * direction's upstream `directionName` ("开往 X"). Stored per direction because
-   * a bus route's two directions are separate upstream lines and each names its
-   * own terminus; absent until that direction's stops are loaded.
+   * 方向标签，键为 `${favoriteId}_${direction}`，取自各方向数据源的 `directionName`
+   * （「开往 X」）。按方向存储：公交线路的两个方向是不同的线路源，各自命名自己的终点站；
+   * 在该方向的站点加载前不存在。
    */
   const directionLabels = shallowRef<Record<string, string>>({})
 
@@ -64,25 +55,22 @@ export function useLineStops() {
   }
 
   /**
-   * The current city's followed lines, in STORED order.
+   * 当前城市已关注的线路，按**存储**顺序。
    *
-   * Read from `favoriteOrder`, never from the store's own array: that array is
-   * ordered the way the home screen presents it, which lifts one row ahead of
-   * where it is actually stored. These pages edit the stored order, so they have to
-   * show exactly that — otherwise the row the user grabs is not the row the drop
-   * writes.
+   * 读自 `favoriteOrder`，绝不读 store 自己的数组：那个数组的排序是首页呈现它用的顺序，
+   * 会把某一行提到它实际存储位置之前。这些页面编辑的是存储顺序，故必须原样展示——
+   * 否则用户抓住的那一行，不是落下时写入的那一行。
    */
   const cityFavorites = computed(() =>
     favoriteOrder.value.filter(f => f.cityCode === cityStore.currentCode),
   )
 
   /**
-   * Commute direction options of a favourite, one entry per available direction.
+   * 一个关注项的通勤方向选项，每个可用方向一条。
    *
-   * A bus route's two directions are two upstream lineIds, so each option carries
-   * the lineId its stops must be fetched from. The label is the upstream's own
-   * `directionName` ("开往 X"), which is what the vehicle's destination board
-   * reads — 上行/下行 is not in the data and is not consistent between cities.
+   * 公交线路的两个方向是两个 lineId，故每个选项携带其站点必须从此获取的 lineId。
+   * 标签是数据源自己的 `directionName`（「开往 X」），也就是车辆终点站牌上的读法——
+   * 上行/下行不在数据里，各城市之间也不一致。
    */
   function directionOptions(fav: UserFavoriteLine): Array<{
     direction: 0 | 1
@@ -105,7 +93,10 @@ export function useLineStops() {
 
   async function ensureStations(fav: UserFavoriteLine, direction: 0 | 1, lineId: string): Promise<void> {
     const key = pinKey(fav.id!, direction)
-    if (stationLists.value[key]) return
+    // 已作答的读取是定论，不再重复获取。**没有**作答的读取由下一趟重试：
+    // 它被记录下来并被措辞（面板说 未读到），
+    // 但后面的某一趟仍可能取到列表。
+    if (stationReads.value[key]?.state === 'read') return
     try {
       const qs = new URLSearchParams({
         direction: String(direction),
@@ -115,30 +106,56 @@ export function useLineStops() {
       const json = await res.json()
       if (json.success && json.data) {
         const detail = json.data as LineDetail
-        stationLists.value = { ...stationLists.value, [key]: detail.stops }
+        // 答了就是答了，哪怕它一条站也没有：一个只有线路名、没有站表的上游记录是真实存在的情况
+        // （`holdsLineRecord` 就认这种 payload），空表因此是「这个方向没有站点数据」这个事实，
+        // 与「还没读到」不是同一句话。
+        stationReads.value = { ...stationReads.value, [key]: { state: 'read', value: detail.stops } }
         if (detail.directionName) {
           directionLabels.value = { ...directionLabels.value, [key]: detail.directionName }
         }
         return
       }
-      // Reachable and empty: record it, so the panel can say the direction has no
-      // stops instead of showing a picker that will never fill.
-      stationLoadFailed.value = { ...stationLoadFailed.value, [key]: true }
+      // 没有拿到这条线路的详情（404，或应答里没有 data）：这一次读取没有回答本方向的站点，
+      // 记下来让界面说「未读到」，而不是说这个方向没有数据 —— 后者是关于上游数据的主张。
+      stationReads.value = { ...stationReads.value, [key]: { state: 'unreadable' } }
     }
     catch {
-      // Transient (offline, server down): leave unloaded so a later pass retries,
-      // and do NOT claim the direction is unavailable — that would be a lie.
+      // 瞬时故障（离线、服务端挂了）：与上面的未命中同一种措辞——关于这个方向
+      // 什么都没读到——而后面的某一趟会重试。
+      stationReads.value = { ...stationReads.value, [key]: { state: 'unreadable' } }
     }
   }
 
   /**
-   * Load stop lists for every direction of the current city's followed lines.
+   * 一个方向的站点列表读取，按读取自己的三种状态。
    *
-   * BOTH directions, not just the chosen one: the direction selector must show
-   * "开往 X" for an option before the user picks it, and that label comes from the
-   * direction's own detail. Driven by a watcher (not a one-shot call in
-   * `onMounted`) because following a new line later in the session must load its
-   * stops too — otherwise its picker stays empty until the page is reloaded.
+   * 没有记录的方向是 `'reading'`——还没有任何东西为它作答，任何界面都不得把这个措辞成
+   * 关于该方向的事实。`'unreadable'` 是没作答的读取（重试仍可改变它），`'read'` 是**答案**，
+   * 其值可能是空列表。
+   */
+  function stopsRead(fav: UserFavoriteLine, direction: 0 | 1): ReadValue<Station[]> {
+    if (!fav.id) return { state: 'reading' }
+    return stationReads.value[pinKey(fav.id, direction)] ?? { state: 'reading' }
+  }
+
+  /**
+   * 一个方向的读取**作答**出的站点；尚未作答时为 `null`。
+   *
+   * 这里的 `null` 意思是「还没有这个事实」——不是空列表，
+   * 空列表是没有站点数据的方向给出的答案。
+   */
+  function stopsOf(fav: UserFavoriteLine, direction: 0 | 1): Station[] | null {
+    const read = stopsRead(fav, direction)
+    return read.state === 'read' ? read.value : null
+  }
+
+  /**
+   * 为当前城市已关注线路的每个方向加载站点列表。
+   *
+   * **两个**方向，而不只是所选的那一个：方向选择器必须在用户选定之前，就为一个选项显示
+   * 「开往 X」，而该标签来自方向自己的详情。由侦听器驱动（而不是 `onMounted` 里的
+   * 一次性调用），因为会话中后来关注的新线路也必须加载它的站点——否则它的选择器会一直
+   * 空着，直到重载页面。
    */
   async function ensureAllStations(): Promise<void> {
     const tasks: Array<Promise<void>> = []
@@ -152,29 +169,27 @@ export function useLineStops() {
   }
 
   /**
-   * Read the followed set, recording which of the three states it left the page in.
+   * 读取关注集合，记录它把页面留在三种状态中的哪一种。
    *
-   * The store's own answer decides: a read it completed makes the (possibly empty) list a
-   * fact, and a read it did not complete leaves the state unreadable — never an empty list,
-   * which is a claim about the user's stored rows that nobody obtained. Exposed so a page
-   * whose list failed can offer the retry that is the only thing that can change it.
+   * 由 store 自己的答案决定：它完成的读取使（可能为空的）列表成为事实，它没完成的读取
+   * 使状态为读不到——绝不是空列表，那是对用户已存记录一个无人取得过的主张。
+   * 暴露出来，好让列表失败的页面给出唯一能改变它的重试。
    */
   async function readFavorites(): Promise<void> {
     favoritesRead.value = 'reading'
     favoritesRead.value = (await transitStore.fetchFavorites()) ? 'read' : 'unreadable'
   }
 
-  // The followed set itself, read here because it is this module's premise: without it
-  // neither page has a line to show a stop list for, and a page that mounted before the
-  // store had them would offer an empty list. The old one-page 设置 read it in its own
-  // `onMounted`; the read moved with the code that needs it — and with the read moved the
-  // ANSWER, so a page's 重试 re-runs it here rather than reaching into the store itself.
+  // 关注集合本身在这里读取，因为它是本模块的前提：没有它，两个页面都没有线路
+  // 可以展示站点列表，而一个在 store 拿到它之前挂载的页面只会给出空列表。
+  // 读取随需要它的代码一起移动——**答案**也随之，
+  // 故页面的重试在这里重跑它，而不是去够 store 内部。
   onMounted(() => {
     void readFavorites()
   })
 
-  // Followed set or active city changed -> load any stops not yet cached.
-  // ensureStations skips what it already holds, so this stays a no-op on reruns.
+  // 关注集合或当前城市变化 -> 加载尚未缓存的站点。
+  // ensureStations 会跳过已持有的，故重跑时这里是空操作。
   watch(
     () => cityFavorites.value
       .map(f => `${f.id}_${f.lineId}_${f.reverseLineId ?? ''}`)
@@ -184,25 +199,22 @@ export function useLineStops() {
   )
 
   /**
-   * The lines a chain leg may ride: the active city's followed routes, one entry per
-   * direction.
+   * 链路的一段可以乘坐的线路：当前城市已关注线路，每个方向一条。
    *
-   * The followed lines are the source, and the choice is the chain editor's premise
-   * rather than a convenience (see `ChainLineOption`): a chain records the lines the user
-   * actually rides, those are the ones they follow, and this module already holds each
-   * direction's own stop list — which is the only thing that can tell whether a
-   * (station, order) pair is real. The reader pays for it honestly: a leg cannot name a
-   * line that is not followed, and the editor says so where it offers the choice.
+   * 关注线路是来源，而这个选择是链路编辑器的前提而非便利（见 `ChainLineOption`）：
+   * 链路记录的是用户真正乘坐的线路，那些正是他关注的线路，而本模块已经持有每个方向
+   * 自己的站点列表——这是唯一能判断一对 (站名, 站序) 是否真实的东西。读者为此诚实地
+   * 付代价：一段无法命名一条未被关注的线路，编辑器在提供选择之处就这么说。
    *
-   * The stop list's three states come from the same two maps the pin pickers use, so a
-   * leg's choice can never be offered stops the board considers unavailable.
+   * 站点列表的三种状态来自站点选择器用的同两个 map，
+   * 故一段的选择绝不会被提供报告板认为不可用的站点。
    */
   const chainLineOptions = computed<ChainLineOption[]>(() =>
     cityFavorites.value.flatMap((fav) => {
       if (!fav.id) return []
       return directionOptions(fav).map((option) => {
         const key = pinKey(fav.id!, option.direction)
-        const stops = stationLists.value[key]
+        const read = stopsRead(fav, option.direction)
         return {
           key,
           direction: option.direction,
@@ -210,8 +222,11 @@ export function useLineStops() {
           lineName: fav.lineName,
           cityCode: fav.cityCode || cityStore.currentCode,
           directionLabel: option.label,
-          stations: stops ?? [],
-          stops: stops ? 'ready' : stationLoadFailed.value[key] ? 'unavailable' : 'loading',
+          stations: read.state === 'read' ? read.value : [],
+          // 三种读取状态映射成链路编辑器自己的话：答了就是 ready（空表由编辑器的
+          // `stopsStateSentence` 说成「暂无站点数据」），没答上来与还在读都只能是 loading ——
+          // 这两种状态下确实还没有一份列表可以核对那一对 (站名, 站序)。
+          stops: read.state === 'read' ? 'ready' : 'loading',
         } satisfies ChainLineOption
       })
     }),
@@ -221,8 +236,8 @@ export function useLineStops() {
     cityFavorites,
     favoritesRead,
     readFavorites,
-    stationLists,
-    stationLoadFailed,
+    stopsRead,
+    stopsOf,
     directionLabels,
     pinKey,
     directionOptions,

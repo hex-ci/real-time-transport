@@ -9,72 +9,65 @@ import { commuteLegNoticeOf } from '../commute-leg'
 import type { CommuteLegState } from '../commute-leg'
 import { nearbyEmptyNoticeOf } from '../nearby-notice'
 import type { NearbyLocationState } from '../nearby-notice'
+import type { CardRowWithArrivals, ArrivalsFeed, OverviewMode } from '../types'
 import { operatingTextOf } from '@/operating-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
-import type { ArrivalsFeed, CardRowWithArrivals, OverviewMode } from '../types'
+import { readingText, unreadText, type ReadState } from '@/read-state'
 
 const props = defineProps<{
   lineName: string
   /**
-   * Label of the direction whose terminal the card leads with. Comes from the
-   * authoritative upstream `directionName`; rows carry their own, this covers
-   * the case where no row resolved (no board stop set, or no platform here).
+   * 卡片领起方向上终点的标签。来自权威的 `directionName`；行各自带着自己的，这里覆盖「一行
+   * 都没解析出来」的情形（没设上车点、或这里没有站台）。
    */
   directionName: string
-  /** The stop being reported on: a board stop (commute) or the located platform (nearby). */
+  /** 正在报告的那个站：通勤模式是上车点，附近模式是定位到的站台。 */
   stopName: string | null
-  /** GPS distance to that stop, metres — nearby mode only. */
+  /** 到那个站的 GPS 距离，米 —— 仅附近模式。 */
   stopDistanceMeters: number | null
   /**
-   * What the caller established about this commute leg from the favourite's own
-   * board stop and direction — or null for the nearby view, which has no commute
-   * leg, and while the chosen direction's stop list has not loaded.
+   * 调用方从关注行自己的上车点与方向建立起来的这一段通勤 —— 附近视图没有通勤段时为 null，
+   * 所选方向的站表尚未加载时也是 null。
    *
-   * A state, not a symptom: every unreadable leg carries no row either, so the
-   * card may not read one off the absence of a row.
+   * 是一个状态，不是症状：读不出的通勤段同样一行都没有，所以卡片不能从「行缺席」读出一个。
    */
   legState: CommuteLegState | null
   /**
-   * Whether the app has a position, as the location store reports it — the fact
-   * this card may NOT infer. A nearby card with no rows is empty for more than one
-   * reason (no fix at all, a fix nothing resolves from, a browser that cannot
-   * locate), and an empty row list cannot tell them apart, so the state is GIVEN
-   * here.
+   * 应用是否有位置，按位置 store 报告的方式 —— 这是卡片「不能」推断的事实。一行都没有的
+   * 附近卡片为空的原因不止一个（根本没有定位、有定位但解析不出任何站、浏览器不能定位），
+   * 而空的行程单分不开它们，所以这个状态是「给」进来的。
    */
   nearbyLocation: NearbyLocationState
   rows: CardRowWithArrivals[]
   mode: OverviewMode
   detailLoaded: boolean
-  /** Subway routes are tinted amber, buses cyan — one accent rule for route type. */
+  /** 地铁用琥珀、公交用青 —— 线路类型只有一套强调色规则。 */
   isSubway: boolean
   /**
-   * This route is the pinned one. The pin is a state overlaid on the list order,
-   * so the card carries a marker rather than being lifted out of the list, and the
-   * marker never displaces the arrivals it exists to make readable.
+   * 这条线路是被钉住的那条。置顶是铺在列表顺序之上的一种状态，所以卡片带的是一个标记，而不是
+   * 从列表里被抬出来；这个标记也从不挤掉它本要使之可读的到站数据。
    */
   isPinned: boolean
   /**
-   * Which direction leads when a card carries both. The leading row is decided
-   * by the caller (commute leg in season, or a manual pick) rather than by
-   * arrival time: on a platform the two directions serve opposite kerbs, so a
-   * faster bus across the road must not displace the one being waited for.
+   * 一张卡片同时携带两个方向时，哪一个领起。领起的那一行由调用方决定（当季的通勤段、或一次
+   * 手动选择），而不是由到站时间决定：在同一个站台上，两个方向服务对侧的路缘，所以马路对面
+   * 更快的那班车不能挤掉正在等的那一班。
    */
   primaryDirection?: 0 | 1 | null
 }>()
 
 defineEmits<{
   (e: 'click'): void
-  /** The user tapped the trailing direction to promote it. */
+  /** 用户点按了尾部那个方向，把它提上来。 */
   (e: 'switch-direction', direction: 0 | 1): void
-  /** The user tapped the pin control: pin this card, or un-pin it when it is the pinned one. */
+  /** 用户点了置顶控件：钉住这张卡片，或在它已被钉住时取消钉住。 */
   (e: 'toggle-pin'): void
 }>()
 
 /**
- * Accent palette, kept in one place so every tinted element on the card follows the
- * route type: subway = amber, bus = cyan.
- */
+   * 强调色调色板放在一处，使卡片上每个着色元素都跟随线路类型：地铁琥珀、公交青。
+   */
 const accent = computed(() => (props.isSubway
   ? {
       badgeBorder: 'border-amber-500/20',
@@ -98,14 +91,12 @@ const accent = computed(() => (props.isSubway
     }))
 
 /**
- * The notice for a nearby card with no platform to report, or null.
- *
- * Worded from the position state the caller GAVE the card, never from the empty
- * row list: that list is empty both before a fix exists and after one arrives
- * that no stop of this line resolves near, and the two causes need different
- * words. The row count decides only WHETHER there is anything to report — which
- * is this card's own data — never why.
- */
+   * 附近卡片没有站台可报时的那句话，或 null。
+   *
+   * 用调用方「给」卡片的位置状态措辞，绝不用空行列表：那个列表在定位存在之前为空，在定位到来
+   * 但这条线路没有站台解析出来之后也为空，而两种成因需要不同的说法。行数只决定「有没有东西
+   * 可报」—— 那是卡片自己的数据 —— 绝不决定为什么。
+   */
 const nearbyNotice = computed(() => (
   props.mode === 'nearby' && props.rows.length === 0
     ? nearbyEmptyNoticeOf(props.nearbyLocation)
@@ -113,12 +104,11 @@ const nearbyNotice = computed(() => (
 ))
 
 /**
- * The notice for a commute leg the card cannot read, or null when there is none.
- *
- * Worded from the state the caller established from the favourite's own fields —
- * never from this card's row count, which cannot tell an unset board stop from an
- * unchosen direction.
- */
+   * 卡片读不出的那一段通勤的提示，或没有时为 null。
+   *
+   * 用调用方从关注行自己的字段建立的状态措辞 —— 绝不用卡片自己的行数，它分不出「上车点未设」
+   * 和「方向未选」。
+   */
 const legNotice = computed(() => {
   if (props.mode === 'nearby') return null
   return commuteLegNoticeOf(props.legState, props.mode)
@@ -129,18 +119,16 @@ function nextOf(feed: ArrivalsFeed | null) {
 }
 
 /**
- * Minutes until that row's next bus; 0 means it is pulling in now.
- *
- * `null` covers BOTH facts the card has to tell apart — there is no row, and the
- * row states no minute — which is why the branch that words the row asks whether a
- * row EXISTS as well: a vehicle upstream could not price is not an empty service.
- */
+   * 到那一行下一班车的分钟数；0 表示它正在靠站。
+   *
+   * `null` 同时覆盖卡片必须分开的两个事实 —— 没有行，以及那一行说不出分钟 —— 所以给这一行
+   * 措辞的那个分支还要问「行是否存在」。
+   */
 function minutesOf(feed: ArrivalsFeed | null): number | null {
   const a = nextOf(feed)
   if (!a) return null
-  // One rule for the whole app, so the reference row's verdict is drawn from the
-  // very minute this list shows — and a row that states no minute is an absence
-  // rather than a number this card would have to invent.
+  // 全应用一条规则，使参考行的结论正是由这个列表显示的同一个分钟数得出 —— 而说不出分钟的
+  // 行是一次缺席，不是这张卡片得去编的一个数字。
   return statedArrivalMinutes(a)
 }
 
@@ -149,16 +137,13 @@ function subsequentOf(feed: ArrivalsFeed | null) {
 }
 
 /**
- * The row to lead with.
- *
- * A single-row card (commute) leads with that row. A two-row card (nearby)
- * leads with `primaryDirection` when the caller supplies one, and otherwise
- * falls back to the lowest direction number — a stable choice, deliberately NOT
- * the soonest bus, which would let the opposite kerb steal the headline every
- * refresh. A row with no arrivals still leads when it is the chosen one: the
- * headline then states that direction's operating fact (F3), which is the honest
- * answer for the direction the user is actually waiting for.
- */
+   * 领起的那一行。
+   *
+   * 单行卡片（通勤）以那一行领起。双行卡片（附近）在调用方给出 `primaryDirection` 时以它
+   * 领起，否则退回到最小的方向号 —— 一个稳定的选择，刻意「不是」最快的那班车，那会让对侧路缘
+   * 每次刷新都偷走头条。没有到站数据的行在被选中时仍然领起：头条那时陈述的是那个方向的运营
+   * 事实（F3），那正是用户实际在等的那个方向的诚实答案。
+   */
 const primaryRow = computed<CardRowWithArrivals | null>(() => {
   const rows = props.rows
   if (rows.length === 0) return null
@@ -169,102 +154,171 @@ const primaryRow = computed<CardRowWithArrivals | null>(() => {
     const match = rows.find(r => r.direction === chosen)
     if (match) return match
   }
-  // Stable fallback: lowest direction number, never arrival time.
+  // 稳定的兜底：最小的方向号，绝不是到站时间。
   return [...rows].sort((a, b) => a.direction - b.direction)[0] ?? null
 })
 
-const primaryArrivals = computed(() => primaryRow.value?.arrivals ?? null)
+const primaryArrivals = computed(() => {
+  const read = primaryRow.value?.arrivals
+  return read?.state === 'read' ? read.value : null
+})
 const primarySubsequent = computed(() => subsequentOf(primaryArrivals.value))
 
 /**
- * F4: what kind of minutes this row is showing.
- *
- * A single feed can mix kinds — the payload sends one real vehicle's own minute
- * and this app computes the next — so the list mark is only valid when every
- * classified row agrees, and the fallback is per row: each row then states its
- * own, which is what lets a live minute be told from a computed one in the same
- * list. Derived from the rows the server sent — never from `isExact`, never from
- * the route type, and never from this component's position. Null renders nothing
- * at all, because 「没有来源」 is not 实时.
- */
+   * 一行「到站读数」的读取状态：`read` 是答了（哪怕答的是「一辆车都没有」），`unreadable`
+   * 是没答上来，`reading`/缺省是还在读。三态来自 `@/read-state`，卡片不自己推。
+   */
+function readStateOf(row: CardRowWithArrivals | null): ReadState {
+  return row?.arrivals?.state ?? 'reading'
+}
+
+/** 首行读数自己的状态，卡片上三处关于车辆的话都从它来。 */
+const primaryReadState = computed<ReadState>(() => readStateOf(primaryRow.value))
+
+/**
+   * F4：这一行显示的是哪一类分钟。
+   *
+   * 一个 feed 可以混种类 —— payload 送出一辆真实车辆自己的分钟，而这个应用算出下一辆 —— 所以
+   * 列表标记只在每个分类过的行都一致时成立，兜底是逐行的：每一行那时说出自己的种类，这正是让
+   * 同一个列表里实时的一分钟能和算出来的区分开的东西。由服务端送来的行推出 —— 绝不来自
+   * `isExact`，绝不来自线路类型，也绝不来自本组件的位置。null 什么都不渲染，因为「没有来源」
+   * 不是「实时」。
+   */
 const primaryRows = computed(() => primaryArrivals.value?.arrivals ?? [])
 
-/** The leading minute's mark: the feed's one word, or that row's own kind. */
+/** 首行的标记：feed 的那一个词，或那一行自己的种类。 */
 const primaryMark = computed(() => provenanceLabelOf(cardRowProvenanceOf(primaryRows.value, 0)))
 
 /**
- * A 后续 row's mark, or null. Stated only when the feed mixes kinds: when one
- * word is true of the whole list it already rides on the leading minute, and
- * repeating it down the sub-list would crowd the minutes it describes.
- */
+   * 一条后续行的标记，或 null。只在 feed 混了种类时才说：一个词对整个列表都成立时它已经搭在
+   * 首行的分钟上，在子列表里逐行重复会挤掉它描述的那些分钟。
+   */
 function subsequentMarkOf(index: number): string | null {
   return provenanceLabelOf(cardRowProvenanceOf(primaryRows.value, index + 1))
 }
 
 /**
- * F3: what the leading row says when it has no minutes to show.
- *
- * That the list is empty is not the whole fact — service may not have started,
- * may have ended for the day, or may simply have no vehicle in range — so the
- * line comes from the operating status the server derived from this line's own
- * first/last departure, never from a clock read here.
- */
-const primaryOperatingText = computed(() => operatingTextOf(primaryArrivals.value?.operatingStatus))
+   * F3：领起的那一行没有分钟可显示时它说什么。
+   *
+   * 列表为空不是全部事实 —— 可能还没到首班、可能已经收班、也可能范围内就是没有车 —— 所以这句
+   * 话来自服务端根据这条线路自己的首末班得出的运营状态，绝不是这里读的时钟。
+   *
+   * 但这一切的前提是那一次读取答了：读没答上来时，「一辆车也没有」是一件没有人得到过的事；
+   * 还在读时，读还在路上。三种情形都走到这里，说的却是三句话（见 `noMinutesText`）。
+   */
+const primaryOperatingText = computed(() => noMinutesText(
+  primaryReadState.value,
+  operatingTextOf(primaryArrivals.value?.operatingStatus),
+))
 
 /**
- * The other direction, shown compactly. Kept even when it has no arrivals, so
- * the user can still see (and switch to) the opposite kerb.
- */
+   * 「没有分钟可说」时的那句话：读数答了才谈运营状态，没答上来与还在读各自说自己。
+   *
+   * 三件事走到这个位置的样子是一样的（都没有行内分钟），但它们不是一句话：读了而确实没有车，
+   * 是这个行自己的运营状态；读取没答上来，是关于世界的一句话没有人得到过；还在读，就还在读。
+   */
+function noMinutesText(state: ReadState, operating: string): string {
+  if (state === 'unreadable') return unreadText('本站来车', '无法显示到站时间')
+  if (state === 'reading') return readingText('到站数据')
+  return operating
+}
+
+/**
+   * 另一个方向，紧凑显示。即使它没有到站数据也留着，使用户仍能看见（并切换到）对侧路缘。
+   */
 const secondaryRow = computed<CardRowWithArrivals | null>(() =>
   props.rows.find(r => r !== primaryRow.value) ?? null)
 
-/** Only a two-row card can be switched; a single-row card has nothing to trade. */
+/** 反向行的读数（答了才有），或 null（还在读 / 没答上来）。 */
+const secondaryArrivals = computed(() => {
+  const read = secondaryRow.value?.arrivals
+  return read?.state === 'read' ? read.value : null
+})
+
+/** 只有双行卡片能切换；单行卡片没有可换的。 */
 const canSwitch = computed(() => props.rows.length > 1 && secondaryRow.value !== null)
 
-/** The opposite direction is worth tapping only when it actually has a bus. */
-const secondaryHasArrivals = computed(() => nextOf(secondaryRow.value?.arrivals ?? null) !== null)
+/** 反方向只有真的有一班车时才值得点按。 */
+const secondaryHasArrivals = computed(() => nextOf(secondaryArrivals.value) !== null)
 
-/** F3 for the trailing row: the same operating fact, in the same words. */
-const secondaryOperatingText = computed(() =>
-  operatingTextOf(secondaryRow.value?.arrivals?.operatingStatus))
+/** 尾部那一行的 F3：同一个运营事实、同一套措辞 —— 它没有分钟可说时同样按它自己那次读取
+   *  的状态说话（见 `noMinutesText`）。 */
+const secondaryOperatingText = computed(() => noMinutesText(
+  readStateOf(secondaryRow.value),
+  operatingTextOf(secondaryArrivals.value?.operatingStatus),
+))
 
-/** F4 for the trailing row: its own feed, its own authority to state a mark. */
-const secondaryRows = computed(() => secondaryRow.value?.arrivals?.arrivals ?? [])
+/** 尾部那一行的 F4：它自己的 feed，它自己有资格说出一个标记。 */
+const secondaryRows = computed(() => secondaryArrivals.value?.arrivals ?? [])
 
 /**
- * The trailing row's mark. Same fallback as the leading one: the feed's single
- * word when the rows agree, otherwise the row being shown states its own kind.
- */
+   * 尾部那一行的标记。与首行同一套兜底：行一致时用 feed 的那一个词，否则被显示的那一行说出
+   * 自己的种类。
+   */
 const secondaryMark = computed(() => provenanceLabelOf(cardRowProvenanceOf(secondaryRows.value, 0)))
 
-/** Every future bus across all rows — the honest "how many are coming" count. */
+/** 一行读了之后车有几辆；没答上来或还在读的行不贡献数字。 */
+function aheadCountOf(row: CardRowWithArrivals): number {
+  const read = row.arrivals
+  return read?.state === 'read' ? read.value.arrivals.length : 0
+}
+
+/** 所有行加起来未来还有几班车 —— 诚实的「还有几辆要来」。 */
 const aheadCount = computed(() =>
-  props.rows.reduce((sum, r) => sum + (r.arrivals?.arrivals?.length ?? 0), 0))
+  props.rows.reduce((sum, r) => sum + aheadCountOf(r), 0))
+
+/**
+   * 这几行的读取状态，合起来看那一个数字能不能说出口。
+   *
+   * 角标上的数字是前方的车数，跨行求和，所以它只有在每一行的读取都答了的时候才是一个关于世界的
+   * 事实：还有一行在读，总数可能还会变大；有一行没答上来，总数可能少算了。两者都不是「一辆也
+   * 没有」，因此都不能读作「前方暂无来车」。
+   */
+const aheadReadState = computed<ReadState>(() => {
+  const states = props.rows.map(row => readStateOf(row))
+  if (states.includes('unreadable')) return 'unreadable'
+  if (states.includes('reading')) return 'reading'
+  return 'read'
+})
+
+/** 角标上有数字，且那是一个读到了的数字。 */
+const aheadCountIsAFact = computed(() => aheadReadState.value === 'read')
+
+/**
+   * 角标的话，三件事实三句。
+   *
+   * 「前方暂无来车」是一句关于世界的话，只属于「读了、确实一辆也没有」这一种情形；读取没答上来
+   * 与还在读各有自己的说法 —— 先前它们与「一辆也没有」共用这一句，于是一次失败的读取被显示成
+   * 「没有车要来」。
+   */
+const aheadBadgeText = computed(() => {
+  if (aheadReadState.value === 'unreadable') return '前方来车未读到'
+  if (aheadReadState.value === 'reading') return readingText('来车')
+  return aheadCount.value > 0 ? `前方 ${aheadCount.value} 辆` : '前方暂无来车'
+})
 
 const modeLabel = computed(() => (props.mode === 'morning'
   ? '🏠 上班'
   : props.mode === 'evening' ? '🏢 下班' : '📍 附近'))
 
 /**
- * F1's reference for the leading row, or null.
- *
- * Commute legs only. There 家 / 公司 really is 「where you are」, which is what
- * makes 「锚点 → 站台」 a walk the user is about to take; in the nearby view the
- * platform shown is simply the closest one to a live fix, so the same walk would
- * be a number about a trip nobody is taking.
- */
+   * 首行的 F1 参考，或 null。
+   *
+   * 只有通勤段才有。那里「家 / 公司」确实就是「你所在的地方」，这才使「锚点 → 站台」成为用户
+   * 即将走的一段路；附近视图里显示的站台只是离一次实时定位最近的那个，同一段步行会是一个关于
+   * 没人要走的旅程的数字。
+   */
 const reference = computed<DepartureReference | null>(() => {
   if (props.mode === 'nearby') return null
   return primaryArrivals.value?.reference ?? null
 })
 
 /**
- * The reference line's text, or null when there is nothing honest to say.
- *
- * It is a REFERENCE, not a replacement: the arrival minutes above stay complete
- * and this line can only ever add one to the panel — never hide, shrink or
- * truncate a single one of them.
- */
+   * 参考行的文本，没有诚实的话可说时为 null。
+   *
+   * 它是「参考」，不是替代：上面的到站分钟数保持完整，这一行只能给面板加一条，绝不能隐藏、
+   * 缩小或截断其中任何一个分钟数。
+   */
 const referenceLine = computed(() => referenceLineOf(reference.value))
 </script>
 
@@ -274,9 +328,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
     :class="accent.hoverBorder"
     @click="$emit('click')"
   >
-    <!-- Pinned marker: a strip on the card's own top edge. Neutral by design — the
-         cyan/amber accent means route TYPE, so a state marker borrowing either would
-         read as a different kind of line. -->
+    <!-- 置顶标记：卡片自己顶边上的一条。刻意中性 —— 青色/琥珀色强调的是线路「类型」，
+         借用其中任一的状态标记会被读成另一种线路。 -->
     <div
       v-if="isPinned"
       class="flex items-center gap-1.5 bg-slate-800/90 px-4 py-1.5 text-xs font-semibold text-slate-100"
@@ -286,7 +339,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
     </div>
 
     <div class="p-4">
-      <!-- Card Header -->
+      <!-- 卡片头部 -->
       <div class="flex items-center justify-between">
         <div class="flex min-w-0 items-center gap-2.5">
           <span
@@ -306,22 +359,25 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         </div>
 
         <div class="flex shrink-0 items-center gap-2">
-          <!-- Ahead-vehicles badge: future buses only, honest zero -->
+          <!-- 前方车辆角标：只有未来的车，诚实的零。只有读了才数车：没答上来与还在读各自说自己
+               那句话，而不是被当成「一辆也没有」。卡片一行都没有（这一段还没设好、或附近没有
+               站台）时不摆这个角标 —— 它的主语是本站前方的车，没有站台就没有主语，那种情形由
+               正文里那句自己的话说明。 -->
           <span
+            v-if="rows.length > 0"
             class="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
-            :class="aheadCount > 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-slate-700 bg-slate-800/60 text-slate-400'"
+            :class="aheadCountIsAFact && aheadCount > 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-slate-700 bg-slate-800/60 text-slate-400'"
           >
             <span
-              v-if="aheadCount > 0"
+              v-if="aheadCountIsAFact && aheadCount > 0"
               class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"
             ></span>
-            {{ aheadCount > 0 ? `前方 ${aheadCount} 辆` : '前方暂无来车' }}
+            {{ aheadBadgeText }}
           </span>
 
-          <!-- Pin entry + cancel, both on the card: the toggle names the action it
-               performs, so a pinned card offers its own way back off the top. Held at
-               the project's 40px floor for a secondary control — the card body opens
-               the detail view, so an undersized target costs a wrong navigation. -->
+          <!-- 置顶入口与取消，都在卡片上：这个开关点名它执行的动作，所以被钉住的卡片自带从顶上退
+               下来的路。按项目对次要控件的 40px 下限 —— 卡片主体是打开详情，所以过小的点按
+               目标会换来一次错误的跳转。 -->
           <button
             type="button"
             class="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition"
@@ -339,14 +395,14 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         </div>
       </div>
 
-      <!-- Loading state: detail not yet resolved from the API -->
+      <!-- 加载态：详情还没从接口解析出来 -->
       <div v-if="!detailLoaded" class="my-3.5 flex items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
         <span class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600" :class="accent.spinner"></span>
         正在加载线路数据...
       </div>
 
       <template v-else>
-        <!-- Honest empty states, one per cause -->
+        <!-- 诚实的空状态，一种成因一条 -->
         <div v-if="nearbyNotice" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ nearbyNotice }}
         </div>
@@ -355,28 +411,24 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         </div>
 
         <div v-else-if="stopName" class="my-3.5 space-y-2.5 rounded-xl bg-slate-950/80 p-3">
-          <!-- The stop this card reports on -->
+          <!-- 这张卡片报告的那个站 -->
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">
               {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-400">第 {{ primaryRow.stopOrder }} 站</span>
             </span>
-            <!-- Nearby mode adds the GPS distance; commute mode already names the
-                 leg under the heading, so the right side stays empty there. -->
+            <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->
             <span v-if="stopDistanceMeters !== null" class="shrink-0 font-mono text-slate-400">
               {{ stopDistanceMeters }}m
             </span>
           </div>
 
-          <!-- Primary ETA. The minute comes from whatever the server could honestly
-               produce; the mark beside it says which kind of number that is (F4).
-               `flex-wrap` so the trailing metadata — which now ends with the mark —
-               moves to its own line on a 375px phone instead of squeezing the
-               minutes, and `ml-auto` keeps it right-aligned when it does. -->
+          <!-- 首行的预计到站。分钟来自服务端能诚实产出的东西；旁边的标记说出那是哪一类数字（F4）。
+               `flex-wrap` 使尾部元数据（现在以标记结尾）在 375px 手机上换到自己那一行，而不是
+               挤压分钟数；`ml-auto` 使它在换行后仍右对齐。 -->
           <div v-if="nextOf(primaryArrivals)?.isAtStation" class="flex items-baseline gap-2">
-            <!-- An observation of where a vehicle is, not a number: the row behind
-                 this state carries its kind (the server prices it as `live`), but a
-                 mark answers 「this number came from where」 and this claim states no
-                 minute — the line-detail panel renders none for the same state. -->
+            <!-- 这是关于车辆位置的「观测」，不是数字：它背后那一行带着自己的种类（服务端把它定价为
+                 `live`），但标记回答的是「这个数字来自哪里」，而这句话不陈述任何分钟数 ——
+                 线路详情面板对同一状态也不渲染标记。 -->
             <span class="font-mono text-xl font-black tracking-tight" :class="accent.etaText">正在进站</span>
           </div>
           <div v-else-if="minutesOf(primaryArrivals) !== null" class="flex flex-wrap items-baseline gap-2">
@@ -388,11 +440,9 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
               {{ nextOf(primaryArrivals)?.time }}<template v-if="nextOf(primaryArrivals)?.stopsAway !== undefined"> <span aria-hidden="true">·</span> 距 {{ nextOf(primaryArrivals)?.stopsAway }} 站</template><template v-if="nextOf(primaryArrivals)?.distanceMeters"> <span aria-hidden="true">·</span> {{ ((nextOf(primaryArrivals)!.distanceMeters!) / 1000).toFixed(1) }}km</template><template v-if="primaryMark"> <span aria-hidden="true">·</span> {{ primaryMark }}</template>
             </span>
           </div>
-          <!-- F-E: the row exists but states no minute — upstream carried the
-               vehicle and published no arrival time for it, and this app no
-               longer estimates one. The absence is stated HERE and not left to
-               the fallback below, which claims something different: that no
-               vehicle is in range at all. -->
+          <!-- F-E：行存在但说不出分钟 —— 数据源携带了这辆车，却没有为它发布到站时间，而这个应用
+               不再估算。这个缺席在「这里」说出，而不是留给下面的兜底，后者主张的是另一件事：
+               范围内根本没有车。 -->
           <div v-else-if="nextOf(primaryArrivals)" class="text-xs text-slate-400 lg:text-base">
             {{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}<template v-if="nextOf(primaryArrivals)?.stopsAway !== undefined"> <span aria-hidden="true">·</span> 距 {{ nextOf(primaryArrivals)?.stopsAway }} 站</template>
           </div>
@@ -400,9 +450,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             {{ primaryOperatingText }}
           </div>
 
-          <!-- The opposite direction at the same platform. Tapping it promotes that
-               direction to the headline; the label names where it goes, so the two
-               rows are never ambiguous. -->
+          <!-- 同一个站台上的反方向。点按它把那个方向提到头条；标签说出它开往哪里，所以两行从不
+               含糊。 -->
           <button
             v-if="secondaryRow"
             type="button"
@@ -420,26 +469,23 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             </span>
             <span class="flex shrink-0 items-baseline gap-1.5">
               <template v-if="secondaryHasArrivals">
-                <template v-if="minutesOf(secondaryRow.arrivals) !== null">
+                <template v-if="minutesOf(secondaryArrivals) !== null">
                   <span class="font-mono font-bold" :class="accent.etaText">
-                    {{ minutesOf(secondaryRow.arrivals) }}分
+                    {{ minutesOf(secondaryArrivals) }}分
                   </span>
-                  <span class="font-mono text-slate-400">{{ nextOf(secondaryRow.arrivals)?.time }}</span>
-                  <!-- The trailing row is a second feed: it states its own kind (F4). -->
+                  <span class="font-mono text-slate-400">{{ nextOf(secondaryArrivals)?.time }}</span>
+                  <!-- 尾部那一行是第二个 feed：它说出自己的种类（F4）。 -->
                   <span v-if="secondaryMark" class="text-xs text-slate-400"><span aria-hidden="true">·</span> {{ secondaryMark }}</span>
                 </template>
-                <!-- A row that states no minute: the absence, not the operating
-                     fact — that other direction does have a vehicle coming. -->
+                <!-- 一行说不出分钟：那是缺席，不是运营事实 —— 另一个方向确实有车要来。 -->
                 <span v-else class="text-slate-400">{{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}</span>
               </template>
               <span v-else class="text-slate-400">{{ secondaryOperatingText }}</span>
             </span>
           </button>
 
-          <!-- Follow-up buses on the leading row. Each states its own kind when the
-               feed mixes kinds (F4); when one word is true of the whole list it
-               already rides on the leading minute above. `flex-wrap` so a mark
-               never squeezes the minutes on a 375px phone. -->
+          <!-- 首行的后续车次。feed 混了种类时每行说出自己的种类（F4）；一个词对整个列表成立时它
+               已经搭在上面首行的分钟上。`flex-wrap` 使标记在 375px 手机上不挤压分钟数。 -->
           <div v-if="primarySubsequent.length > 0" class="flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-2 text-xs">
             <span class="shrink-0 text-slate-400">后续</span>
             <span
@@ -447,9 +493,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
               :key="a.busId || i"
               class="flex items-baseline gap-1"
             >
-              <!-- A subsequent row states its own minute or none — same rule as
-                   the leading one, and its own mark is `null` when it has no
-                   number for a mark to qualify. -->
+              <!-- 后续行说出自己的分钟或说没有 —— 与首行同一条规则，而它没有数字可供标记限定时，自己
+                   的标记是 `null`。 -->
               <template v-if="statedArrivalMinutes(a) !== null">
                 <span class="font-mono font-bold text-slate-300">{{ statedArrivalMinutes(a) }}分</span>
                 <span class="font-mono text-slate-400">{{ a.time }}</span>
@@ -459,11 +504,9 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             </span>
           </div>
 
-          <!-- F1's reference line: the anchor's real walking time and the
-               conclusion the server drew from it. Secondary by design — a step
-               smaller and quieter than the minutes above — and additive by
-               constraint: it can only ever add a line to this panel, never hide
-               or compress one of the arrival minutes it is a reference to. -->
+          <!-- F1 的参考行：锚点真实的步行时间，以及服务端由此得出的结论。刻意次要 —— 比上面的分钟
+               数小一档、也更轻 —— 且按约束只做加法：它只能给这个面板加一条，绝不隐藏或压缩它
+               所参考的任何一个到站分钟数。 -->
           <div
             v-if="referenceLine"
             class="flex flex-wrap items-baseline gap-x-1.5 border-t border-slate-800/60 pt-2 text-xs lg:text-base"

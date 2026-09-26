@@ -2,26 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChelaileProvider } from '../providers/chelaile.js'
 
 /**
- * F-A: the upstream's own ZERO is a fact, not an absence.
+ * F-A：上游自己给出的 0 是事实，不是缺值。`?order=N` 时源对每辆车给出
+ * `travels: [{ order: N, travelTime }]`，车辆停在站台上时报的是
+ * `travelTime 0`。
  *
- * A target-ordered read (`?order=N`) makes chelaile answer, for each vehicle,
- * `travels: [{ order: N, travelTime }]` — the source's own seconds-to-that-stop.
- * When the vehicle is STANDING at the platform the source reports `travelTime 0`
- * (observed alongside `distanceToWaitStn 0` and `speed` ~0). The mapping used to
- * keep only `travelTime > 0`, so that fact was discarded at the provider and the
- * row fell through to this app's own position/dwell estimate, which prints a
- * minute (「3 分」 on the reported reproduction) for a bus at the platform.
- *
- * The assertion is on the VALUE the provider hands on: zero travels through, and
- * a negative sentinel does not (chelaile uses -1 for 「已过目标站」, which is not
- * an arrival time).
+ * 断言针对 provider 交出的值：0 原样通过，负哨兵（车来了的
+ * 「已过目标站」）不通过。
  */
 
-/**
- * Drive the provider without a network: `request` is the only door it fetches
- * through, and a payload with no `jxPath` leaves the road-geometry lookup with
- * nothing to fetch (it negative-caches and returns null).
- */
 function providerAnswering(payload: Record<string, unknown>): ChelaileProvider {
   const provider = new ChelaileProvider()
   const internals = provider as unknown as {
@@ -31,7 +19,6 @@ function providerAnswering(payload: Record<string, unknown>): ChelaileProvider {
   return provider
 }
 
-/** One chelaile bus row, with the fields the mapping reads. */
 function bus(partial: Record<string, unknown>): Record<string, unknown> {
   return {
     busId: 'B1',
@@ -72,8 +59,7 @@ describe('F-A: a vehicle at the platform is reported as being there, not as a mi
   })
 
   it('never turns the past-station sentinel into an arrival time', async () => {
-    // -1 is chelaile's 「已过目标站」, not a duration: only a non-negative
-    // duration is a travel time at all.
+    // -1 是车来了的「已过目标站」，不是时长：只有非负的时长才算行程时间。
     const provider = providerAnswering(payload(-1))
     const status = await provider.getLiveStatus('010-1-0', 0, '010', { targetOrder: 2 })
 

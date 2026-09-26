@@ -1,15 +1,10 @@
 <script setup lang="ts">
 /**
- * 设置's sub-pages' way back — a control of its own, not the system gesture and not the
- * browser's back key (`§4.1`).
+ * 「设置」各子页面的返回方式 —— 一个自己的控件，不是系统手势，也不是浏览器的返回键。
  *
- * THE VISIBLE WORDS ARE THE ACCESSIBLE NAME. What a voice-control user reads out is the
- * words on screen, so a name that replaces them — `aria-label="返回"`, or any shorter
- * phrase — is a control that cannot be called by reading it (WCAG 2.5.3 Label in Name,
- * Level A). This repo shipped exactly that defect and fixed it in
- * `chain-leg-fields.vue`: the visible words come first and anything extra is a
- * parenthetical (`删除该段（第 1 段）`). Here nothing is extra, so there is no `aria-label`
- * at all and the name IS 「返回设置」.
+ * 看得见的字就是无障碍名。语音控制的用户读出来的正是屏幕上那几个字，所以用一个别的名字替换它们
+ * （`aria-label="返回"`，或任何更短的词组）会做出一个「读出来也叫不动」的控件（WCAG 2.5.3）。
+ * 这里没有任何多余的东西，所以根本不需要 `aria-label`，名字「就是」返回设置。
  */
 import { ArrowLeft } from '@lucide/vue'
 </script>

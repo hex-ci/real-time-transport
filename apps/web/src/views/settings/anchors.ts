@@ -1,17 +1,15 @@
 /**
- * 家 / 公司 as `GET /api/transit/settings` answers them.
+ * 家 / 公司，按 `GET /api/transit/settings` 回答它们的方式。
  *
- * One reading of that row, in one place, because 设置 now has two screens that read it:
- * the 位置锚点 page (which shows and re-grabs them) and the INDEX row (which states
- * whether each one is set). A second parse of the same answer is a second chance to
- * disagree about what 「未设置」 means, and the index row is exactly where that would show
- * up as a lie about the stored row.
+ * 一次读取放在一处，因为「设置」现在有两块界面读它：位置锚点页（显示并重新抓取它们）与索引行
+ * （陈述每一个是否已设置）。对同一个应答的第二份解析，就是第二次对「未设置」是什么意思产生分歧
+ * 的机会。
  *
- * The WRITE side is deliberately not here: the wire field names a PATCH carries stay in
- * `components/anchor-picker.vue` beside the `ANCHORS` table that builds the body.
+ * 写的一侧刻意不在这里：PATCH 携带的线上字段名留在 `components/anchor-picker.vue`，紧挨着
+ * 构建请求体的 `ANCHORS` 表。
  */
 
-/** The four stored coordinates, exactly as `GET /settings` answers them. */
+/** 四个存储的坐标，正是 `GET /settings` 回答它们的形状。 */
 export interface StoredAnchors {
   homeLat: number | null
   homeLng: number | null
@@ -19,15 +17,15 @@ export interface StoredAnchors {
   workLng: number | null
 }
 
-/** The anchors the app stores, as F1's reference line names them. */
+/** 应用存储的锚点，按 F1 参考行称呼它们的方式。 */
 export type AnchorId = 'home' | 'work'
 
-/** A coordinate as the server holds it, or null. Never coerced to 0. */
+/** 服务端持有的坐标，或 null。绝不强制成 0。 */
 export function coord(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-/** The four anchors out of a `/settings` answer, with null for anything unset. */
+/** 从 `/settings` 应答里取出这四个锚点，未设置的为 null。 */
 export function pickAnchors(data: Record<string, unknown> | null | undefined): StoredAnchors {
   return {
     homeLat: coord(data?.homeLat),
@@ -37,7 +35,7 @@ export function pickAnchors(data: Record<string, unknown> | null | undefined): S
   }
 }
 
-/** Whether an anchor has a stored position. Both axes, or it is not set. */
+/** 一个锚点是否存有位置。两个轴都要有，否则就是没设置。 */
 export function isAnchorSet(stored: StoredAnchors, id: AnchorId): boolean {
   return id === 'home'
     ? stored.homeLat !== null && stored.homeLng !== null

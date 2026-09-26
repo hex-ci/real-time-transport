@@ -3,33 +3,21 @@ import { anchorForPurpose, emptyStateOf } from '../empty-state'
 import { anchorUnsetSentenceOf } from '../refusal'
 
 /**
- * The page's empty state: nothing recorded for this purpose.
+ * 页面的空态：本目的没有任何记录。
  *
- * The rule is that an empty screen names a cause the USER can act on, and that the
- * cause is not hidden by another one. Two facts can be true at once here — the
- * purpose has no chain, and the anchor a chain would start from was never saved —
- * and BOTH now have a screen behind them (设置's 位置锚点 page, and its 通勤链路 page),
- * so the anchor's fact is stated first: a chain recorded from an unsaved anchor has
- * no walking time, which is the repair that has to come first.
+ * 规则是空屏只点名用户**可行动**的成因，且该成因不被另一个掩盖。这里可同时为真两个事实——目的
+ * 没有链路，以及链路将要起步的锚点从未保存——两者现在都有其背后的屏幕（设置的位置锚点页与
+ * 通勤链路页），故锚点的事实先说：从已保存锚点记录的链路没有步行时间，那是必须先做的修复。
  *
- * The third state is the one this page has to be careful about: a settings read
- * that FAILED is not "the anchor is missing". Nothing may be claimed about a row
- * nobody read, and the empty state then says only what it actually knows — which is
- * the chain fact, whose screen claims nothing about the anchor either way.
- *
- * ONE TEST BELOW WAS REWRITTEN, and the reason is in its name: it used to pin that the
- * empty state offers no action at all, because this build had no screen for recording a
- * chain and the app's rule is that no state promises a control that does not exist. That
- * surface exists now (设置's 通勤链路 page), so the truth changed with it — the rule that
- * produced the old assertion is the rule that requires the new one.
+ * 第三种状态是本页必须小心的：**失败**的设置读取不是「锚点缺失」。不得对没人读过的行作任何断言，
+ * 空态于是只说它真正知道的——链路事实，而它的屏幕对锚点不作任何方向的断言。
  */
 
 describe('an empty purpose names the cause the user can act on', () => {
   it('sends them to 设置 when the anchor a chain would start from was never saved', () => {
     const view = emptyStateOf({ purpose: 'morning', anchorSaved: false })
     expect(view.headline).toBe('这个时段还没有换乘链')
-    // F1's own sentence for the same fact, word for word: one vocabulary for one
-    // settings row across the two features that read it.
+    // F1 对同一事实的同一句话，逐字相同：两个读同一设置行的特性共用一个词。
     expect(view.detail).toBe(anchorUnsetSentenceOf('home'))
     expect(view.detail).toBe('未设置「家」位置 · 在「设置」中设置')
     expect(view.action).toBe('settings')
@@ -52,9 +40,8 @@ describe('an anchor state nobody read is claimed neither way', () => {
   it('says nothing about the anchor when the settings read failed, and offers the screen that claims nothing about it', () => {
     const view = emptyStateOf({ purpose: 'morning', anchorSaved: null })
     expect(view.detail).not.toContain('未设置')
-    // The recording page is not a claim about the anchor row: it is where a chain is
-    // recorded whatever that row holds, so offering it stays silent about the one thing
-    // nobody read.
+    // 录制页不是对锚点行的断言：它是记录链路之处，无论那行持有什么，
+    // 故提供它仍对无人读过的那件事保持沉默。
     expect(view.action).toBe('chains')
     expect(view.headline).toBe('这个时段还没有换乘链')
   })
@@ -62,29 +49,21 @@ describe('an anchor state nobody read is claimed neither way', () => {
   it('never reports an unread anchor state as a missing one', () => {
     const unread = emptyStateOf({ purpose: 'evening', anchorSaved: null })
 
-    // A NEGATIVE does not pin a value: `not.toBe('settings')` holds for 'chains', for null, and
-    // for any invalid value a later edit might introduce, so the action is asserted as the exact
-    // one the landed behaviour takes.
+    // 否定不断定值：`not.toBe('settings')` 对 'chains'、对 null、以及对后续改动可能引入的任意
+    // 无效值都成立，故 action 按其已落地行为的确切值断言。
     expect(unread.action).toBe('chains')
-    // And nothing about the anchor is claimed: the detail is the chain-composition sentence
-    // character for character, and the anchor's own words do not appear in it.
+    // 且对锚点不作任何断言：detail 与链路构成句逐字相同，锚点自己的措辞不出现其中。
     expect(unread.detail).toBe('换乘链由使用者逐段录入：线路 + 上车站 + 下车站')
     expect(unread.detail).not.toContain('未设置')
     expect(unread.detail).not.toContain('位置')
-    // An unread row and a saved row therefore read alike, and that is deliberate:
-    // neither may claim anything about a settings row this page did not read, and
-    // the anchor fact is only ever stated when it was read AND found missing.
+    // 未读的行与已保存的行因此读起来一样，这是刻意的：两者都不得对本页未读的设置行作任何断言，
+    // 锚点事实只在被读取**且**发现缺失时才陈述。
     expect(unread).toEqual(emptyStateOf({ purpose: 'evening', anchorSaved: true }))
   })
 })
 
 describe('with the anchor in place the empty state still guides', () => {
   it('states what a chain is made of AND names the screen that does it — the surface exists now', () => {
-    // This test used to assert `action: null` under the name 「promises no screen that does
-    // not exist」, and that was true then: recording a chain had no page of its own, so
-    // naming one would have been a control nobody could press. 设置's 通勤链路 page is that
-    // screen now, so the old assertion pinned a truth the build has outgrown — the rule
-    // that required it is the rule that requires this one.
     const view = emptyStateOf({ purpose: 'morning', anchorSaved: true })
     expect(view.detail).toBe('换乘链由使用者逐段录入：线路 + 上车站 + 下车站')
     expect(view.action).toBe('chains')

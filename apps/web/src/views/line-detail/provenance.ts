@@ -2,35 +2,29 @@ import type { ArrivalRow, DataProvenance } from '@real-time-transport/shared'
 import { listProvenanceOf } from '@real-time-transport/shared'
 
 /**
- * F4 in the station panel's arrival list.
+ * 站点面板到站列表里的 F4。
  *
- * A single arrivals answer can carry rows of different kinds: the payload sent a
- * real vehicle's own minute and this app computed the next. `listProvenanceOf`
- * answers `null` for such a list — one word would then be false about part of it
- * — so the list states nothing and every row states its own kind instead. When
- * the classified rows DO agree, the list states that one word once (beside 后续
- * 进站计划) and no row repeats it.
+ * 一个到站答案可以携带不同类型的行为：载荷送来真实车辆自己的分钟，排班引擎推演的列车紧邻。
+ * `listProvenanceOf` 对此类列表答 null（一个词会对其中一部分为假），故列表什么都不陈述，
+ * 而每一行各述其类；已分类的各行一致时，列表把这个词说一次（在「后续进站计划」旁）且各行不重复。
  *
- * These two functions are the same fallback the overview card uses, kept here so
- * this view's version is exercised by its own test rather than only read. They
- * return KINDS; the wording stays in `@/provenance-copy`, so no second provenance
- * vocabulary exists anywhere in the app.
+ * 这两个函数与总览卡片用的是同一套回退：返回种类，措辞留在 `@/provenance-copy`，
+ * 故本应用没有第二套来源词汇。
  */
 
 /**
- * The one kind this list can state with a word, or `null` when it cannot — the
- * classified rows disagree, or none of them stated anything.
+ * 这个列表能用一个词陈述的唯一一种类，或不能陈述时的 `null`——已分类的各行不一致，
+ * 或其中没有任何一行陈述了。
  */
 export function arrivalListProvenanceOf(rows: readonly ArrivalRow[]): DataProvenance | null {
   return listProvenanceOf(rows)
 }
 
 /**
- * The kind one row of the list shows.
+ * 列表里某一行显示的种类。
  *
- * `null` when the list already speaks for its classified rows (the word is shown
- * once at the list level) — and `null` when the row itself stated nothing, since
- * a value nobody classified must never borrow the flattering answer.
+ * 列表已代它的已分类各行说话时为 `null`（词只在列表级显示一次）——行自己什么都没陈述时也是
+ * `null`：没人分类的值绝不得借用那个漂亮的答案。
  */
 export function arrivalRowProvenanceOf(
   rows: readonly ArrivalRow[],

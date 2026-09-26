@@ -4,27 +4,17 @@ import type { LineDetail } from '@real-time-transport/shared'
 import { TransitService } from '../services/transit.service.js'
 
 /**
- * F1's reference row on a SUBWAY platform.
+ * F1 在 SUBWAY 站台上的参考行。
  *
- * A `subway_` id is answered by the subway engine and by nothing else: the
- * chelaile provider's own `getLiveStatus` declines every `subway_*` id outright,
- * so the engine is the only source that can answer that line at all — the
- * primary, not a stand-in. Its reading carries `isDegraded: false`, and
- * `arrivalTrust` turns that flag into the trust F1's walk decision is gated on:
- * anything but `ok` suppresses the row (`departureReference`'s
- * `if (params.trust !== 'ok') return null`).
+ * `subway_` id 只由地铁引擎作答，别的都不行：chelaile provider 自己的 `getLiveStatus` 直接
+ * 拒绝每个 `subway_*` id，所以引擎是唯一能答这条线路的来源 —— 是主要来源，不是替身。它的
+ * 读数带 `isDegraded: false`，`arrivalTrust` 把这个标志变成 F1 出门结论所依赖的信任：不是
+ * `ok` 就压掉这一行（`departureReference` 的 `if (params.trust !== 'ok') return null`）。
  *
- * Deriving the flag from the answering provider's POSITION in the list made
- * every subway platform read as a fallback's answer, so this row was withheld
- * on a reading that was neither stale nor served by a backup source. The
- * assertion below is what that cost: the platform must be able to carry a
- * conclusion again.
- *
- * Everything here is network-free except the ONE walking request Amap is asked
- * for — which is the point: it is only spent when trust is `ok`.
+ * 这里除了一次 Amap 步行请求外全都离网 —— 而那只在信任为 `ok` 时才会花。
  */
 
-/** Freeze the wall clock; only `Date` is faked, so nothing else stalls. */
+/** 冻结墙上时钟；只伪造 `Date`，别的东西都不会停摆。 */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(localIso))
@@ -37,21 +27,20 @@ afterEach(() => {
 })
 
 const LINE_ID = 'subway_027_88'
-/** Placeholder names: no real line, station or upstream id appears in this file. */
+/** 占位名字：本文件里不出现任何真实线路、车站或上游 id。 */
 const BOARD_NAME = '戊路'
 const BOARD_ORDER = 5
 
 /**
- * A subway line whose service window covers the engine's WHOLE normalized day
- * range (it maps 00:00–03:59 to +24 h, so currentSecOfDay spans
- * [14400, 100799]): the frozen hour below then cannot be an hour with no trains.
+ * 一条地铁线路，其营运窗口覆盖引擎归一化后的整个日范围：下面冻结的那个钟点不可能是没有
+ * 车的时刻。
  */
 function subwayDetail(): LineDetail {
   const stops = [1, 2, 3, 4, 5, 6, 7, 8].map(i => ({
     id: `s${i}`,
     name: `${'甲乙丙丁戊己庚辛'[i - 1]}路`,
     order: i,
-    // ~1.2 km apart, so the geometry is a plausible track rather than a point.
+    // 相邻站约 1.2 km，所以几何是一条像样的轨道而不是一个点。
     lat: 39.95 + i * 0.011,
     lng: 116.30 + i * 0.011,
     interchanges: [],
@@ -73,9 +62,8 @@ function subwayDetail(): LineDetail {
 }
 
 /**
- * Amap is reachable and prices a walk; nothing else is. The returned list is the
- * record of what was actually asked for, so a test can tell 「the row was
- * suppressed before the walk was priced」 from 「the walk was priced」.
+ * Amap 可达并为步行定价；别的都不可达。返回的列表记录真正被请求过什么，所以测试能分清
+ * 「步行定价之前这一行就被压掉了」与「步行已定价」。
  */
 function stubAmapWalking(): string[] {
   const urls: string[] = []
@@ -96,10 +84,8 @@ function stubAmapWalking(): string[] {
 }
 
 /**
- * The service under test, wired to a stub db whose cached subway row already
- * carries geometry (so no upstream is consulted for static data) and whose
- * stored anchor IS the board platform's own coordinate — a synthetic choice for
- * a test, holding no one's location.
+ * 被测服务，接一个替身 db：它缓存的地铁行已带几何（所以静态数据不问上游），而存下的锚点
+ * 就是站牌站台自己的坐标 —— 测试里的合成选择，不指向任何人的位置。
  */
 function serviceWithAnchorAtBoard(): TransitService {
   const detail = subwayDetail()
@@ -125,7 +111,7 @@ function serviceWithAnchorAtBoard(): TransitService {
 
 describe('F1 on a subway platform: the engine is the only source that can answer, so its reading is not a fallback\'s', () => {
   it('carries the departure reference instead of suppressing it as degraded', async () => {
-    // Inside the morning window, so the anchor that means 「where you are」 is 家.
+    // 在早高峰窗口内，所以表示「你在哪里」的那个锚点是 家。
     freezeAt('2026-09-24T08:30:00')
     const urls = stubAmapWalking()
     const service = serviceWithAnchorAtBoard()
@@ -133,17 +119,17 @@ describe('F1 on a subway platform: the engine is the only source that can answer
       const answer = await service.getStationArrivals(LINE_ID, BOARD_NAME, 0, 3, '027', BOARD_ORDER)
 
       expect(answer).not.toBeNull()
-      // The engine's own reading answered, and it carries trains to price.
+      // 引擎自己的读数作答了，而且带着可以定价的车次。
       expect(answer!.arrivals.length).toBeGreaterThan(0)
 
-      // The row is not withheld. `null` here means the trust gate refused it,
-      // and a reading that is neither stale nor from a fallback has no such
-      // reason: the anchor is saved and the walk is priceable.
+      // 这一行没有被压掉。这里的 `null` 意味着信任闸门拒绝了它，
+      // 而一个既不过期、也不是兜底来源的读数没有这样的理由：
+      // 锚点已保存，步行也可定价。
       expect(answer!.reference).not.toBeNull()
       expect(answer!.reference?.status).toBe('advice')
 
-      // And the conclusion was drawn from a walk this service really asked
-      // Amap for — the request is only spent once trust is `ok`.
+      // 而且这个结论来自本服务真的向 Amap 要过的一次步行 ——
+      // 只有在信任为 `ok` 时才会花这个请求。
       expect(urls.some(url => url.includes('/v3/direction/walking'))).toBe(true)
     }
     finally {
@@ -152,12 +138,9 @@ describe('F1 on a subway platform: the engine is the only source that can answer
   })
 
   it('still withholds the row when a fallback really answered', async () => {
-    // The gate this defect abused must not be loosened: a reading whose source
-    // stood in for another one supports no conclusion, and no walking request is
-    // spent trying. This is the value the aggregator reported for a subway line
-    // before the fix — what F11's refresh test pinned as `isDegraded: true` — and
-    // it is driven through the service's own seam so the value under test is the
-    // TRUST GATE rather than the provider list.
+    // 这个缺陷曾利用的闸门不许被放宽：来源是替身的读数支撑不了结论，
+    // 也不会因此花掉任何步行请求。这里驱动的是服务自己的接缝，
+    // 所以被测的是信任闸门，而不是 provider 列表。
     freezeAt('2026-09-24T08:30:00')
     const urls = stubAmapWalking()
     const service = serviceWithAnchorAtBoard()

@@ -43,7 +43,6 @@ export const useCityStore = defineStore('city', () => {
     localStorage.setItem(STORAGE_KEY, code)
   }
 
-  /** Filter a keyword against name / pinyin prefix. */
   function matchCity(keyword: string): TransitCity[] {
     const kw = keyword.trim().toLowerCase()
     if (!kw) return hotCities.value

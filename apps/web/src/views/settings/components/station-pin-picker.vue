@@ -1,19 +1,16 @@
 <script setup lang="ts">
 /**
- * Searchable station picker whose value is a stop PAIR: the name AND its order.
+ * 可搜索的站点选择器，其值是一**对**：站名**与**站序。
  *
- * A Combobox rather than a Select: a bus route can have 90+ stops, so scrolling
- * a plain list is unusable — typing filters by name and by order.
+ * 用 Combobox 而非 Select：一条公交线路可能有 90 多站，滚动纯列表不可用——
+ * 打字按站名与站序过滤。
  *
- * WHY THE VALUE IS THE PAIR. 线上同名站不止一个 (PRD): the same name stands at more
- * than one order on a real line. A control that reported the NAME alone would have its
- * caller resolve it back with a `find(name)`, and the second 「东大桥」 would silently
- * become the first — a (name, order) pair nobody picked, recorded without a word. So
- * the name and the order travel together, and the trigger reads back exactly what was
- * chosen rather than whatever the list happens to hold for that name.
+ * 值为何是这一对：线上同名站不止一个，同一个站名在真实线路上会站在不止一个站序上。
+ * 只报**站名**的控件会让调用方用 `find(name)` 解析回去，第二个「东大桥」会静默变成第一个
+ * ——一对 (站名, 站序) 无人挑选，却被无声记录。故站名与站序一起流动，触发器逐字读回
+ * 被选中的那一对，而不是列表里该站名碰巧持有的那个。
  *
- * The parent supplies the stops, so this component stays a pure control: it renders
- * what it is given and reports the chosen pair back.
+ * 站点由父级提供，故本组件保持为纯控件：给它什么就渲染什么，并把选中的那一对报回去。
  */
 import { computed, shallowRef, watch } from 'vue'
 import {
@@ -31,20 +28,19 @@ import type { Station } from '@real-time-transport/shared'
 import type { StationChoice } from '../types'
 
 const props = defineProps<{
-  /** Stops of the direction this pin applies to, in travel order. */
+  /** 本固定站点所属方向的站点，按行驶顺序。 */
   stations: Station[]
   /**
-   * The chosen stop as a PAIR — name and order together — or null when nothing is
-   * chosen. Never a bare name: the order is what tells two same-named stops apart.
+   * 选中的站作为**一对**——站名与站序一起——什么都没选时为 null。
+   * 绝不是裸站名：站序才是把两个同名站区分开的东西。
    */
   modelValue: StationChoice | null
-  /** Which stop this control is — labels the trigger only. */
+  /** 本控件是哪个站——只用于标注触发器。 */
   directionLabel: string
   disabled?: boolean
   /**
-   * The control's own accessible name, where the surrounding text is not enough to
-   * tell one picker from another. A leg carries TWO of these (boarding and alighting)
-   * over the same stop list, so a name is what keeps them apart for a screen reader.
+   * 控件自己的可访问名，用于周围文字不足以区分两个选择器之处。一段同时携带**两个**
+   * 这样的控件（上车站与下车站）对着同一份站点列表，故需要一个名字为屏幕阅读器区分它们。
    */
   ariaLabel?: string
 }>()
@@ -54,25 +50,24 @@ const emit = defineEmits<{
 }>()
 
 const open = shallowRef(false)
-/** Filter text; reka-ui keeps the input uncontrolled, so track it for filtering. */
+/** 过滤文本；reka-ui 把输入框保持为非受控，故自行跟踪它以便过滤。 */
 const query = shallowRef('')
 
 /**
- * Whether the chosen pair is one this direction's list actually holds.
+ * 选中的这一对是否真是本方向的列表所持有的。
  *
- * A stop served by the OTHER direction, or a record whose numbering has changed
- * upstream, is a pair the list does not contain — and it must stay visible as what it
- * is rather than being matched to a same-named stop at another order.
+ * 由**另一个**方向服务的站、或编号已在数据源侧改变过的记录，都是列表不含的一对——
+ * 它必须照其原样保持可见，而不是被匹配到另一个站序上的同名站。
  *
- * Requires a loaded list: an empty one means 「not read yet」, and calling the choice
- * unserved then would assert something we do not know.
+ * 需要一个已加载的列表：空列表意思是「还没读到」，
+ * 此时把该选择判为无服务，会断言一件我们并不知道的事。
  */
 const unserved = computed(() => props.modelValue !== null
   && props.stations.length > 0
   && !props.stations.some(station =>
     station.name === props.modelValue!.name && station.order === props.modelValue!.order))
 
-/** Whether one listed stop is the pair held as the value — the tick, by pair. */
+/** 列表中某个站是否就是作为值持有的那一对——按这对打勾。 */
 function isChosen(station: Station): boolean {
   return props.modelValue !== null
     && station.name === props.modelValue.name
@@ -80,13 +75,12 @@ function isChosen(station: Station): boolean {
 }
 
 /**
- * The identity one list item carries.
+ * 一个列表项携带的身份。
  *
- * reka-ui keys its own selection state — the `aria-selected` on each option, the
- * `data-state` beside it — by the item's `value`. A NAME cannot be that identity here:
- * 线上同名站不止一个 (PRD), so two options would share one value and picking the second
- * 「东大桥」 would announce BOTH of them as selected. The pair, written as one string, is
- * unique per stop and is what the selected state is keyed by.
+ * reka-ui 用它自己的选择状态——每个选项上的 `aria-selected`、旁边的 `data-state`——
+ * 以该项的 `value` 为键。此处**站名**不能是那个身份：线上同名站不止一个，故两个选项
+ * 会共用一个值，挑第二个「东大桥」会把**两者**都宣布为选中。这一对写成一个字符串后
+ * 每站唯一，选中状态就以它为键。
  */
 function stationKey(stop: { name: string, order: number | null }): string {
   return `${stop.order}_${stop.name}`
@@ -100,13 +94,13 @@ const filtered = computed(() => {
   )
 })
 
-// reka-ui resets the input on close; keep the filter in step so reopening does
-// not show a stale filtered list.
+// reka-ui 在关闭时重置输入框；让过滤器同步，
+// 重新打开时才不会显示过期的过滤结果。
 watch(open, (isOpen) => {
   if (!isOpen) query.value = ''
 })
 
-/** The pair a click on a list item means: that item's own name AND order. */
+/** 点击一个列表项所意味的那一对：该项自己的站名**与**站序。 */
 function choose(station: Station): void {
   emit('update:modelValue', { name: station.name, order: station.order })
   open.value = false
@@ -119,10 +113,10 @@ function clear(): void {
 
 <template>
   <div class="flex items-center gap-1.5">
-    <!-- Selection is this component's own (`@select` carries the stop, not its name): reka-ui's
-         root model-value can only hold the option's `value`, which a name cannot be when two
-         stops share it — so it holds the pair's own key and no listener is bound to it. That
-         keeps reka's `aria-selected` on the options agreeing with the pair that is selected. -->
+    <!-- 选中状态是本组件自己的（`@select` 携带站，而不是它的名字）：reka-ui 的根
+         model-value 只能持有选项的 `value`，而两个站共用站名时它不能是站名——故它持有这一对
+         自己的 key，且没有监听器绑在它上面。这让 reka 选项上的 `aria-selected`
+         与选中的那一对保持一致。 -->
     <ComboboxRoot
       v-model:open="open"
       :model-value="modelValue ? stationKey(modelValue) : ''"
@@ -137,8 +131,8 @@ function clear(): void {
         >
           <span class="flex min-w-0 items-center gap-1.5">
             <MapPin class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
-            <!-- The pair as it is held, shown whole: 「东大桥 第4站」 is what was picked,
-                 and a stop the list no longer holds keeps its own numbers. -->
+            <!-- 按持有的原样整对显示：「东大桥 第4站」就是被挑中的那个，
+                 而列表已不再持有的站保留它自己的编号。 -->
             <span v-if="modelValue" class="min-w-0 truncate" :class="unserved ? 'text-amber-400' : 'text-slate-100'">
               {{ modelValue.name }}
               <span v-if="modelValue.order !== null" class="ml-1 font-mono text-xs" :class="unserved ? '' : 'text-slate-400'">第{{ modelValue.order }}站</span>
@@ -158,12 +152,10 @@ function clear(): void {
           class="z-50 max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl"
         >
           <div class="border-b border-slate-800 p-2">
-            <!-- A plain input, not ComboboxInput: reka-ui focuses its input both on
-                 content mount and on open, so the panel would always open with the
-                 caret in the box. Filtering is this component's own `filtered`
-                 computed (ignore-filter is on), so ComboboxInput bought nothing but
-                 the stolen focus. A plain input leaves rootContext.inputElement
-                 unset, so neither focus path fires — no blur hack needed. -->
+            <!-- 普通 input，不是 ComboboxInput：reka-ui 在内容挂载时与打开时都会聚焦它的
+                 输入框，故面板每次打开光标都在框里。过滤是本组件自己的 `filtered` computed
+                 （已开启 ignore-filter），故 ComboboxInput 除了抢焦点别无所得。普通 input
+                 不设置 rootContext.inputElement，两条聚焦路径都不触发——无需模糊 hack。 -->
             <input
               v-model="query"
               type="text"
@@ -196,8 +188,8 @@ function clear(): void {
       </ComboboxPortal>
     </ComboboxRoot>
 
-    <!-- Clearing is a separate control: picking a stop and removing the pin are
-         different intents, and reka-ui's combobox has no built-in clear. -->
+    <!-- 清除是独立控件：挑一个站与取消固定是两个不同的意图，
+         而 reka-ui 的组合框没有内置清除。 -->
     <button
       v-if="modelValue"
       type="button"

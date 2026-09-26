@@ -1,21 +1,11 @@
 <script setup lang="ts">
 /**
- * 通勤链路 (F10): record and edit the chains the user rides, leg by leg.
+ * 通勤链路：逐段录入与编辑用户要乘的链路。
  *
- * The card is `CommuteChainCard` — the editor, the refusals and the save cycle all live in it —
- * rendered here as the page's subject rather than one card wedged into a settings screen, on its
- * own path (`/settings/chains`), with its own `<h2>` and its own way back. 链路页 (/commute-chain)
- * is still where a chain's CONCLUSION is read; recording stays here.
+ * 卡片是 `CommuteChainCard`——编辑器、拒绝与保存周期都在其中——在此作为页面主体渲染，
+ * 有自己的路径、`<h2>` 与返回方式。链路页仍是读结论的地方；录入留在这里。
  *
- * This file makes no 「未变」 claim about the card: the card and this page landed in the same
- * working tree, so there is no earlier revision of the card to diff against — a comment saying
- * it was untouched by the split would be a claim nobody can check. What is checkable is the
- * shape above, plus what the page hands the card: the lines a leg may ride come from
- * `line-stops.ts`, shared with 关注线路, so the stop list a leg is checked against is the very
- * list the pin pickers offer — and that read's own state travels with them, so a read that
- * FAILED is stated as a failed read rather than as 「还没有关注线路」.
- *
- * Nothing here computes a conclusion: no margin, no wait, no duration.
+ * 这里不计算任何结论：没有余量、没有等待、没有时长。
  */
 import { useLineStops } from './line-stops'
 import { BackToSettings, CommuteChainCard } from './components'

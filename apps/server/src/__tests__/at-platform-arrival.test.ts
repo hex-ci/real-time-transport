@@ -4,26 +4,15 @@ import type { LineDetail, LiveLineStatus } from '@real-time-transport/shared'
 import { TransitService } from '../services/transit.service.js'
 
 /**
- * F-A on the server: the upstream's zero is routed to the at-platform state.
+ * 服务端的 F-A：上游给的 0 被路由到「正在本站」这个状态。
  *
- * Reproduced against the real upstream: on a target-ordered read (`?order=N`) a
- * vehicle standing at the stop arrives as `travelTime 0` with `distanceToWaitStn 0`
- * and `speed` ~0, and the board printed 「3 分」 for it — a minute this app made
- * up, because the row fell past the at-platform branch into the position/dwell
- * estimate. The at-platform state already exists (`isAtStation`, the 「车辆正在本站」
- * copy, the ±35 m window) but that window is measured in metres and the upstream's
- * own statement about the vehicle is not.
- *
- * Two things are asserted here, and the second is the one the metre window cannot
- * do: the upstream zero lands on the at-platform row even when the vehicle's
- * reported position is OUTSIDE ±35 m of the stop line, and that row renders no
- * minute at all. The estimate branch that such a row used to fall into has since
- * been removed outright (see `no-estimated-arrival-minute.test.ts`), so the
- * second test below is about the OTHER state a row can be in: a vehicle still on
- * the road whose reading published no arrival time.
+ * 那个状态本来就在（`isAtStation`、「车辆正在本站」文案、±35 m 窗口），但窗口是按米量的，
+ * 而上游对车辆自己的陈述不是：上游的 0 必须落在「正在本站」那一行上，且那一行不渲染分钟。
+ * 会把它误定价的位置/停站推算分支已被整个移除（见 `no-estimated-arrival-minute.test.ts`），
+ * 所以下面第二个测试讲的是行可能处的另一种状态：车还在路上，而它的读数没有发布到达时刻。
  */
 
-/** Freeze the wall clock; only `Date` is faked, so nothing else stalls. */
+/** 冻结墙上时钟；只伪造 `Date`，别的东西都不会停摆。 */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(localIso))
@@ -39,7 +28,7 @@ function station(name: string, order: number) {
   return { id: `s${order}`, name, order, lat: 39.9 + order / 100, lng: 116.4 + order / 100, interchanges: [] }
 }
 
-/** A three-stop bus; the queried platform is 丙站 at 3000 m along the route. */
+/** 三站公交；被查询的站台是沿线上 3000 m 处的 丙站。 */
 function busDetail(): LineDetail {
   return {
     lineId: '010-1-0',
@@ -71,7 +60,6 @@ function liveStatus(buses: Array<Record<string, unknown>>): LiveLineStatus {
   }
 }
 
-/** The service under test, wired to a stub db so no upstream can be reached. */
 function serviceFor(detail: LineDetail, status: LiveLineStatus): TransitService {
   const db = {
     getCachedLine: async () => detail,
@@ -79,8 +67,8 @@ function serviceFor(detail: LineDetail, status: LiveLineStatus): TransitService 
     upsertCachedLine: async () => {},
   } as unknown as Database
 
-  // Every test here is network-free by construction: a call that escaped would
-  // throw rather than spend real quota.
+  // 这里的每个测试按构造都离网：逃出去的调用会抛错，
+  // 而不是花掉真实配额。
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     throw new Error(`unexpected upstream call: ${String(url)}`)
   }))
@@ -99,9 +87,8 @@ async function rowsFor(service: TransitService) {
 describe('F-A: an upstream travelTime of 0 is the vehicle being at the platform', () => {
   it('routes it to the at-platform row, which states no minute', async () => {
     freezeAt('2026-09-25T16:10:00')
-    // 60 m short of the stop line: outside the ±35 m window, so the row is
-    // reached by the upstream's own zero rather than by the metre test. This is
-    // the reported shape — the window misses the fact the source stated outright.
+    // 距站线 60 m：在 ±35 m 窗口之外，所以这一行靠上游自己的 0 落到这里，
+    // 而不是靠按米的判断。
     const service = serviceFor(busDetail(), liveStatus([
       vehicle({ travelTimeSec: 0, distanceToWaitStn: 0, distanceFromStart: 2940, speed: 0 }),
     ]))
@@ -114,9 +101,8 @@ describe('F-A: an upstream travelTime of 0 is the vehicle being at the platform'
         isAtStation: true,
         provenance: 'live',
       })
-      // The whole point: no minute is stated for a vehicle the source says is
-      // here, and `stopsAway` is zero rather than the one full hop the estimate
-      // branch used to report.
+      // 关键就在这：数据源说它就在本站的这个车没有分钟，
+      // 而 `stopsAway` 是 0，不是推算分支过去报的整整一跳。
       expect(rows[0]!.time).not.toMatch(/^\d{2}:\d{2}$/)
       expect(rows[0]!.stopsAway).toBe(0)
     }
@@ -127,11 +113,11 @@ describe('F-A: an upstream travelTime of 0 is the vehicle being at the platform'
 
   it('does not claim the platform for a vehicle the payload says is still on the road', async () => {
     freezeAt('2026-09-25T16:10:00')
-    // No travels entry at all: the payload stated no arrival time for this vehicle
-    // — a missing duration is not the zero that means 「已在本站」, so the row is not
-    // the at-platform state. It states no minute either: the estimate that used to
-    // fill the gap is gone (see `no-estimated-arrival-minute.test.ts`), and what
-    // the screen gets is the absence, not a number this app extrapolated.
+    // 完全没有 travels 条目：载荷没有为这辆车给出到达时刻 ——
+    // 缺失的时长不是那个表示「已在本站」的 0，所以这一行不是
+    // 「正在本站」状态。它也不给分钟（推算已移除，见
+    // `no-estimated-arrival-minute.test.ts`），屏幕上拿到的是「没有」
+    // 这件事，而不是本应用外推出来的数字。
     const service = serviceFor(busDetail(), liveStatus([
       vehicle({ distanceFromStart: 500, speed: 6 }),
     ]))

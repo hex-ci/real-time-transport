@@ -1,40 +1,23 @@
 import type { OperatingState, OperatingStatus } from './schemas/transit.js'
 
 /**
- * F3: 「今天还有没有车」, as a state rather than a sentence.
- *
- * A board that says 「暂无来车」 at 01:00 has told the user nothing they can act
- * on: no vehicle is coming because the day's service has ended, and that answer
- * is available from the line's own last departure. The three facts this module
- * separates — 首班前 / 运营中 / 已过末班 — are decided from the line's REAL
- * first and last departure times, and from nothing else:
- *
- * - Never from a clock assumption. There is no built-in 05:30 or 23:00 anywhere
- *   in this file: a line whose hours are unknown reports `unknown`, and the
- *   caller renders that state rather than 运营中 with a caveat.
- * - Never from a guess at the other end. Half a service window (one time known)
- *   is still `unknown`: 12:00 could be mid-service or hours after the last
- *   train, and the one absent time is never filled in with a default.
- *
- * The day model is the one the station timetable already uses
- * (`operatingDateOf(bjNow) = bjNow - 4h` in the adapter): an operating day runs
- * from its first morning departure through the after-midnight tail, so 00:00–03:59
- * still belongs to the PREVIOUS operating day and its timeline runs 00:00–28:00.
- * {@link operatingDaySecondsOf} is the seconds form of that same boundary, and
- * the two must agree — 04:00 is where a new operating day starts.
+ * F3：「今天还有没有车」，以状态而非句子表达。
+ * 三态（首班前 / 运营中 / 已过末班）只由线路**真实**的首末班时刻判定，别无其他依据：
+ * 不用任何时钟假设（本文件没有内建的 05:30 或 23:00，时刻未知即 `unknown`，
+ * 由调用方渲染该状态而不是 运营中 加一句免责）；也不猜另一端
+ * （半截服务窗口仍为 `unknown`，缺失的那一端绝不用默认值补上）。
+ * 运营日模型与时刻表已用的 `operatingDateOf` 同一（即 bjNow - 4h）：
+ * 00:00–03:59 仍属前一运营日，时间轴为 00:00–28:00；04:00 即新运营日起点，两者必须一致。
  */
 
-/** The operating day's boundary in Beijing: 04:00, the same -4h of `operatingDateOf`. */
+/** 运营日边界（北京时间 04:00），与 `operatingDateOf` 的 -4h 同源。 */
 const OPERATING_DAY_START_SEC = 4 * 3600
 
 const DAY_SEC = 24 * 3600
 
 /**
- * Seconds into the Beijing operating day (00:00–28:00) for an instant.
- *
- * The instant may come from any device timezone: it is read in Beijing time, so
- * the boundary is the network's, not the phone's. 00:00–03:59 is shifted +24h,
- * making the after-midnight tail continuous with the evening it belongs to.
+ * 某瞬间落在北京运营日里的秒数（00:00–28:00）。
+ * 按北京时间读取，故边界归网络而非手机时区；00:00–03:59 偏移 +24h，与该日所属的晚间连续。
  */
 export function operatingDaySecondsOf(now: Date = new Date()): number {
   const beijing = new Date(now.getTime() + 8 * 3600 * 1000)
@@ -43,9 +26,8 @@ export function operatingDaySecondsOf(now: Date = new Date()): number {
 }
 
 /**
- * An upstream 「HH:MM」 departure as both its operating-day seconds and the
- * normalized label the API carries. `null` for anything that is not a time —
- * an unparseable value is unknown, not a partial parse.
+ * 上游「HH:MM」发车时刻，给出运营日秒数与 API 携带的归一化标签。
+ * 非时刻一律 `null` —— 不可解析即未知，不做部分解析。
  */
 function parseDeparture(time: string | null | undefined): { seconds: number, label: string } | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(String(time ?? '').trim())
@@ -53,44 +35,39 @@ function parseDeparture(time: string | null | undefined): { seconds: number, lab
 
   const hours = Number(match[1])
   const minutes = Number(match[2])
-  // 「24:00」 is the end of the operating day, not a malformed 25th hour: a feed
-  // that runs past midnight prints it as the last departure. Accepted only as
-  // exactly 24:00 — 24:30 is a time this model cannot place, so it stays malformed.
+  // 「24:00」是运营日终点（跨零点的末班如此打印），仅接受恰好 24:00：
+  // 24:30 是本模型无法定位的时刻，仍算非法。
   const isDayEnd = hours === 24 && minutes === 0
   if ((hours > 23 && !isDayEnd) || minutes > 59) return null
 
   const seconds = hours * 3600 + minutes * 60
   return {
-    // After-midnight departures belong to this operating day's tail.
+    // 零点后的发车属于本运营日的尾段。
     seconds: seconds < OPERATING_DAY_START_SEC ? seconds + DAY_SEC : seconds,
     label: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
   }
 }
 
 export interface OperatingStatusInput {
-  /** The line's (or platform's) first departure, 「HH:MM」; '' / null when unknown. */
+  /** 线路（或站台）首班，「HH:MM」；未知为 '' 或 null。 */
   firstDeparture?: string | null
-  /** The line's last departure, 「HH:MM」 — possibly after midnight. */
+  /** 线路末班，「HH:MM」，可能晚于零点。 */
   lastDeparture?: string | null
-  /** Now, in operating-day seconds, from {@link operatingDaySecondsOf}. */
+  /** 当前时刻的运营日秒数，取自 `operatingDaySecondsOf`。 */
   nowSecOfDay: number
 }
 
 /**
- * The operating state, with the times it was derived from.
- *
- * Boundaries are inclusive at both ends: at exactly the first departure the
- * service is running (that train is leaving now), and so is it at exactly the
- * last one. Both `firstDeparture` and `lastDeparture` are reported whenever they
- * are known — including in the `unknown` state, where one of them may be known —
- * and are null when they are not.
+ * 运营状态，以及据以判定它的时刻。
+ * 两端边界都为闭区间：恰在首班即运营中（那趟车正在发出），恰在末班亦然。
+ * `firstDeparture` / `lastDeparture` 只要已知就回报 —— 含 `unknown` 状态（其中一端可能已知）；
+ * 未知时为 null，绝不用默认时刻顶替。
  */
 export function operatingStatusOf(input: OperatingStatusInput): OperatingStatus {
   const first = parseDeparture(input.firstDeparture)
   const last = parseDeparture(input.lastDeparture)
 
-  // A single known end says nothing: the service window is the pair. Report what
-  // is held (so a known 首班 can still be shown) and refuse to state a state.
+  // 只有一端已知说明不了什么（服务窗口是一对）：回报已持有的值，但拒绝给出状态。
   if (!first || !last) {
     return {
       state: 'unknown',
@@ -99,8 +76,8 @@ export function operatingStatusOf(input: OperatingStatusInput): OperatingStatus 
     }
   }
 
-  // A window that ends before it starts is contradictory data, not a service
-  // day. 运营中 would be a claim about hours that cannot both be true.
+  // 窗口终点不晚于起点是自相矛盾的数据，不是运营日：
+  // 报 运营中 等于断言两个不可能同时为真的时刻。
   if (first.seconds >= last.seconds) {
     return { state: 'unknown', firstDeparture: first.label, lastDeparture: last.label }
   }

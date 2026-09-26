@@ -6,31 +6,19 @@ import type { ArrivalRow } from '@real-time-transport/shared'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '../arrival-copy'
 
 /**
- * Every surface that lists arrivals must render the absence, never a minute.
+ * 列出到站的每个界面都必须渲染「无到站耗时」，绝不显示分钟数。
  *
- * The server no longer states a minute for a targeted bus reading that published
- * none (it extrapolated a snapshot speed and a nominal dwell across every
- * remaining stop — ~12 min mean error, 28 min worst, sign unfixed), so the wire
- * serves such a row with NO `etaSeconds` at all. Three surfaces list arrivals:
- * the line panel's 后续进站计划, the overview card's leading/subsequent rows, and
- * the platform board's 预计到站 column. Each of them used to have exactly one
- * branch for "a minute" and would now paint `Math.round(undefined / 60)` next to
- * 「分」 — the same lie as the estimate, one layer out.
+ * 服务端对无法估价的车辆只下发顺序中的位置，不含 `etaSeconds`。三个界面列出到站：
+ * 线路面板的后续进站计划、总览卡片的到站行、站台屏的预计到站列，它们共用
+ * `@/arrival-copy` 里的同一个 token，不能各自造句。
  *
- * The rule and the WORDS are both pinned here rather than in each template:
- * `statedArrivalMinutes` answers the minute or `null`, and 「暂无到站耗时」 is
- * the platform board's own token for an unknown arrival, held once in
- * `@/arrival-copy` so the three surfaces cannot drift into three sentences. These
- * components are browser-only artefacts in this repo (no jsdom, no
- * @vue/test-utils), so the wiring is asserted against the SFC source, the way
- * this project's other display rules are.
+ * 这些组件只跑在浏览器（无 jsdom、无 @vue/test-utils），故按 SFC 源码断言。
  */
 
 function sfc(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 }
 
-/** Everything between the SFC's own <template> tags: what reaches the screen. */
 function templateOf(source: string): string {
   const start = source.indexOf('<template>')
   const end = source.lastIndexOf('</template>')
@@ -45,13 +33,12 @@ const linePage = sfc('../views/line-detail/index.vue')
 describe('the unknown-arrival token is one token', () => {
   it('is the platform board\'s own wording, and contains no digit', () => {
     expect(ARRIVAL_MINUTE_UNAVAILABLE_TEXT).toBe('暂无到站耗时')
-    // A digit in this token would read as a minute beside it.
+    // token 里出现数字会被读成旁边的分钟数。
     expect(ARRIVAL_MINUTE_UNAVAILABLE_TEXT).not.toMatch(/\d/)
   })
 
   it('is the constant every arrivals surface renders, the board included', () => {
-    // Not a re-typed literal per file: one source, so the two surfaces that show
-    // the same state for the same row cannot word it differently.
+    // 同一行同一状态在多个界面呈现，措辞必须唯一：只此一处常量，不逐文件重复字面量。
     expect(templateOf(board)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
     expect(templateOf(popover)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
     expect(templateOf(card)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
@@ -61,14 +48,12 @@ describe('the unknown-arrival token is one token', () => {
 describe('no arrivals surface prices a minute for a row that states none', () => {
   it('the line panel renders the absence and guards its minute on the helper', () => {
     const template = templateOf(popover)
-    // The minute comes from the helper — never from raw arithmetic over a field
-    // that may be absent.
+    // 分钟取自 helper，绝不对可能缺失的字段做原始算术。
     expect(template).toContain('statedArrivalMinutes(a)')
     expect(template, 'the panel still rounds etaSeconds itself, which is undefined for this row')
       .not.toContain('Math.round(a.etaSeconds / 60)')
-    // And the absence branch is real: a row with no minute states the token.
     expect(template).toMatch(/ARRIVAL_MINUTE_UNAVAILABLE_TEXT/)
-    // The helper answers for the row the panel is drawing.
+    // helper 为面板正在绘制的行作答。
     const absent: ArrivalRow = { stopsAway: 2, busId: 'b1' }
     expect(statedArrivalMinutes(absent)).toBeNull()
     const present: ArrivalRow = { time: '14:07', etaSeconds: 420 }
@@ -80,9 +65,7 @@ describe('no arrivals surface prices a minute for a row that states none', () =>
     expect(template, 'the card still rounds etaSeconds itself for a subsequent row')
       .not.toContain('Math.round(a.etaSeconds / 60)')
     expect(template).toContain('statedArrivalMinutes(a)')
-    // The leading row keeps its own branch for "no minute", ahead of the
-    // operating-state fallback which claims something else entirely (that no
-    // vehicle is in range).
+    // 首行保留自己的「无分钟」分支，且必须排在 operating-state 兜底（声称无车在范围内）之前。
     const numbered = template.indexOf('minutesOf(primaryArrivals) !== null')
     const absence = template.indexOf('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
     const operating = template.indexOf('primaryOperatingText', numbered)
@@ -93,8 +76,7 @@ describe('no arrivals surface prices a minute for a row that states none', () =>
   })
 
   it('reads the row the wire serves, so the token is what the screen shows', () => {
-    // The row shape the server now serves for a vehicle it could not price: it is
-    // still reported, with its place in the order, and no minute.
+    // 服务端对无法估价的车辆下发的行：仍上报顺序中的位置，但没有分钟数。
     const row: ArrivalRow = { stopsAway: 3, distanceMeters: 1200, busId: 'b1' }
     expect(statedArrivalMinutes(row)).toBeNull()
     expect(JSON.stringify(row), 'a minute-shaped number is hiding in the row').not.toMatch(/\d{2}:\d{2}/)
@@ -102,14 +84,7 @@ describe('no arrivals surface prices a minute for a row that states none', () =>
 })
 
 /**
- * The line page's own headline. It lived in `pending-estimate.ts` as a copy of
- * the server's position/dwell formula; both copies are gone, so the page states
- * the absence for the same reason the list rows do.
- *
- * PINNED AS THE SFC SOURCE ON PURPOSE: `index.vue` is being edited by a
- * concurrent unit at the moment this rule lands, so the two assertions below are
- * the exact text that must hold once that write has landed — they are RED until
- * it does, and they are the only assertions in this suite that are.
+ * 线路页面自己的头条：与列表行出于同一理由显示「无到站耗时」。
  */
 describe('the line page states the absence instead of a bus minute of its own', () => {
   it('no longer prices a minute from the vehicle\'s position', () => {

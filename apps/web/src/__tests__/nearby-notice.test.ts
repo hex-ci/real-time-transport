@@ -4,19 +4,14 @@ import { describe, expect, it } from 'vitest'
 import { nearbyEmptyNoticeOf, nearbyLocationStateOf } from '../views/overview/nearby-notice'
 
 /**
- * The nearby card's empty state, and the two causes it must not confuse.
+ * 附近卡片的空态，以及它不得混淆的两种成因。
  *
- * A nearby card shows no platform for two different reasons: the app has no
- * position at all (never asked, refused, or a request still in flight), or it HAS
- * one and no stop of this line resolves near it. The card decided this from
- * `mode === 'nearby' && rows.length === 0`, which is true of both — so it said
- * 「开启定位后显示离你最近的站点车辆」 to a user who had already granted location,
- * naming a cause that was not theirs and hiding the one that was.
+ * 附近卡片不显示站台有两种原因：应用完全没有位置（从未询问、被拒、请求仍在途），或者有位置
+ * 而本线路没有站点解析在附近。卡片曾用 `mode === 'nearby' && rows.length === 0` 判断空态，
+ * 它对两者都成立，于是对已授权定位的用户说了「开启定位后显示离你最近的站点车辆」。
  *
- * The position fact therefore travels from the location store, through the view,
- * into the card as an explicit input, in the three states the store can tell
- * apart; the wording lives here, and the guards at the end hold the wiring a unit
- * test cannot see.
+ * 因此位置事实从 location store 经视图作为显式输入进入卡片，共 store 可区分的三种状态；
+ * 措辞在此，末尾的守卫钉单元测试看不到的接线。
  */
 
 describe('the two causes of an empty nearby card are worded as what they are', () => {
@@ -25,8 +20,7 @@ describe('the two causes of an empty nearby card are worded as what they are', (
     const hasFix = nearbyEmptyNoticeOf('fix')
 
     expect(hasFix, 'the position and no-position causes read the same').not.toBe(noFix)
-    // The sentence this defect was: enabling location is not the missing thing
-    // when a fix is already in hand, so the state may not name it.
+    // 本缺陷的句子：已有定位时，开启定位并非缺失之物，故本状态不得提它。
     expect(hasFix).not.toContain('开启定位')
     expect(hasFix).toContain('站台')
     expect(noFix).toContain('开启定位')
@@ -34,10 +28,8 @@ describe('the two causes of an empty nearby card are worded as what they are', (
 
   it('names a fix that has not arrived yet as a request, not as an unset permission', () => {
     const locating = nearbyEmptyNoticeOf('locating')
-    // Nothing is missing from the user here: the fix is on its way, so the state
-    // says so and asks for no setting. Distinct from both other causes, because a
-    // user waiting for a fix and a user who never granted one are different
-    // situations with different next steps.
+    // 用户这里什么都不缺：定位在途中，状态如实说，不要求任何设置。与另两种成因不同，
+    // 因为等待定位与从未授权的用户处境不同、下一步也不同。
     expect(locating).not.toBe(nearbyEmptyNoticeOf('absent'))
     expect(locating).not.toBe(nearbyEmptyNoticeOf('fix'))
     expect(locating).not.toContain('开启定位')
@@ -57,32 +49,26 @@ describe('the two causes of an empty nearby card are worded as what they are', (
 })
 
 /**
- * A browser with no geolocation API at all.
+ * 完全没有 geolocation API 的浏览器。
  *
- * `useGeolocation` reports it through `isSupported`, and the store already names
- * it in `locationError`; the nearby card mapped every failure to `absent`, whose
- * sentence tells the user to enable location — the one thing that browser cannot
- * do, because the capability is absent rather than withheld. So the case gets its
- * own state, and its sentence says what is true of THAT browser.
+ * `useGeolocation` 通过 `isSupported` 上报它，store 已在 `locationError` 中点名；附近卡片曾把每种
+ * 失败都映射为 `absent`，其句子让用户去开启定位——而该浏览器做不到，因为能力是缺失而非被拒。
+ * 因此这种情况有自己的状态，其句子陈述该浏览器的真实处境。
  *
- * Permission-denied and never-asked are deliberately NOT split: `absent` tells
- * both to grant permission (via the browser prompt or the 定位最近站 button), and
- * that is the correct next step for each — only the capability being absent has a
- * different next step, and only that case is worth its own words.
+ * 权限被拒与从未询问**刻意**不拆分：`absent` 让两者都去授予权限（经由浏览器提示或
+ * 最近站按钮），对两者都是正确的下一步；只有能力缺失有别的下一步，也只有它值得自己的措辞。
  */
 describe('a browser that cannot locate at all is told what is true of it', () => {
   it('reads a browser with no geolocation support as its own state', () => {
     expect(nearbyLocationStateOf({ hasFix: false, requesting: false, failed: false, supported: false }))
       .toBe('unsupported')
-    // A refusal and a question never asked are both 「no permission yet」: the same
-    // next step (grant it, or tap the button that asks), so they stay together.
+    // 被拒与从未询问都是「尚无权限」：下一步相同（授予，或点击发起询问的按钮），故留在一起。
     expect(nearbyLocationStateOf({ hasFix: false, requesting: false, failed: true, supported: true }))
       .toBe('absent')
   })
 
   it('lets a fix in hand outrank the capability read', () => {
-    // The state answers 「是否有定位」 first: a position already reported is a
-    // position, whatever the store says the browser supports.
+    // 状态先回答「是否有定位」：已经上报的位置就是位置，不管 store 说浏览器支持什么。
     expect(nearbyLocationStateOf({ hasFix: true, requesting: false, failed: false, supported: false }))
       .toBe('fix')
   })
@@ -92,21 +78,17 @@ describe('a browser that cannot locate at all is told what is true of it', () =>
     expect(unsupported, 'a browser with no geolocation was told to enable location')
       .not.toContain('开启定位')
     expect(unsupported).not.toBe(nearbyEmptyNoticeOf('absent'))
-    // It names the missing capability and where it is missing, so the user is not
-    // sent looking for a permission that would not help.
+    // 它点名缺失的能力及缺失之处，使用户不去找一个无济于事的权限。
     expect(unsupported).toContain('浏览器')
     expect(unsupported).toContain('不支持定位')
   })
 })
 
 describe('the state comes from what the location store already reports', () => {
-  // `supported: true` throughout this block: the capability read is now a required
-  // input, and these cases are all about a browser that CAN locate — the fix, the
-  // request in flight, and the request that failed. A caller that omits it is
-  // answered as a browser that cannot locate, which is why it is not optional.
+  // 本块全程 `supported: true`：能力读取现在是必需输入，而这些用例都关于**能**定位的浏览器——
+  // 有定位、请求在途、请求失败。省略它的调用会被当作不能定位的浏览器应答。
   it('reads a fix in hand as the fix state, whatever else is in flight', () => {
-    // `isLocating` is `tracking && no fix`, so the two agree by construction —
-    // pinned here because the card's wording flips on this one value.
+    // `isLocating` 即 `tracking && 无定位`，两者由构造一致——在此钉住，因为卡片的措辞随这一个值翻转。
     expect(nearbyLocationStateOf({ hasFix: true, requesting: true, failed: false, supported: true }))
       .toBe('fix')
     expect(nearbyLocationStateOf({ hasFix: true, requesting: false, failed: true, supported: true }))
@@ -119,8 +101,8 @@ describe('the state comes from what the location store already reports', () => {
   })
 
   it('reads a failed or never-made request as absent rather than still coming', () => {
-    // A refused request keeps `tracking` true in the store, so the request flag
-    // alone would say 「正在获取定位…」 forever over a fix that is never arriving.
+    // 被拒的请求在 store 里仍保持 `tracking` 为真，故只看请求标志会永远说「正在获取定位…」，
+    // 而定位永不到来。
     expect(nearbyLocationStateOf({ hasFix: false, requesting: true, failed: true, supported: true }))
       .toBe('absent')
     expect(nearbyLocationStateOf({ hasFix: false, requesting: false, failed: false, supported: true }))
@@ -142,12 +124,10 @@ describe('the card is handed the position fact and words none of it itself', () 
   })
 
   it('words no location cause in its own template', () => {
-    // 开启定位 was the card's own sentence for every empty nearby card; it belongs
-    // to the copy module now, where a state becomes the words for it.
+    // 「开启定位」现在属于 copy 模块：状态在那里变成措辞。
     expect(card.slice(card.indexOf('<template>')), 'the card template states a location cause itself')
       .not.toContain('开启定位')
-    // Same rule for the browser-lacks-geolocation cause: the card renders the
-    // module's sentence, it does not carry one of its own.
+    // 对「浏览器缺少 geolocation」的成因同理：卡片渲染模块的句子，不自带一句。
     expect(card.slice(card.indexOf('<template>')), 'the card template words the unsupported case itself')
       .not.toContain('不支持定位')
   })
@@ -164,8 +144,7 @@ describe('the overview reads the position fact from the location store', () => {
   )
 
   it('derives it from the store\'s own reads', () => {
-    // The store's distinction, reused rather than re-invented: the fix, the
-    // request in flight, and the request that failed.
+    // 复用 store 的区分而非另造：有定位、请求在途、请求失败。
     expect(overview).toContain('locationStore.userCoords')
     expect(overview).toContain('locationStore.isLocating')
     expect(overview).toContain('locationStore.locationError')
@@ -173,9 +152,8 @@ describe('the overview reads the position fact from the location store', () => {
   })
 
   it('takes the capability reading from the store too, not from a guess', () => {
-    // Whether the browser can locate at all is a fact the STORE holds
-    // (`geo.isSupported`); a view that inferred it from a failure would call a
-    // denied permission 「不支持」 and send the user to another browser.
+    // 浏览器能否定位是 **store** 持有的事实（`geo.isSupported`）；视图若从失败推断它，
+    // 会把被拒的权限说成「不支持」并把用户送去换浏览器。
     expect(overview).toContain('locationStore.isSupported')
     expect(overview).toContain('supported:')
   })

@@ -6,30 +6,24 @@ import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 
 /**
- * A DOM-free mount of the chain page, so the page's own wiring can be tested by
- * BEHAVIOUR rather than by grepping its source.
+ * 链路页的无 DOM 挂载，使页面自身的接线可按**行为**而非 grep 源码来测试。
  *
- * This repo has no DOM harness (no jsdom, no `@vue/test-utils`), and this file does
- * not add one: Vue's runtime-core is handed a host that keeps the tree as plain
- * objects instead of touching a document. That is enough for everything the page's
- * behaviour is read through here — the rendered tree, the events its children emit,
- * and the requests it makes — with no new dependency and no global test setup.
+ * 本仓库没有 DOM 测试台（无 jsdom、无 `@vue/test-utils`），本文件也不新增：Vue 的 runtime-core
+ * 被交给一个把树保存为普通对象的宿主，而非触碰 document。这已足够读取本页行为所需的一切——
+ * 渲染出的树、子组件发出的事件、以及它发出的请求——不新增依赖、不设全局测试装置。
  *
- * Two globals are provided because the page's radio group is reka-ui, which is
- * written against a real DOM: `Element` (its `forwardRef` tests `ref instanceof
- * Element`) and `localStorage` (the city store reads it while it is created). Both
- * are stubbed here; the test file unstubs them.
+ * 提供两个全局是因为页面的单选组是 reka-ui（面向真实 DOM 编写）：`Element`（其 `forwardRef`
+ * 检测 `ref instanceof Element`）与 `localStorage`（city store 在创建时读取它）。两者在此打桩；
+ * 测试文件负责取消打桩。
  *
- * `fetch` is the seam. The page and the store it calls both go through it, so the
- * harness records every request (url, method, parsed body) and answers each route
- * from a responder the test supplies. A responder may hand back a `deferred()` so a
- * test can hold one answer open and release answers out of order — the only way to
- * see a stale answer race a newer one.
+ * `fetch` 是接缝。页面与它调用的 store 都经由它，故本装置记录每个请求（url、method、解析后的 body）
+ * 并按键由测试提供的 responder 作答。responder 可交回一个 `deferred()`，使测试能挂起一个答案、
+ * 按乱序释放——这是看到旧答案与更新的答案相竞的唯一方式。
  */
 
 /**
- * One rendered node. It is DOM-ish on purpose: reka-ui's radio group reaches for
- * `closest`, `focus` and `instanceof Element` on what it renders.
+ * 一个渲染节点。它刻意 DOM 化：reka-ui 的单选组会对其渲染物取 `closest`、`focus`
+ * 与 `instanceof Element`。
  */
 export class HostElement {
   tag: string
@@ -52,7 +46,7 @@ export class HostElement {
     return this.tag.toUpperCase()
   }
 
-  /** Nothing this page renders sits inside a form, so there is no ancestor to walk. */
+  /** 本页渲染的任何内容都不在 form 内，故没有祖先可走。 */
   closest(): null {
     return null
   }
@@ -72,8 +66,8 @@ export class HostElement {
   }
 
   /**
-   * reka-ui's radio dispatches its own `CustomEvent` at the click's target and
-   * listens for it there, so a click needs a target that can hold listeners.
+   * reka-ui 的单选在点击目标上派发自己的 `CustomEvent` 并就地监听，
+   * 故一次点击需要一个能持有监听器的目标。
    */
   dispatchEvent(event: { type: string }): boolean {
     for (const handler of [...(this.listeners.get(event.type) ?? [])]) handler(event)
@@ -98,7 +92,7 @@ export class HostElement {
   }
 }
 
-/** Every node of the tree, in document order. */
+/** 树里的每个节点，按文档顺序。 */
 function walk(root: HostElement): HostElement[] {
   const out: HostElement[] = []
   const visit = (current: HostElement): void => {
@@ -109,7 +103,7 @@ function walk(root: HostElement): HostElement[] {
   return out
 }
 
-/** A hoisted static subtree arrives as raw HTML: read it as the text it shows. */
+/** 被提升的静态子树以原始 HTML 到达：按它显示的文本读取。 */
 function staticText(html: string): string {
   return html.replace(/<[^>]*>/g, ' ')
 }
@@ -117,8 +111,8 @@ function staticText(html: string): string {
 function textOf(root: HostElement): string {
   return walk(root)
     .map((item) => {
-      // A node holds either children or its own text, never both: `setElementText`
-      // is how Vue renders an element whose whole content is one string.
+      // 节点要么持有子节点、要么持有自己的文本，不会两者兼有：
+      // `setElementText` 就是 Vue 渲染整体内容为单个字符串的元素的方式。
       if (item.tag === '#static') return staticText(item.text)
       return item.text
     })
@@ -127,7 +121,7 @@ function textOf(root: HostElement): string {
     .trim()
 }
 
-/** A promise a test resolves itself, so an answer can be released on demand. */
+/** 由测试自行兑现的 promise，使一个答案可按需释放。 */
 export interface Deferred<T> {
   promise: Promise<T>
   resolve: (value: T) => void
@@ -141,7 +135,7 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve }
 }
 
-/** One request the page (or the store it calls) made. */
+/** 页面（或它调用的 store）发出的一个请求。 */
 export interface RecordedRequest {
   url: string
   method: string
@@ -158,7 +152,7 @@ export interface HttpAnswer {
 
 const HTTP_ANSWER: unique symbol = Symbol('http-answer')
 
-/** Answer a route with a specific status — a 429 is how the window refuses a press. */
+/** 以特定状态应答一个路由——窗口拒绝一次按下用的是 429。 */
 export function httpStatus(status: number, payload: unknown): HttpAnswer {
   return { status, payload, [HTTP_ANSWER]: true }
 }
@@ -167,7 +161,7 @@ function isHttpAnswer(answer: unknown): answer is HttpAnswer {
   return typeof answer === 'object' && answer !== null && HTTP_ANSWER in answer
 }
 
-/** The fetch seam: routes, and every request it saw. */
+/** fetch 接缝：路由，以及它见过的每个请求。 */
 export class MockServer {
   readonly requests: RecordedRequest[] = []
   private readonly routes: Array<{ pattern: RegExp, respond: Responder }> = []
@@ -177,7 +171,7 @@ export class MockServer {
     return this
   }
 
-  /** Every request whose url matches, in order. */
+  /** url 匹配的每个请求，按顺序。 */
   seen(pattern: RegExp): RecordedRequest[] {
     return this.requests.filter(request => pattern.test(request.url))
   }
@@ -189,7 +183,7 @@ export class MockServer {
     const request: RecordedRequest = { url, method, body }
     this.requests.push(request)
 
-    // The most recently registered match wins, so a test can override a default.
+    // 最近注册的匹配胜出，故测试可覆盖默认值。
     const route = [...this.routes].reverse().find(item => item.pattern.test(url))
     const answer = route ? await route.respond(request) : { success: false }
     if (isHttpAnswer(answer)) {
@@ -207,7 +201,7 @@ export class MockServer {
   }
 }
 
-/** Just enough `localStorage` for the city store, which reads it while it is created. */
+/** 恰好够 city store 用的 `localStorage`，它在创建时读取。 */
 function createMemoryStorage(): Storage {
   const entries = new Map<string, string>()
   return {
@@ -220,7 +214,7 @@ function createMemoryStorage(): Storage {
   } as Storage
 }
 
-/** Vue's runtime-core, rendered into `HostElement`s instead of a document. */
+/** Vue 的 runtime-core，渲染进 `HostElement` 而非 document。 */
 function createHostRenderer() {
   return createRenderer<HostElement, HostElement>({
     createElement: tag => new HostElement(tag),
@@ -270,39 +264,38 @@ export interface MountedChainPage {
   server: MockServer
   store: ReturnType<typeof useTransitStore>
   city: ReturnType<typeof useCityStore>
-  /** The page's visible text, whitespace-normalised. */
+  /** 页面的可见文本，已归一化空白。 */
   text(): string
-  /** The visible text of one rendered node, the same way. */
+  /** 某个渲染节点的可见文本，方式相同。 */
   textOf(node: HostElement): string
-  /** All rendered nodes matching a predicate, in document order. */
+  /** 所有匹配谓词的渲染节点，按文档顺序。 */
   nodes(where: (node: HostElement) => boolean): HostElement[]
-  /** The first node matching, or a thrown error naming what was looked for. */
+  /** 首个匹配的节点，或一个点名所寻之物的错误。 */
   node(where: (node: HostElement) => boolean, description: string): HostElement
-  /** Let every pending promise and re-render settle. */
+  /** 让所有挂起的 promise 与重渲染落定。 */
   flush(): Promise<void>
   unmount(): void
 }
 
 export interface MountOptions {
-  /** Routes, tried in order (the last match wins). One route, or a list of them. */
+  /** 路由，按顺序尝试（最后一个匹配胜出）。一个路由，或它们的一个列表。 */
   routes?: Route | Route[]
 }
 
-/** One route: the requests it answers, and the answer it gives. */
+/** 一个路由：它应答的请求，以及它给出的答案。 */
 export type Route = [RegExp, Responder]
 
-/** A page with one route should not have to wrap it in a list. */
+/** 只有一个路由的页面不该被迫把它包成列表。 */
 function routeList(routes: Route | Route[] | undefined): Route[] {
   if (!routes) return []
   return routes[0] instanceof RegExp ? [routes as Route] : routes as Route[]
 }
 
 /**
- * Mount the chain page and answer its requests from `routes`.
+ * 挂载链路页并由 `routes` 应答其请求。
  *
- * A route the test does not supply answers `{ success: false }`, which is what the
- * page's own failure paths must handle — so a missing route shows up as the state it
- * produces rather than as a crash.
+ * 测试未提供的路由答 `{ success: false }`，这正是页面自己的失败路径必须处理的——故缺失的路由
+ * 表现为它产生的状态，而不是一次崩溃。
  */
 export async function mountChainPage(options: MountOptions = {}): Promise<MountedChainPage> {
   const server = new MockServer()
@@ -310,7 +303,7 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
   vi.stubGlobal('fetch', server.handle)
   vi.stubGlobal('localStorage', createMemoryStorage())
   vi.stubGlobal('Element', HostElement)
-  // reka-ui's radio dispatches one of these at the clicked element.
+  // reka-ui 的单选会在被点击元素上派发其中一个。
   vi.stubGlobal('CustomEvent', class {
     type: string
     detail: unknown
@@ -327,9 +320,8 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
   const container = new HostElement('#root')
   const app = renderer.createApp(ChainPage as Component)
   app.use(pinia)
-  // Vitest transforms modules through Vite's pipeline, so an SFC's compiled wrapper
-  // reaches for `useSSRContext()`. Handing it an empty context keeps the component
-  // mounting in this host instead of into a server render it is not.
+  // Vitest 经 Vite 管线转换模块，故 SFC 的编译包装器会取 `useSSRContext()`。给它一个空上下文，
+  // 使组件挂载于本宿主而非一个它并不属于的服务端渲染。
   app.provide(ssrContextKey, { modules: new Set<string>() })
   app.component('RouterLink', {
     props: { to: { type: String, required: true } },
@@ -366,11 +358,10 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
 }
 
 /**
- * The refresh control: the page's one F11 entry.
+ * 刷新控件：本页唯一的 F11 入口。
  *
- * Found by the section it lives in rather than by a class, so the selector cannot
- * be satisfied by some other 44px control the page grows (the purpose radios are
- * buttons with a touch-target height of their own).
+ * 按它所在的 section 而非某个 class 定位，使该选择器不会被页面日后长出的其他 44px 控件满足
+ * （目的单选本身也是各自带触摸目标高度的按钮）。
  */
 export function refreshButton(page: MountedChainPage): HostElement {
   const section = page.node(item => item.props['aria-label'] === '数据刷新', 'refresh section')
@@ -380,8 +371,8 @@ export function refreshButton(page: MountedChainPage): HostElement {
 }
 
 /**
- * Click a rendered element, with the event shape a real click carries: reka-ui's
- * radio reads `target`, `preventDefault` and `defaultPrevented` off it.
+ * 点击一个渲染元素，带真实点击所携带的事件形状：reka-ui 的单选会从它读取 `target`、
+ * `preventDefault` 与 `defaultPrevented`。
  */
 export function click(element: HostElement): void {
   let prevented = false
@@ -395,7 +386,7 @@ export function click(element: HostElement): void {
   })
 }
 
-/** Press the refresh control, the way a user does — a disabled control is not clickable. */
+/** 像用户那样按下刷新控件——被禁用的控件不可点击。 */
 export async function pressRefresh(page: MountedChainPage): Promise<void> {
   const button = refreshButton(page)
   if (button.props.disabled) {
@@ -405,19 +396,19 @@ export async function pressRefresh(page: MountedChainPage): Promise<void> {
   await page.flush()
 }
 
-/** Every line the last refresh request named, flattened for comparison. */
+/** 上次刷新请求点名的每条线路，拍平以便比较。 */
 export function refreshedLines(page: MountedChainPage): string[] {
   const posted = page.server.seen(/\/api\/transit\/refresh$/).at(-1)
   if (!posted) throw new Error('the page made no refresh request')
   return (posted.body?.lines ?? []).map((line: any) => `${line.lineId}_${line.direction}@${line.cityCode}`)
 }
 
-/** The purpose radios, in the order the page renders them. */
+/** 目的单选，按页面渲染它们的顺序。 */
 export function purposeRadios(page: MountedChainPage): HostElement[] {
   return page.nodes(item => item.props.role === 'radio')
 }
 
-/** Pick a purpose by clicking its radio, the way a user does. */
+/** 像用户那样点击单选来选一个目的。 */
 export async function pickPurpose(page: MountedChainPage, purpose: string): Promise<void> {
   const radio = purposeRadios(page).find(item => item.props.value === purpose)
   if (!radio) throw new Error(`the page rendered no ${purpose} radio`)

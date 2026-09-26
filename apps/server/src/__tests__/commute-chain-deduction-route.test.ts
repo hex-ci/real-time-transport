@@ -2,22 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 
 /**
- * F10's route: the chains of one purpose, each with the engine's own answer.
+ * F10 的路由部分：一个用途的链路，每条链路带引擎自己的答案。
  *
- * Two things this suite pins down that the service suite cannot.
+ * 1. 线上形状：该用途的每条链路都在同一次响应里，每条链路的推演原样透传 —— 「不给结论」
+ *    的原因是一个码，不带任何多余的东西；用户读到的每一个字归 web 层所有。
+ * 2. 两次定向读数走真实提供方与聚合器，用的是存下来的路段点名的目标站序，所以装配依赖的
+ *    按站缓存键是真正被用到的那些，而不是只有替身才见过的。
  *
- *  1. The WIRE shape. Every chain of the purpose travels in ONE response, and
- *     each chain's deduction is passed through untouched: a 「不给结论」 reason
- *     is a code with no siblings, never a sentence the server wrote — the web
- *     layer owns every word the user reads, and a server-side sentence could not
- *     be re-worded or translated without a release.
- *  2. The two targeted reads happen through the REAL provider and aggregator,
- *     with the target orders the stored legs name — so the per-station cache keys
- *     the assembly relies on (`<line>_<direction>_target_<order>`) are the ones
- *     actually used, not ones only a mock ever sees.
- *
- * 101 / 202 / 甲路 / 乙路 are placeholders: no real route, station or upstream id
- * appears in this file, and no upstream is reachable — both upstreams are stubs.
+ * 101 / 202 / 甲路 / 乙路 是占位：本文件不出现真实线路、站点或上游 id，也触不到上游。
  */
 
 const T0 = '2026-09-24T08:30:00'
@@ -26,18 +18,18 @@ const T0_MS = new Date(T0).getTime()
 const LINE_A = '101'
 const LINE_B = '202'
 
-/** The stop list each line is read with, and the leg booked against it. */
+/** 每条线路被读取时用的站表，以及挂在它上面的那一段。 */
 const STOPS: Record<string, string[]> = {
   [LINE_A]: ['甲路', '乙路', '丙路'],
   [LINE_B]: ['丙路', '丁路', '戊路', '己路'],
 }
 const BOARD_ORDER: Record<string, number> = { [LINE_A]: 2, [LINE_B]: 3 }
-/** What the upstream reports for each requested target order, in seconds. */
+/** 上游为每个被请求的目标站序报的秒数。 */
 const TRAVEL: Record<string, Record<number, number>> = {
   [LINE_A]: { 2: 900, 3: 1200 },
   [LINE_B]: { 3: 2100, 4: 2400 },
 }
-/** The walking duration the path-service stub prices every connection at. */
+/** 路径服务替身为每个换乘定价的步行时长。 */
 const WALK_SECONDS = 300
 
 function freezeAt(localIso: string): void {
@@ -77,15 +69,13 @@ function chainBody(over: Record<string, unknown> = {}) {
 }
 
 /**
- * Both upstreams the deduction can reach, counted.
+ * 推演能触到的两个上游，都计数。
  *
- * `targets` records the target order of every LIVE read, which is how 「each leg
- * is read twice, at its own two stations」 is observable from outside. The
- * line-detail read carries no target and is not counted there.
+ * `targets` 记录每次实时读数的目标站序，`<线路>:<站序>` 这串就是「每段在自己的两个站各读
+ * 一次」从外面可观测的方式；线路详情读数不带目标，不计入其中。
  *
- * `noseAtByLine` moves a line's vehicle along it, so a test can reproduce the
- * upstream filter that prices no row: a vehicle whose nose has already passed the
- * requested order is not returned for it.
+ * `noseAtByLine` 让线路上的车往前走，于是测试能再现上游那个「一行都不定价」的过滤：车头已经
+ * 越过所请求站序的车，对那个站序不会被返回。
  */
 function stubUpstream(options: { noseAtByLine?: Record<string, number> } = {}): { lines: string[], targets: string[], walking: number } {
   const state = { lines: [] as string[], targets: [] as string[], walking: 0 }
@@ -115,12 +105,12 @@ function stubUpstream(options: { noseAtByLine?: Record<string, number> } = {}): 
   return state
 }
 
-/** A response the chelaile provider reads as text, which is what it does. */
+/** chelaile 提供方按文本读的响应，它本来就是这么读的。 */
 function body(text: string) {
   return { ok: true, status: 200, text: async () => text }
 }
 
-/** An Amap v3 success envelope. */
+/** 一个 Amap v3 成功信封。 */
 function amapOk(payload: Record<string, unknown>) {
   return {
     ok: true,
@@ -130,15 +120,12 @@ function amapOk(payload: Record<string, unknown>) {
 }
 
 /**
- * A line's detail, with the vehicle the upstream reports for the requested
- * target order only — exactly like the real one, whose `travels` are matched by
- * the order the request named. No `mileage` and no `distanceToWaitStn`, so no row
- * can be read as 「正在进站」 and every minute below is the upstream's own.
+ * 一条线路的详情，只带上游为所请求目标站序报的那辆车 —— 与真实的一样，其 `travels` 按请求
+ * 点名的站序匹配。没有 `mileage` 也没有 `distanceToWaitStn`，所以没有一行会被读成「正在进站」，
+ * 下面每个分钟都是上游自己的。
  *
- * `noseAt` is where the vehicle's nose is; unset means the line's own board
- * order, which is the ordinary case. Upstream returns a vehicle for a requested
- * order iff its nose has NOT passed that order, so a nose past an order is what
- * makes that read price no row.
+ * `noseAt` 是车头所在处；不设就是这条线路自己的上车站序，也就是通常情形。上游只在车头尚未
+ * 越过该站序时才为它返回车辆，所以车头越过某个站序，就是让那次读数一行都不定价的原因。
  */
 function lineBody(lineId: string, targetOrder: number | null, noseAt?: number) {
   const names = STOPS[lineId] ?? []
@@ -215,7 +202,7 @@ describe('F10 route: one response carries every chain of the purpose', () => {
             alightMinutes: 20,
             rideMinutes: 5,
             marginMinutes: 10,
-            // F3's state travels with the leg: the line's own hours, and `now`.
+            // F3 的状态跟着路段走：线路自己的时刻，加上 `now`。
             operatingStatus: { state: 'operating', firstDeparture: '05:00', lastDeparture: '23:00' },
           },
           {
@@ -236,9 +223,8 @@ describe('F10 route: one response carries every chain of the purpose', () => {
         lastUpdatedAt: T0_MS,
       })
 
-      // One live read per station: the adapter answers for one target order, so
-      // each leg's board minute and alight minute come from two requests — and
-      // the orders named are the stored ones, over the real provider.
+      // 每个站一次实时读数：适配器一次只答一个目标站序，所以一段的上车分钟与下车分钟来自两次请求，
+      // 点名的站序是存下来的那些，而且走的是真实提供方。
       expect(upstream.targets).toEqual([`${LINE_A}:2`, `${LINE_A}:3`, `${LINE_B}:3`, `${LINE_B}:4`])
     }
     finally {
@@ -303,9 +289,8 @@ describe('F10 route: 不给结论 travels as the engine\'s code', () => {
         reason: 'station-unset',
         leg: { seq: 0, lineId: '101', lineName: '101路' },
       })
-      // A reason, which leg refused it, and nothing else: no sentence, no
-      // defaulted minutes, no guess at which bus the user might catch. WHICH leg
-      // refused is not a quantity about the answer — see `ChainNoConclusion`.
+      // 只有一个原因码和点名哪一段被拒，别的什么都没有：没有句子，没有兜底的分钟。
+      // 「哪一段」不是关于这个答案的量 —— 见 `ChainNoConclusion`。
       expect(Object.keys(deduction).sort()).toEqual(['leg', 'reason', 'status'])
     }
     finally {
@@ -318,12 +303,9 @@ describe('F10 route: 不给结论 travels as the engine\'s code', () => {
     const upstream = stubUpstream()
     const app = await buildApp({ amapKey: 'test-key' })
     try {
-      // No anchor saved at all: the connection into the first leg cannot be
-      // priced, and the engine says so rather than walking from a coordinate the
-      // user never saved. The reason names THAT fact — the origin the chain was
-      // recorded against was never set — because it is the one cause of an
-      // unpriced connection the user can act on, and it is the same word F1's
-      // own empty state uses for the same fact.
+      // 完全没存锚点：进入第一段的换乘无法定价，引擎如实说明，而不是从一个用户从未保存过的坐标
+      // 起步。原因点名的正是这件事 —— 记录这条链路时所依据的起点从未设置 —— 因为这是用户唯一能
+      // 动手修的「换乘无价」成因，也是 F1 自己的空状态为同一件事用的那个词。
       await createChain(app, chainBody({ legs: [{ ...LEG_A }] }))
 
       const res = await deductions(app)
@@ -333,8 +315,7 @@ describe('F10 route: 不给结论 travels as the engine\'s code', () => {
         reason: 'anchor-unset',
         leg: { seq: 0, lineId: '101', lineName: '101路' },
       })
-      // Nothing was walked and no platform was read: the engine refuses on the
-      // connection before a reading could matter.
+      // 一步没走、一站没读：引擎在读任何数据之前就在这个换乘上拒掉了。
       expect(upstream.walking).toBe(0)
       expect(upstream.targets).toEqual([])
     }
@@ -348,11 +329,9 @@ describe('F10 route: 不给结论 travels as the engine\'s code', () => {
     const upstream = stubUpstream()
     const app = await buildApp({ amapKey: 'test-key' })
     try {
-      // Both faults at once: no anchor was ever saved, and this leg's own stop
-      // list cannot place its stations (an unknown line reads as a line with no
-      // stops). Only one of the two is the user's to repair, and the answer has
-      // to name that one: an answer that names the other sends them to a screen
-      // where the remedy is not.
+      // 两个毛病同时出现：锚点从未保存，且这一段自己的站表无法定位它的站（未知线路读成没有站的
+      // 线路）。两者只有一个是用户能修的，答案必须点名那一个：点了另一个，会把用户送到没有解药的
+      // 页面上去。
       const unlocatable = { ...LEG_A, lineId: '999', lineName: '999路' }
       await createChain(app, chainBody({ legs: [unlocatable] }))
 
@@ -405,9 +384,8 @@ describe('F10 route: the refusal names the leg it is about, over the wire', () =
       const res = await deductions(app)
       expect(res.statusCode, res.body).toBe(200)
 
-      // Leg 0 is deduceable; leg 1's station was never chosen. The refusal has to
-      // say WHICH transfer point that is — a two-leg chain otherwise leaves the
-      // page unable to point at it or name the line that refused there.
+      // 第 0 段可推演，第 1 段的站从未选过。拒绝必须说明那是哪个换乘点 —— 否则两条腿的链路会让
+      // 页面既指不出它，也说不清是哪条线路在那里拒的。
       expect(res.json().data.chains[0].deduction).toEqual({
         status: 'no-conclusion',
         reason: 'station-unset',
@@ -421,11 +399,9 @@ describe('F10 route: the refusal names the leg it is about, over the wire', () =
 
   it('carries the refusing leg\'s reading age and service state, not only its reason', async () => {
     freezeAt(T0)
-    // LINE_A's vehicle has already passed the board order (its nose is at order 3
-    // while the leg boards at order 2), so the board read prices NO row and the
-    // empty answer is the SERVICE's. The refusal must date that reading and say
-    // which service state governs it — 05:00–23:00 at 08:30 is 运营中, so the page
-    // can state a gap in a running service rather than a day that ended.
+    // LINE_A 的车头已在站序 3，而这一段在站序 2 上车，所以上车读数一行都不定价，这个空答案是
+    // 服务的。拒绝必须给那次读数标上时间、说明由哪个运营状态管辖 —— 08:30 处在 05:00–23:00 之内，
+    // 即 运营中，页面才能说这是运营中的空档，而不是一天已经结束。
     stubUpstream({ noseAtByLine: { [LINE_A]: 3 } })
     const app = await buildApp({ amapKey: 'test-key' })
     try {
@@ -449,7 +425,7 @@ describe('F10 route: the refusal names the leg it is about, over the wire', () =
 })
 
 describe('F10 route: a leg recorded the wrong way round cannot be stored', () => {
-  /** The same line, recorded with the two stations the other way round. */
+  /** 同一条线路，两个站反着记录。 */
   const BACKWARDS = {
     ...LEG_A,
     boardStationName: '丙路',
@@ -488,7 +464,7 @@ describe('F10 route: a leg recorded the wrong way round cannot be stored', () =>
       expect(res.statusCode, res.body).toBe(400)
       expect(res.json().success).toBe(false)
 
-      // The rejected write stored nothing: the leg still runs downstream.
+      // 被拒的写入什么都没存：这一段仍旧在下游跑。
       const read = (await app.inject({ url: `/api/transit/commute-chains/${created.id}` })).json().data
       expect(read.legs[0].boardStationOrder).toBe(2)
       expect(read.legs[0].alightStationOrder).toBe(3)

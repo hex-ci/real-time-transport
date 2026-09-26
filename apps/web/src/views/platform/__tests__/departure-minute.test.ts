@@ -6,19 +6,14 @@ import { departureRowOf } from '../departure-row'
 import type { PlatformLineRule } from '../types'
 
 /**
- * H1: the board's 预计到站 column must be able to state a real minute.
+ * H1：报告板的预计到站列必须能陈述真实分钟。
  *
- * The column read 「无法估算 / 暂无到站耗时」 on every row at every moment because the
- * request behind it named no target stop, and upstream fills a vehicle's `travelTimeSec`
- * only when the request says which stop it is travelling to. The route now forwards that
- * order (see `apps/server/src/__tests__/live-target-order.test.ts`) and this module turns
- * the answer into a row — so both outcomes are pinned here: a row whose reading carries
- * the platform's own minute, and a row whose reading genuinely carries none.
+ * 该列曾在每一行每一刻都读作「无法估算 / 暂无到站耗时」，因为它背后的请求没有点名目标站，
+ * 而上游只在请求说明开往哪一站时才填车辆的 `travelTimeSec`。路由现在转发该站序，本模块把答案变成行
+ * ——故此处钉住两种结果：读数携带站台自己分钟的**行**，以及读数确实没有分钟的行。
  *
- * Neither may be fabricated. The unknown state is not a defect to remove: a vehicle with
- * no served travel time has no minute, and inventing one (per-stop arithmetic, a nominal
- * speed) is the fabrication the whole F4 vocabulary exists to prevent. What was broken was
- * that the KNOWN case could not be reached at all.
+ * 两者都不得捏造。未知状态不是要移除的缺陷：没有所服务行程时间的车辆就是没有分钟，而捏造一个
+ * （逐站算术、一个标称速度）正是整套 F4 词汇要防的事。坏掉的是**已知**的情形根本无法到达。
  */
 
 const rule: PlatformLineRule = {
@@ -30,7 +25,7 @@ const rule: PlatformLineRule = {
   operatingText: '运营中，本方向暂无来车',
 }
 
-/** A vehicle reading, validated by the contract it travels as. */
+/** 一个车辆读数，由它所承载的契约校验。 */
 function bus(fields: Record<string, unknown>) {
   return LiveBusSchema.parse({ id: 'v1', updatedAt: 0, ...fields })
 }
@@ -45,33 +40,29 @@ const rowWith = (buses: Array<Record<string, unknown>>) =>
 
 describe('H1: a reading that carries this platform\'s minute is stated as a minute', () => {
   it('takes the minute upstream served for the requested stop', () => {
-    // nextOrder === stationOrder: the vehicle's nose is heading to this platform, and
-    // 480 s is the source's own travel time for it.
+    // nextOrder === stationOrder：车头正开向本站台，480 s 是来源为它给出的行程时间。
     const row = rowWith([{ order: 2, nextOrder: 3, travelTimeSec: 480, congestion: 'low' }])
 
     expect(row.etaMinutes).toBe(8)
     expect(row.stopsAway).toBe(1)
     expect(row.unavailable).toBe(false)
-    // A minute is not a service fact: the operating text belongs to the rows without one.
+    // 分钟不是服务事实：运营文本属于没有分钟的行。
     expect(row.operatingText).toBeNull()
-    // The kind follows the source, so a served minute is 实时.
+    // 类型随来源，故所服务的分钟是实时。
     expect(row.provenance).toBe('live')
     expect(row.congestion).toBe('low')
   })
 
   it('keeps the platform\'s minute, not the terminus one, when both are in the payload', () => {
-    // The defect's exact shape: an untargeted reading prices every vehicle to the
-    // terminus (here 3 240 s ≈ 54 min), which reads as a real minute and is the wrong
-    // question's answer. The targeted reading is the 480 s above; the row must never
-    // prefer the larger figure it can also hold.
+    // 缺陷的确切形状：未定位的读数把每辆车都定价到终点站（此处 3 240 s ≈ 54 min），读起来像真实
+    // 分钟，却是错问题的答案。定位读数即上面的 480 s；该行绝不可偏好它同时也能持有的更大数字。
     const row = rowWith([{ order: 2, nextOrder: 3, travelTimeSec: 480, congestion: 'low' }])
     expect(row.etaMinutes).toBe(8)
     expect(row.etaMinutes).not.toBe(54)
   })
 
   it('states the minute for a vehicle standing at the platform as the imminent one', () => {
-    // Upstream's own 0 means the vehicle is AT the stop: flooring it to 1 分钟 is this
-    // app's convention for 「马上」 and it is a reading, not a guess.
+    // 上游自己的 0 意为车辆**在**站：把它下沉到 1 分钟是本应用对「马上」的约定，是读数而非猜测。
     const row = rowWith([{ order: 3, nextOrder: 4, travelTimeSec: 0, congestion: 'high' }])
     expect(row.etaMinutes).toBe(1)
     expect(row.stopsAway).toBe(1)
@@ -81,28 +72,26 @@ describe('H1: a reading that carries this platform\'s minute is stated as a minu
 
 describe('H1: a reading that carries no minute states the honest unknown', () => {
   it('states no minute for a vehicle heading here with no served travel time', () => {
-    // The vehicle is real and its nose is heading to this platform — what upstream did
-    // not say is when. The row states that, and nothing else: no minute, no service
-    // fact (a vehicle IS in range), no failure (the request answered).
+    // 车辆真实且车头正开向本站台——上游没说何时。该行只陈述这一点，别的都不说：
+    // 无分钟、无服务事实（范围内**有**车）、无失败（请求已作答）。
     const row = rowWith([{ order: 2, nextOrder: 3, congestion: 'high' }])
 
     expect(row.etaMinutes).toBeNull()
     expect(row.stopsAway).toBe(1)
     expect(row.operatingText).toBeNull()
     expect(row.unavailable).toBe(false)
-    // No number, so no kind: a mark exists only where a minute does.
+    // 没有数字就没有类型：标记只存在于有分钟之处。
     expect(row.provenance).toBeNull()
-    // The crowding verdict is the vehicle's own and survives the missing minute.
+    // 拥挤判决是该车自己的，在分钟缺失时仍存在。
     expect(row.congestion).toBe('high')
   })
 })
 
 describe('H1: the row is about the vehicle still heading here', () => {
   it('never prices a vehicle that has already cleared the platform', () => {
-    // `nextOrder > stationOrder` is the stop the nose has passed, and chelaile's -1 is
-    // the source saying the same thing outright. Either one makes a minute for THIS
-    // platform a minute for a place the vehicle is no longer going — so the row is about
-    // the vehicle behind it (480 s, 8 min), never the nearer one that has gone by (60 s).
+    // `nextOrder > stationOrder` 是车头已越过的站，chelailie 的 -1 是来源直接说同一件事。
+    // 任一都使**本**站台的分钟成为车辆不再前往之处的分钟——故该行是关于它后面那辆车的
+    // （480 s, 8 min），绝不是已过去的那辆更近的（60 s）。
     const row = rowWith([
       { id: 'passed', order: 4, nextOrder: 5, travelTimeSec: 60 },
       { id: 'behind', order: 2, nextOrder: 3, travelTimeSec: 480 },
@@ -117,8 +106,7 @@ describe('H1: the row is about the vehicle still heading here', () => {
   })
 
   it('states the operating fact when nothing is heading here, rather than a failure', () => {
-    // An answered reading with no vehicle for this platform is not an error: the row
-    // reports what the line's own service hours say (the F3 split).
+    // 已作答的读数而没有本站台的车不是错误：该行报线路自己的运营时段所说的（F3 的拆分）。
     const row = rowWith([])
     expect(row.etaMinutes).toBeNull()
     expect(row.stopsAway).toBeNull()
@@ -140,7 +128,7 @@ describe('H1: the board asks about the platform it is showing', () => {
   const read = (relative: string) =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 
-  /** The file with its explanatory prose removed, so code is what is asserted. */
+  /** 去掉说明性文字的文件，故被断言的是代码。 */
   function codeOf(source: string): string {
     return source
       .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -149,19 +137,17 @@ describe('H1: the board asks about the platform it is showing', () => {
   }
 
   it('names the station order in the live request, which is what makes the minute exist', () => {
-    // A view that asked for the line's direction alone would receive the terminus figure
-    // and state it as this platform's, or (as it did) state no minute at all.
+    // 只索要线路方向的视图会收到终点站数字并当作本站台的陈述，
+    // 或（如它曾经那样）完全不陈述分钟。
     const view = codeOf(read('../index.vue'))
     expect(view).toContain('order: String(rule.stationOrder)')
     expect(view).toContain('departureRowOf(')
   })
 
   it('still renders the honest unknown, in exactly one wording', () => {
-    // The state stays reachable and stays worded once: a row with no minute, no vehicle
-    // fact and no failure falls to the board's last branch, which states it. The WORDS
-    // now come from `@/arrival-copy` — the one module every arrivals surface renders —
-    // so the board no longer types the sentence itself, and the render is asserted
-    // instead of the literal.
+    // 该状态仍可达且仍只被措辞一次：无分钟、无车辆事实、无失败的行落到报告板的最后一个分支，由它陈述。
+    // 措辞现在来自 `@/arrival-copy`——每个到站表面都渲染的同一个模块——故报告板不再自己打这句话，
+    // 断言的是渲染而非字面量。
     const board = read('../components/departure-board.vue')
     expect(board.match(/无法估算/g)?.length).toBe(1)
     expect(board).toContain('arrival-copy')

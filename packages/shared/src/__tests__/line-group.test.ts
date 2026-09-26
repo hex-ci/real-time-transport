@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { LineSummary } from '../schemas/api.js'
 import {
@@ -9,10 +11,9 @@ import {
   isBidirectional,
   resolveFavoriteLineId,
   resolveRouteTarget,
-  stopServedByDirection,
 } from '../line-group.js'
 
-/** chelaile bus hit: one distinct lineId per direction. */
+/** 公交命中：上行与下行各是一个不同的 lineId。 */
 const busUp: LineSummary = {
   lineId: '0010000000001',
   lineName: '101',
@@ -32,7 +33,7 @@ const busDown: LineSummary = {
   cityCode: '027',
 }
 
-/** subway hit: the SAME lineId serves both directions. */
+/** 地铁命中：同一 lineId 服务两个方向。 */
 const subwayUp: LineSummary = {
   lineId: 'subway_027_88',
   lineName: '地铁88号线外环',
@@ -56,8 +57,7 @@ describe('groupLineSummaries', () => {
 
   it('keeps the per-direction lineId distinct for buses (no invented ids)', () => {
     const groups = groupLineSummaries([busUp, busDown])
-    // The two directions must NOT collapse onto one lineId — that would make
-    // switching show the wrong way's vehicles.
+    // 两个方向绝不能塌到同一个 lineId —— 那会让切换方向后显示反方向的车辆。
     expect(groups[0]!.up!.lineId).not.toBe(groups[0]!.down!.lineId)
   })
 
@@ -86,7 +86,7 @@ describe('groupLineSummaries', () => {
     const groups = groupLineSummaries([busUp])
     expect(groups).toHaveLength(1)
     expect(groups[0]!.up).not.toBeNull()
-    // Must stay null: inventing a down lineId would point at a nonexistent route.
+    // 必须保持 null：凭空造一个下行 lineId 会指向并不存在的线路。
     expect(groups[0]!.down).toBeNull()
     expect(isBidirectional(groups[0]!)).toBe(false)
   })
@@ -113,15 +113,12 @@ describe('resolveRouteTarget', () => {
 describe('search-hit direction labels', () => {
   it('carries the provider-built label instead of leaving callers to compose one', () => {
     const [group] = groupLineSummaries([busUp, busDown])
-    // Regression: the search rows used to render `开往 ${endStop}` themselves,
-    // which is a SECOND composition of the same label the direction selector
-    // builds from `directionName`. Two composition sites can drift apart; the
-    // entry must expose the finished label so the UI only renders it.
+    // 方向名只有一个合成点：条目必须暴露已合成好的标签，UI 只负责渲染 —— 两处合成必然各自漂移。
     expect(group!.up!.directionName).toBe('开往 汽车站')
     expect(group!.down!.directionName).toBe('开往 火车站')
     for (const entry of [group!.up!, group!.down!]) {
       expect(entry.directionName).toMatch(/^开往 /)
-      // The label must name the same terminal the stop fields report.
+      // 标签必须与停靠字段给出同一个终点站。
       expect(entry.directionName).toBe(`开往 ${entry.endStop}`)
     }
   })
@@ -193,8 +190,7 @@ describe('commuteDirectionFor', () => {
   })
 
   it('does not fall back to the other purpose or to preferredDirection', () => {
-    // A morning choice must not answer for the evening, and the lineId anchor
-    // (`preferredDirection`) is not a commute direction.
+    // 早上的选择不得替晚上作答；lineId 锚点（`preferredDirection`）不是通勤方向。
     const fav = { morningDirection: 1, preferredDirection: 0 }
     expect(commuteDirectionFor(fav, 'evening')).toBeNull()
   })
@@ -210,15 +206,14 @@ describe('effectiveCommuteDirection', () => {
   it('is the stored choice on a two-way route, with no fallback', () => {
     expect(effectiveCommuteDirection({ ...twoWay, morningDirection: 1 }, 'morning')).toBe(1)
     expect(effectiveCommuteDirection({ ...twoWay, eveningDirection: 0 }, 'evening')).toBe(0)
-    // Unchosen stays unchosen: the UI must show "not set", not an arbitrary way.
+    // 未选择就保持未选择：UI 必须显示「未设置」，而不是随便一个方向。
     expect(effectiveCommuteDirection(twoWay, 'morning')).toBeNull()
     expect(effectiveCommuteDirection({ ...twoWay, morningDirection: 1 }, 'evening')).toBeNull()
   })
 
   it('resolves the sole direction on a one-way route', () => {
-    // 102 专线: upstream returns no reverse lineId, so the settings panel
-    // renders a static label instead of a picker and nothing can ever store a
-    // choice. Requiring one left every consumer stuck on "not set" forever.
+    // 单向线路（102 专线：上游不给反向 lineId，面板只能给静态标签）存不进方向选择，
+    // 故回落到 preferredDirection。
     const oneWay = { lineId: '001000000001', preferredDirection: 0 }
     expect(effectiveCommuteDirection(oneWay, 'morning')).toBe(0)
     expect(effectiveCommuteDirection(oneWay, 'evening')).toBe(0)
@@ -231,7 +226,7 @@ describe('effectiveCommuteDirection', () => {
   })
 
   it('prefers a stored choice over the one-way fallback', () => {
-    // Should upstream later gain a reverse lineId, a stored choice still wins.
+    // 即便上游后来有了反向 lineId，已存的选择仍然优先。
     const fav = {
       lineId: '001000000001',
       reverseLineId: '001000000002',
@@ -277,9 +272,8 @@ describe('favoriteDirections', () => {
   })
 
   it('yields ONE entry for a single-direction route', () => {
-    // 102 专线. Enumerating [0, 1] with a `?? f.lineId` fallback made the
-    // same lineId answer for both, so the platform board listed it twice with
-    // identical order and arrivals.
+    // 单向线路：若用 `?? f.lineId` 兜底枚举 [0, 1]，两个方向会得到同一个 lineId，
+    // 站台看板便会以相同的站序与到站把它列两次。
     const oneWay = { lineId: '001000000001', preferredDirection: 0 }
     expect(favoriteDirections(oneWay)).toEqual([
       { direction: 0, lineId: '001000000001' },
@@ -299,22 +293,13 @@ describe('favoriteDirections', () => {
   })
 })
 
-describe('stopServedByDirection', () => {
-  const detail = { stops: [{ name: '汽车站东' }, { name: '火车站' }] }
-
-  it('reports a stop that this direction serves', () => {
-    expect(stopServedByDirection(detail, '火车站')).toBe(true)
-  })
-
-  it('reports a stop this direction does not serve (direction-exclusive platform)', () => {
-    expect(stopServedByDirection(detail, '汽车站西')).toBe(false)
-  })
-
-  it('returns null when there is nothing to judge, never false', () => {
-    expect(stopServedByDirection(detail, null)).toBeNull()
-    expect(stopServedByDirection(detail, undefined)).toBeNull()
-    // Stops not loaded yet: unknown, not "not served".
-    expect(stopServedByDirection(null, '火车站')).toBeNull()
-    expect(stopServedByDirection(undefined, '火车站')).toBeNull()
+describe('reading a stored stop back', () => {
+  it('is not answered by a name-only helper any more', () => {
+    const lineGroup = readFileSync(
+      fileURLToPath(new URL('../line-group.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(lineGroup, 'a name-only "is it served" helper is back, and it cannot tell WHICH stop')
+      .not.toContain('stopServedByDirection')
   })
 })

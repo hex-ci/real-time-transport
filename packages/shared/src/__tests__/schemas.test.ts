@@ -38,9 +38,8 @@ describe('Shared Schemas', () => {
       interchanges: [],
     }
     const parsed = StationSchema.parse(unplaced)
-    // The absence is the schema's own answer: it neither requires a coordinate
-    // nor supplies one. (0, 0) is a real position in the Atlantic, so a default
-    // here would be indistinguishable from a stop the upstream really placed.
+    // 缺省就是 schema 自己的答案：既不要求坐标也不补一个。(0, 0) 是大西洋上的真实位置，
+    // 在这里补默认值会与上游真放过的站无法区分。
     expect(parsed.lat).toBeUndefined()
     expect(parsed.lng).toBeUndefined()
   })
@@ -63,12 +62,8 @@ describe('Shared Schemas', () => {
   })
 
   it('offers only the crowding levels the upstream has been observed to report', () => {
-    // F12: the crowding domain is the OBSERVED vocabulary, not a guessed ladder.
-    // Measured live so far, the upstream's crowding tag states two labels:
-    // 「不拥挤」 (key 拥挤度_1) and 「拥挤」 (keys 拥挤度_3 and 拥挤度_5 — the
-    // observed keys are not contiguous). A middle rung nobody has sampled would
-    // let a later code path turn "no reading" into a verdict, and a verdict the
-    // upstream never gave is a fabricated value; those readings stay `unknown`.
+    // F12：拥挤度的取值域取自**实测到的**词表，不是猜出来的分档。没人采样过的中间档
+    // 会让后续代码把「没有读数」变成结论，而上游从未给出的结论就是编造值 —— 那些读数保持 `unknown`。
     expect(CongestionLevelSchema.options).toEqual(['unknown', 'low', 'high'])
     expect(CongestionLevelSchema.safeParse('medium').success).toBe(false)
     expect(CongestionLevelSchema.parse('high')).toBe('high')
@@ -101,13 +96,13 @@ describe('Shared Schemas', () => {
     expect(beijing!.hasMetro).toBe(true)
     expect(getCityAdcode('027')).toBe('110000')
     expect(getCityAdcode('999')).toBe('999')
-    // Guangzhou/Shenzhen covered by curated amap-only entries
+    // 广州 / 深圳由人工维护的 amap-only 条目覆盖。
     expect(HOT_CITY_META.some(c => c.name === '广州')).toBe(true)
     expect(HOT_CITY_META.some(c => c.name === '深圳')).toBe(true)
   })
 
   it('normalizes time format from amap HHMM in schemas context', () => {
-    // firstBusTime/lastBusTime are plain strings normalized to HH:MM
+    // firstBusTime / lastBusTime 是归一化为 HH:MM 的普通字符串。
     expect(/^(\d{2}):(\d{2})$/.test('05:09')).toBe(true)
   })
 })
@@ -143,10 +138,9 @@ describe('Favourite ordering and pinning contract', () => {
       preferredDirection: 0,
       createdAt: '2024-01-01T00:00:00.000Z',
     })
-    // The order's final tiebreak travels with the row; dropping it would leave
-    // the client unable to mirror the server's `created_at ASC`.
+    // 排序的最终 tiebreak 随行出行：丢掉它客户端就无法复刻服务端的 `created_at ASC`；
+    // 新建请求没有自己的瞬间，该列属于服务端。
     expect(parsed.createdAt).toBe('2024-01-01T00:00:00.000Z')
-    // A create request has no instant of its own — the column is the server's.
     expect(UserFavoriteLineSchema.safeParse({
       userId: 'default_user',
       cityCode: '027',
@@ -167,11 +161,9 @@ describe('Home/work anchor contract', () => {
   })
 
   it('states whether a window was stored, and refuses a profile that does not', () => {
-    // `z.object` STRIPS unknown keys, so `safeParse(...).success` is green before the
-    // field exists — hence the parsed VALUE, and hence a rejection case. The field is
-    // required with no default on purpose: `mode: 'auto'` means both 「outside the
-    // configured windows」 and 「no window configured」, and only this word tells a
-    // consumer which one it is reading.
+    // `z.object` 丢弃未知键，故只断言 `safeParse(...).success` 在该字段存在前也会通过 ——
+    // 所以要断言解析后的值，并配一个拒绝用例。该字段刻意必填且无默认值：
+    // `mode: 'auto'` 同时表示「时段之外」与「从未配置时段」，只有这个词能告诉消费方读到的是哪一个。
     expect(CommuteProfileSchema.safeParse({ mode: 'work', description: '早通勤时段', windowState: 'stored' }).success).toBe(true)
     expect(CommuteProfileSchema.parse({ mode: 'auto', description: '未设置通勤时段', windowState: 'unset' }).windowState).toBe('unset')
 
@@ -193,17 +185,14 @@ describe('Home/work anchor contract', () => {
   })
 
   it('rejects a non-numeric or non-finite coordinate instead of storing it', () => {
-    // A NaN or Infinity written into a coordinate column poisons every later
-    // walking route with NaN metres or a garbage origin, and `z.object` strips
-    // rather than rejects — so this is asserted per field, on both the stored
-    // row and the PATCH payload.
+    // 坐标列里写进 NaN 或 Infinity 会毒化之后每一次步行路线（NaN 米或垃圾起点），
+    // 而 `z.object` 是丢弃而非拒绝 —— 故逐字段断言，已存行与 PATCH payload 都覆盖。
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, '39.9']) {
       expect(UpdateSettingsSchema.safeParse({ homeLat: bad }).success, `PATCH homeLat=${String(bad)}`).toBe(false)
       expect(UserSettingsSchema.safeParse({ ...hours, workLng: bad }).success, `row workLng=${String(bad)}`).toBe(false)
       const parsed = UpdateSettingsSchema.safeParse({ workLat: bad })
       expect(parsed.success).toBe(false)
-      // The rejection is visible in the parsed output's absence, not swallowed:
-      // a successful parse here would carry the value into the write path.
+      // 拒绝体现为解析结果里没有该值，而不是被吞掉：这里解析成功会把值带进写入路径。
       expect(parsed.success ? parsed.data.workLat : undefined).toBeUndefined()
     }
   })
@@ -223,9 +212,8 @@ describe('Home/work anchor contract', () => {
   })
 
   it('keeps the anchor contract per-field, so the endpoint can rule on pairs', () => {
-    // Both-or-neither is the SERVER's rule at `/settings`: the conversion needs
-    // both axes, so only the boundary can reject a lone one with a reason. The
-    // contract stays per-field so a partial write remains expressible.
+    // 「两个轴同在或同缺」是服务端 `/settings` 的规则：换算需要两个轴，
+    // 故只有边界能用理由拒绝单个轴；契约保持逐字段，部分写入才仍然可表达。
     const parsed = UpdateSettingsSchema.parse({ workLng: 116.3974 })
     expect(parsed.workLng).toBe(116.3974)
     expect(parsed.workLat).toBeUndefined()
@@ -233,7 +221,7 @@ describe('Home/work anchor contract', () => {
 })
 
 describe('Nearby-radar distance contract', () => {
-  /** One POI as the radar answers it, minus whatever the case is about. */
+  /** 一条雷达返回的 POI，去掉当前用例所针对的字段。 */
   const poi = (over: Record<string, unknown> = {}) => ({
     name: '甲路(公交站)',
     type: 'bus',
@@ -244,23 +232,20 @@ describe('Nearby-radar distance contract', () => {
 
   it('accepts a POI whose distance the radar never stated, and states none for it either', () => {
     const parsed = NearbyStationSchema.parse(poi())
-    // The absence is the schema's OWN answer: the field is optional and carries
-    // no default. `distanceMeters: 0` would be a claim that the user is standing
-    // on the platform — a real distance nobody measured.
+    // 缺省是 schema 自己的答案：该字段可选且无默认值。`distanceMeters: 0` 会声称用户就站在站台上 ——
+    // 一个没人测过的真实距离。
     expect(parsed.distanceMeters).toBeUndefined()
   })
 
   it('keeps a distance the radar does state, a zero included', () => {
-    // The other half: 0 metres is a legal reading (the POI sits on the measured
-    // point), so it is not the spelling of an absent field. A schema that dropped
-    // a stated 0 would erase a real measurement.
+    // 另一半：0 米是合法读数（POI 就在测点上），不是「字段缺失」的另一种写法；
+    // 丢掉已声明的 0 会抹掉一次真实测量。
     expect(NearbyStationSchema.parse(poi({ distanceMeters: 120 })).distanceMeters).toBe(120)
     expect(NearbyStationSchema.parse(poi({ distanceMeters: 0 })).distanceMeters).toBe(0)
   })
 
   it('still requires the name and the route type the radar is read for', () => {
-    // The distance is the only field allowed to be absent: a POI with no name or
-    // no type cannot be matched to a platform at all.
+    // 只有距离允许缺失：没有站名或没有类型的 POI 根本无法与站台匹配。
     expect(NearbyStationSchema.safeParse({ type: 'bus' }).success).toBe(false)
     expect(NearbyStationSchema.safeParse({ name: '甲路(公交站)' }).success).toBe(false)
   })
@@ -298,16 +283,14 @@ describe('Commute chain contract (F10)', () => {
     const parsed = CommuteChainSchema.parse(chain({
       legs: [{ ...leg, boardStationName: null, boardStationOrder: null }],
     }))
-    // An empty string would read back as a station named "" — a station that
-    // does not exist. "Not chosen yet" is null, and nothing else.
+    // 空串读回来会是一个名为 "" 的站 —— 并不存在的站。「尚未选择」就是 null，别无其他。
     expect(parsed.legs[0]!.boardStationName).toBeNull()
     expect(parsed.legs[0]!.boardStationOrder).toBeNull()
   })
 
   it('refuses half a station: a name without its stop order cannot be located', () => {
-    // The name alone does not resolve back into the line's stop list (duplicate
-    // names, and a subway line numbers its stops differently per direction), so
-    // the pair travels together or not at all.
+    // 站名单独无法解析回停靠列表（有重名，且地铁按方向对同一站编号不同），
+    // 故配对要么同时出行、要么都不出行。
     expect(CommuteChainSchema.safeParse(chain({
       legs: [{ ...leg, boardStationOrder: null }],
     })).success).toBe(false)
@@ -327,8 +310,7 @@ describe('Commute chain contract (F10)', () => {
   })
 
   it('rejects a negative transfer time rather than storing it as 0', () => {
-    // "Unset" is null; a negative number is not a smaller "unset", it is a
-    // contradiction that would subtract minutes from a connection.
+    // 「未设置」是 null；负数不是更小的「未设置」，而是会把接驳时长减成负数的矛盾值。
     expect(CommuteChainSchema.safeParse(chain({
       legs: [{ ...leg, transferExtraMinutes: -1 }],
     })).success).toBe(false)

@@ -4,18 +4,13 @@ import { describe, expect, it } from 'vitest'
 import { statedDistanceSuffix } from '../landmark-distance'
 
 /**
- * The radar's distance, on the one surface that renders it: the landmark hint
- * under the platform board's GPS button.
+ * 雷达的距离，在渲染它的唯一表面上：站台屏 GPS 按钮下的地标提示。
  *
- * The value comes from `NearbyStationResult.distanceMeters`, which the wire makes
- * optional because Amap leaves the field out for a POI it did not measure. That
- * absence is NOT a distance of zero — 「0m」 claims the user is standing on the
- * platform — and it is not a number this screen may invent either: the view's own
- * `Math.round(...)` printed 「NaNm」 for it. So the hint renders the distance when
- * the radar stated one (a stated 0 included: that IS a measurement) and renders
- * nothing where the field is absent. What the number means is decided upstream in
- * `statedNumber`; what this file pins is that the screen never states a distance
- * nobody measured, and never substitutes one.
+ * 该值来自 `NearbyStationResult.distanceMeters`，线上把它设为可选，因为高德对未测量的 POI 会省掉该字段。
+ * 该缺失**不是**距离零——「0m」声称用户正站在站台上——也不是本屏可以捏造的数字：视图自己的
+ * `Math.round(...)` 为它印出「NaNm」。故雷达陈述了距离时提示渲染它（陈述的 0 也包括，那确实是测量），
+ * 字段缺失时什么都不渲染。数字的含义在上游 `statedNumber` 中决定；本文件钉的是该屏绝不陈述没人测量过的
+ * 距离，也绝不用别的替代。
  */
 
 describe('the hint states the distance only where the radar stated one', () => {
@@ -25,24 +20,21 @@ describe('the hint states the distance only where the radar stated one', () => {
   })
 
   it('keeps a stated zero, which is a measurement and not the absence', () => {
-    // A POI on the measured point is genuinely 0 m away. Reading that as 「no
-    // distance」 would erase a real reading, exactly as inventing a 0 for an
-    // absent field would.
+    // 位于被测点上的 POI 真的是 0 m。把它读成「无距离」会抹掉一个真实读数，
+    // 正如为缺失字段捏造 0 一样。
     expect(statedDistanceSuffix(0)).toBe('（0m）')
   })
 
   it('renders no distance at all where the radar never stated one', () => {
     const absent = statedDistanceSuffix(undefined)
     expect(absent).toBe('')
-    // The failure this replaces, named: the old expression printed 「（NaNm）」,
-    // and a 「0m」 would be the same class of claim — a number nobody measured.
+    // 本实现所替代的失败，点名于此：旧表达式印出「（NaNm）」，而「0m」会是同一类断言——一个没人测量过的数字。
     expect(absent).not.toContain('NaN')
     expect(absent).not.toContain('0')
   })
 
   it('renders no distance for a value no radar could have measured', () => {
-    // A non-finite value is the same absence: it is not a distance, and printing
-    // it would put a number on screen that measures nothing.
+    // 非有限值与缺失同义：它不是距离，印出它会把一个不测量任何东西的数字放上屏幕。
     expect(statedDistanceSuffix(Number.NaN)).toBe('')
     expect(statedDistanceSuffix(Number.POSITIVE_INFINITY)).toBe('')
   })
@@ -55,8 +47,7 @@ describe('the platform view reads the distance through the one rule', () => {
   )
 
   it('never rounds a distance the radar may not have stated', () => {
-    // `Math.round(nearestPoi.distanceMeters)` is the expression that turned an
-    // absent field into 「NaNm」 on the hint.
+    // `Math.round(nearestPoi.distanceMeters)` 正是把缺失字段变成提示上「NaNm」的表达式。
     expect(view, 'the view rounds a distance that may be absent')
       .not.toMatch(/Math\.round\(\s*nearestPoi\.distanceMeters/)
     expect(view, 'the view does not route the distance through the shared rule')
@@ -64,10 +55,8 @@ describe('the platform view reads the distance through the one rule', () => {
   })
 
   it('renders the distance on both hint branches, and invents none elsewhere', () => {
-    // Both branches that name a platform carry its stated distance; the 「no
-    // platform in range」 branch has no distance to state at all. The pin is the
-    // rendered copy, so a branch that keeps its own number expression is visible
-    // here rather than only in the browser.
+    // 两个点名站台的分支都携带其陈述的距离；「范围内无站台」分支根本没有距离可陈述。
+    // 此处钉的是渲染文案，故保留自己数字表达式的分支在此可见而非只在浏览器里。
     expect(view.match(/statedDistanceSuffix\(/g)).toHaveLength(1)
     expect(view).toContain('`GPS 已对准 ${matched}${distance}`')
     expect(view).toContain('`最近站台 ${nearestPoi.name}${distance}，不在关注线路中`')

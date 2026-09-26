@@ -22,7 +22,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: () => {} }),
 }))
 
-/** The reads the page makes, with the profile answer under the test's control. */
+/** 页面发出的读取，profile 答案由测试控制。 */
 function routes(profile: unknown): Route[] {
   return [
     [/\/api\/transit\/favorites$/, () => ({ success: true, data: [] })],

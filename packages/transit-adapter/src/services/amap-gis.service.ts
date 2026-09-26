@@ -6,35 +6,26 @@ import { statedCoordinate, statedNumber, statedStopOrder } from '@real-time-tran
 const AMAP_BASE = 'https://restapi.amap.com'
 
 /**
- * Ceiling on cached walking ETAs. Entries are keyed by anchor coordinates, so a
- * moving fix mints a fresh key every poll: a long-running process would
- * otherwise keep one entry per position it has ever seen.
+ * 步行走廊 ETA 缓存的上限。条目按锚点坐标作键，移动中的定位每次
+ * 轮询都会造出新键，没有上限时长跑进程会为见过的每个位置各留一条。
  */
 export const WALK_ETA_MAX_ENTRIES = 500
 
-/** A fixed (anchor, station) pair barely moves, so a priced walking leg is re-fetched daily. */
+/** 固定的（锚点, 站点）对几乎不动，所以已定价的步行腿每天重取一次。 */
 const WALK_ETA_TTL_MS = 24 * 3600 * 1000
 
-/** After a transient failure, retry soon but keep serving the last good leg meanwhile. */
+/** 瞬时失败后尽快重试，同时继续供上一条可用的腿。 */
 const WALK_ETA_RETRY_MS = 30 * 1000
 
 /**
- * Walking-ETA cache key, built from the GCJ-02 pair exactly as sent upstream,
- * rounded to 5 decimals (~1 m). Keying on the coordinates the priced leg belongs
- * to lets two anchors inside one ~1 m cell share an entry, and keeps a change to
- * the conversion from serving a leg priced for another coordinate.
+ * 步行走廊 ETA 的缓存键：用原样发给上游的 GCJ-02 坐标构造，保留
+ * 5 位小数（约 1 m），使同一个 ~1 m 格子内的锚点共用条目，坐标
+ * 转换改动后也不会供出为别的坐标定价的腿。
  */
 function walkEtaCacheKey(glng: number, glat: number, dlng: number, dlat: number): string {
   return `${glng.toFixed(5)},${glat.toFixed(5)}|${dlng.toFixed(5)},${dlat.toFixed(5)}`
 }
 
-/**
- * Amap infocodes that mean "retry later", not "this line does not exist":
- * 10002 key expired/limited, 10003 daily quota exceeded, 10014 QPS limit,
- * 10015 invalid key, 10019/10020/10021/10022/10029 various quota & CUQPS
- * throttles. A genuine "no data" response uses infocode 10000 with empty
- * buslines, or 20000/20800-class parameter codes (non-transient).
- */
 const TRANSIENT_AMAP_INFOCODES = new Set([
   '10002', '10003', '10004', '10005', '10006', '10007',
   '10008', '10009', '10010', '10011', '10012', '10013',
@@ -50,30 +41,27 @@ export interface WalkEtaResult {
 export interface NearbyStationResult {
   name: string
   type: 'bus' | 'subway'
-  /** The POI's own GCJ-02 position, absent when the payload stated no position for it. */
+  /** POI 自身的 GCJ-02 位置；上游未给出位置时缺省。 */
   lat?: number
   lng?: number
   /**
-   * Metres to the POI, absent when the payload stated no distance for it.
+   * 到 POI 的米数；上游未给出距离时缺省。
    *
-   * Read through `statedNumber`, so a distance the payload spells as `0` — a POI
-   * on the measured point — is a real reading and only an unstated one is absent.
+   * 经 `statedNumber` 读取：写成 `0`（POI 就在测点上）是真实读数，
+   * 只有未声明的距离才算缺省。
    */
   distanceMeters?: number
 }
 
 /**
- * An Amap 「lng,lat」 pair, or undefined when the payload states no position.
+ * 高德的「lng,lat」坐标对；上游未给出位置时为 undefined。
  *
- * Amap leaves `location` out for a stop or POI it could not place, and a pair it
- * DID state is taken only as far as {@link statedCoordinate} takes it: a half
- * that is empty, malformed, non-finite or ZERO makes the whole pair absent. The
- * zero is not decorative — no placed stop on this app's GCJ-02 datum sits at 0 on
- * either axis, so a payload spelling one is stating that it could not place the
- * stop, and what a caller must read is the absence rather than a point on the
- * equator or the Greenwich meridian. Both spellings of the pair are read — the
- * REST payloads state it as the string 「lng,lat」, and a two-element array states
- * the same two numbers — and the order is upstream's own: longitude first.
+ * 高德对放不下的站点或 POI 会省略 `location`；写出的坐标对也只取到
+ * {@link statedCoordinate} 的程度 —— 一半为空、格式错、非有限或为 0
+ * 都使整对缺省。0 不是装饰：本应用的 GCJ-02 基准上没有任何已放置的
+ * 站点落在某个轴的 0 上，所以上游写 0 就是在说它放不下这个站点。
+ * 两种写法都读：REST 载荷是字符串「lng,lat」，二元数组给同样两个数，
+ * 顺序按上游自己的 —— 经度在前。
  */
 function parseAmapLocation(location: unknown): { lng: number, lat: number } | undefined {
   const pair = Array.isArray(location)
@@ -85,7 +73,6 @@ function parseAmapLocation(location: unknown): { lng: number, lat: number } | un
   return lng === undefined || lat === undefined ? undefined : { lng, lat }
 }
 
-/** Rate-limited sequential queue for Amap QPS protection (min interval per request) */
 class AmapRateLimiter {
   private lastRequestTime = 0
   private readonly minIntervalMs: number
@@ -105,23 +92,18 @@ class AmapRateLimiter {
 }
 
 /**
- * Amap Web-Service GIS client.
+ * 高德 Web 服务 GIS 客户端。
  *
- * COORDINATE CONTRACT: every public method that takes coordinates takes
- * **GCJ-02** — the app's normalized system, which is also what Amap's REST API
- * speaks — and performs no conversion. A raw device fix is WGS-84
- * (`navigator.geolocation` reports it unconverted, and the web app sends it
- * as-is), so it must be converted with `wgs84ToGcj02` at the HTTP boundary,
- * exactly once, BEFORE it reaches this service. Converting here as well would
- * shift an origin by ~500 m; converting a destination here is worse still,
- * because every station coordinate the app holds is already GCJ-02 (Amap static
- * station sequence — `docs/PRD.md` standardizes all stored and delivered
- * coordinates on GCJ-02), so it would be converted a second time.
+ * 坐标契约：每个接收坐标的公开方法接收的都是 **GCJ-02** —— 应用的
+ * 归一化坐标系，也正是高德 REST API 使用的坐标系 —— 且不做任何转换。
+ * 原始设备定位是 WGS-84，必须在 HTTP 边界用 `wgs84ToGcj02` 只转换
+ * 一次，在它到达本服务之前：在这里再转一次会把起点挪偏；而在终点上
+ * 转更糟，因为应用的每个站点坐标本已是 GCJ-02（`docs/PRD.md` 规定
+ * 存储与传输坐标统一为 GCJ-02），那就会是第二次转换。
  */
 export class AmapGisService {
   private readonly apiKey: string
   private readonly limiter = new AmapRateLimiter(220)
-  /** In-process long-lived cache for static line data (stations rarely change) */
   private readonly lineCache = new Map<string, {
     data: AmapLineResult | null
     expiresAt: number
@@ -129,14 +111,13 @@ export class AmapGisService {
   }>()
 
   /**
-   * Walking ETAs are stable for a fixed (anchor, station) pair, so they are
-   * cached long. Without this the home screen's polling alone would exceed the
-   * AMap monthly quota.
+   * 固定的（锚点, 站点）步行 ETA 很稳定，所以长期缓存；
+   * 否则仅首页轮询就会超出高德月度配额。
    */
   private readonly walkEtaCache = new Map<string, { meters: number, seconds: number, expiresAt: number }>()
 
   constructor(apiKey?: string) {
-    // Explicit argument (even '') wins; undefined falls back to environment
+    // 显式实参（即使是 ''）优先；未传（undefined）才回落到环境变量
     this.apiKey = apiKey !== undefined ? apiKey : (process.env.AMAP_MAPS_API_KEY || '')
   }
 
@@ -145,13 +126,12 @@ export class AmapGisService {
   }
 
   /**
-   * Amap request with an explicit failure classification.
+   * 带明确失败分类的高德请求。
    *
-   * `transient` distinguishes a retryable condition (no key, network error,
-   * timeout, HTTP 5xx, or Amap QPS/quota infocodes like 10002/10003/10014/
-   * 10019/10020/10021/10022/10029) from a genuine "valid response, but no
-   * matching data" result. Callers use this to decide whether serving stale
-   * cache is appropriate — a transient blip must never poison good data.
+   * `transient` 把可重试的情形（无 key、网络错误、超时、HTTP 5xx、
+   * 高德 QPS/配额类 infocode）与真正的「响应合法但没有匹配数据」
+   * 区分开；调用方据此决定是否适合供出陈旧缓存 —— 一次瞬时抖动
+   * 绝不能污染好数据。
    */
   private async requestDetailed(
     path: string,
@@ -172,7 +152,6 @@ export class AmapGisService {
     try {
       const res = await fetch(url, { signal: controller.signal })
       if (!res.ok) {
-        // 5xx = upstream trouble (transient); 4xx = our request is wrong
         return { json: null, transient: res.status >= 500 }
       }
       const json = await res.json() as any
@@ -182,7 +161,6 @@ export class AmapGisService {
       return { json, transient: false }
     }
     catch {
-      // Network error / timeout / abort — always retryable
       return { json: null, transient: true }
     }
     finally {
@@ -195,12 +173,6 @@ export class AmapGisService {
     return json
   }
 
-  /**
-   * Fetch static line info (stations with coordinates) for any city / any line.
-   * Used for: subway lines nationwide (Beijing 1~19, Shanghai 2, Guangzhou 3, ...),
-   * and as a fallback for bus lines that Chelaile cannot find.
-   * Results cached for 24 hours in-process, persisted upstream by the server DB.
-   */
   async getLineByName(cityNameOrAdcode: string, keyword: string): Promise<AmapLineResult | null> {
     const cacheKey = `${cityNameOrAdcode}_${keyword}`
     const cached = this.lineCache.get(cacheKey)
@@ -218,12 +190,11 @@ export class AmapGisService {
 
     const raw = json?.buslines?.[0] || null
     if (!raw) {
-      // Transient failure (QPS/quota/network): NEVER poison good cached data.
-      // Station sequences are extremely stable, so serving previously fetched
-      // data always beats returning a 404 for a line that really exists.
+      // 瞬时失败（QPS/配额/网络）：绝不能污染好的缓存数据。
+      // 站点序列极其稳定，所以供出此前取到的数据，永远优于
+      // 为一条真实存在的线路返回 404。
       if (transient) {
         if (cached?.data) {
-          // Keep the real data but mark it expired so the next call retries.
           this.lineCache.set(cacheKey, {
             data: cached.data,
             expiresAt: Date.now() + 30 * 1000,
@@ -234,8 +205,8 @@ export class AmapGisService {
         this.lineCache.set(cacheKey, { data: null, expiresAt: Date.now() + 30 * 1000, fetchedAt: Date.now() })
         return null
       }
-      // Genuine miss (valid response, no such line): short negative cache so a
-      // typo search is not hammered upstream, but recovery stays fast.
+      // 真正的未命中（响应合法，确无此线路）：短负缓存，使一次
+      // 打错字的搜索不至于反复捶上游，同时恢复仍然很快。
       this.lineCache.set(cacheKey, { data: null, expiresAt: Date.now() + 30 * 1000, fetchedAt: Date.now() })
       return null
     }
@@ -247,8 +218,6 @@ export class AmapGisService {
         id: String(stop.id || `amap_stop_${idx + 1}`),
         name: String(stop.name || ''),
         order: statedStopOrder(stop.sequence, idx + 1),
-        // A stop Amap could not place stays unplaced — whether the payload left
-        // `location` out or spelled it with a zero. See `parseAmapLocation`.
         lat: location?.lat,
         lng: location?.lng,
         interchanges: [],
@@ -275,9 +244,8 @@ export class AmapGisService {
   }
 
   /**
-   * Drop walking ETAs that have expired, returning how many were dropped. A
-   * long-running process sees a new anchor with every GPS fix, so the map is
-   * pruned while it is being written rather than left to grow.
+   * 清掉已过期的步行 ETA 并返回清掉的条数：长跑进程每次定位都
+   * 带来新锚点，所以缓存边写边剪枝，而不是任其增长。
    */
   clearExpired(): number {
     const now = Date.now()
@@ -292,10 +260,9 @@ export class AmapGisService {
   }
 
   /**
-   * Shed the longest-held entries until there is room for another, so a drifting
-   * fix cannot push the map past WALK_ETA_MAX_ENTRIES. Map iteration follows
-   * insertion order, so what is dropped is the oldest anchor rather than the
-   * one just priced.
+   * 一直淘汰最早持有的条目，直到腾出一个位置，使漂移的定位不会把
+   * 缓存推过 WALK_ETA_MAX_ENTRIES。Map 的迭代遵循插入顺序，所以
+   * 淘汰的是最早的锚点，而不是刚定价的那一个。
    */
   private dropOldestWalkingEta(): void {
     while (this.walkEtaCache.size >= WALK_ETA_MAX_ENTRIES) {
@@ -314,12 +281,10 @@ export class AmapGisService {
   }
 
   /**
-   * Real-road walking route planning (v3/direction/walking).
-   * Used to compute "should I run for the bus?" decision.
+   * 真实道路步行路线规划（v3/direction/walking），用于「要不要跑去赶车」。
    *
-   * Both ends are GCJ-02 and are sent upstream exactly as given: the origin is a
-   * position in the app's normalized system, and the destination is a stored
-   * station coordinate, which is already in it. See the class contract.
+   * 两端都是 GCJ-02，原样发给上游：起点是应用归一化坐标系里的位置，
+   * 终点是已存储的站点坐标，本来就在该坐标系内。见类上的契约。
    */
   async getWalkingEta(originLng: number, originLat: number, destLng: number, destLat: number): Promise<WalkEtaResult | null> {
     const cacheKey = walkEtaCacheKey(originLng, originLat, destLng, destLat)
@@ -336,11 +301,10 @@ export class AmapGisService {
 
     const path = json?.route?.paths?.[0]
     if (!path) {
-      // Transient failure (QPS/quota/network): NEVER poison good data. A leg
-      // priced earlier is still the best answer available for this pair, so
-      // serve it and mark the entry for an early retry rather than reporting
-      // the stop unreachable. With nothing priced yet there is no answer to
-      // give, and null is the signal the callers already degrade on.
+      // 瞬时失败（QPS/配额/网络）：绝不能污染好数据。此前定价的这条腿
+      // 仍是该端点对可得的最佳答案，所以供出它并把条目标成尽早重试，
+      // 而不是报告此站不可达。还没有任何定价时没有答案可给，
+      // 而 null 正是调用方已在降级处理的信号。
       if (transient && cached) {
         this.walkEtaCache.set(cacheKey, { ...cached, expiresAt: Date.now() + WALK_ETA_RETRY_MS })
         return { distanceMeters: cached.meters, durationSeconds: cached.seconds }
@@ -348,13 +312,10 @@ export class AmapGisService {
       return null
     }
 
-    // A path that exists but does not price both ends is the same class of answer
-    // as the empty `paths` list above — upstream's own 「no route for this pair」
-    // — and it is what a SUCCESSFUL response can carry, so the stale entry is not
-    // served in its place: the current truth is that this pair has no price. The
-    // two numbers as the payload states them, or nothing at all. A stated `0` is
-    // kept: the upstream's shortest priced walk is one second and two coincident
-    // points are a legal 0-metre leg, so zero is a price it really states.
+    // 路径存在但没有为两端都定价，与上面空的 `paths` 是同一类答案 ——
+    // 上游自己的「这对端点无路线」—— 所以不用陈旧条目顶替：当下的事实
+    // 就是这对端点没有价格。载荷写出的两个数原样采用，写出的 `0` 保留
+    // （0 米腿合法），否则视为无价格并返回 null。
     const distanceMeters = statedNumber(path.distance)
     const durationSeconds = statedNumber(path.duration)
     if (distanceMeters === undefined || durationSeconds === undefined) {
@@ -367,11 +328,11 @@ export class AmapGisService {
   }
 
   /**
-   * Nearby bus/subway stations radar (v3/place/around).
-   * type: 150700 = 公交车站, 150500 = 地铁站
+   * 附近公交/地铁站雷达（v3/place/around），
+   * type: 150700 = 公交车站, 150500 = 地铁站。
    *
-   * `lng`/`lat` are GCJ-02 and are sent upstream as given — see the class
-   * contract. The results come back in GCJ-02 too.
+   * `lng`/`lat` 是 GCJ-02，原样发给上游，返回结果同样是 GCJ-02。
+   * 见类上的契约。
    */
   async getNearbyStations(lng: number, lat: number, radiusMeters: number = 800): Promise<NearbyStationResult[]> {
     const json = await this.request('/v3/place/around', {
@@ -388,27 +349,20 @@ export class AmapGisService {
       return {
         name: String(poi.name || ''),
         type: String(poi.type || '').includes('地铁站') ? 'subway' : 'bus',
-        // A POI Amap could not place — or marks with a zero — keeps no position:
-        // it is still a station name with a stated distance, which is what this
-        // radar is read for.
+        // 高德放不下 —— 或用 0 标记 —— 的 POI 保持没有位置，但它仍是
+        // 一个带已声明距离的站名，而这个雷达要读的正是后者。
         lat: location?.lat,
         lng: location?.lng,
-        // The distance the payload STATES, or absent when it states none.
-        // Deliberately not a coordinate read: a stated 0 is a real distance to a
-        // POI on the measured point, whereas a 0 coordinate is a stop nobody
-        // placed. `Number(poi.distance || 0)` answered a real-looking 「0m」 for a
-        // POI the radar never measured, which the landmark hint rendered as a
-        // distance.
+        // 载荷「声明」的距离，未声明时缺省。刻意不按坐标读：写出的 0 是
+        // 到测点上那个 POI 的真实距离，而坐标为 0 是没人放置过的站；
+        // 未测量就必须缺省，不能给出看着真实的「0m」。
         distanceMeters: statedNumber(poi.distance),
       }
     })
   }
 
-  /**
-   * Reverse geocoding (v3/geocode/regeo): a GCJ-02 point -> human-readable
-   * landmark description. `lng`/`lat` are sent upstream as given — see the class
-   * contract.
-   */
+  /** 逆地理编码（v3/geocode/regeo）：GCJ-02 点 -> 可读地标描述。
+   *  `lng`/`lat` 原样发给上游 —— 见类上的契约。 */
   async reverseGeocode(lng: number, lat: number): Promise<string | null> {
     const json = await this.request('/v3/geocode/regeo', {
       location: `${lng.toFixed(6)},${lat.toFixed(6)}`,
@@ -429,10 +383,6 @@ export class AmapGisService {
   }
 }
 
-/**
- * Amap v3/bus/linename returns start_time/end_time in HHMM form ("0509")
- * or occasionally already colon-separated ("05:09"). Normalize to HH:MM.
- */
 export function normalizeAmapTime(raw: unknown): string {
   if (raw === undefined || raw === null) return ''
   const s = String(raw).trim()
@@ -448,7 +398,6 @@ export function normalizeAmapTime(raw: unknown): string {
   return s
 }
 
-/** Detect subway/metro type from an amap busline record (type strings vary: "地铁线路", "150500", "地铁"). */
 function isSubwayType(raw: any): boolean {
   const t = String(raw?.type || '')
   const name = String(raw?.name || '')

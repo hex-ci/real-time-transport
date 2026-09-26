@@ -23,35 +23,30 @@ import type { CommuteChainLeg } from '../schemas/api.js'
 import type { DataSourceType, OperatingStatus } from '../schemas/transit.js'
 
 /**
- * A line's own service hours, as F3 derives a state from them. Every leg in this
- * suite is 运营中 unless a test says otherwise: the clock is `NOW`, which is
- * 06:13:20 Beijing on the operating day the fixtures sit in.
+ * 线路自己的服务时刻，F3 据此导出状态。
+ * 除注明外，本套件每段都是 运营中：时钟是 `NOW`，即各 fixture 所属运营日的北京时间 06:13:20。
  */
 const OPERATING: OperatingStatus = { state: 'operating', firstDeparture: '05:00', lastDeparture: '23:00' }
 
 /**
- * F10's chain deduction, at its boundaries.
+ * F10 的链路推演，在其边界上。
  *
- * The engine is pure, so every number the row shows is decided here: the margin
- * (and therefore the band), which vehicle each leg boards, the F4 mark of each
- * minute, and every case where the honest answer is 「无法给出结论」. All station
- * and line values are synthetic placeholders — this suite never carries a real
- * commute of anyone's.
+ * 引擎是纯的，故行展示的每个数字都在此决定：余量（进而带位）、每段上哪辆车、
+ * 每个分钟的 F4 标记，以及诚实答案是「无法给出结论」的每一种情形。
+ * 所有站与线的取值都是合成的占位符 —— 本套件从不携带任何人的真实通勤。
  *
- * Two sets of numbers matter. The first is the four bands, whose thresholds are
- * F1's own (`CHAIN_TIGHT_MARGIN_MINUTES` = T) plus the resolution of a
- * whole-minute margin (`CHAIN_ERROR_MAGNITUDE_MINUTES`). The second is the
- * binding leg: with more than one boarding, the conclusion belongs to the
- * tightest one, not to the first.
+ * 两组数字重要。一是四个带位，其阈值就是 F1 的（`CHAIN_TIGHT_MARGIN_MINUTES` = T）
+ * 加上整分余量的分辨率（`CHAIN_ERROR_MAGNITUDE_MINUTES`）；
+ * 二是决定性路段：有多次上车时，结论属于最紧的那次，而不是第一次。
  */
 
-/** A fixed clock: the engine reads the AGE of a reading, never the wall clock. */
+/** 固定时钟：引擎读的是读数的**年龄**，绝不是墙上时钟。 */
 const NOW = 1_700_000_000_000
 
 const BOARD_STATION = { name: '甲乙路', order: 3 }
 const ALIGHT_STATION = { name: '丙丁路', order: 8 }
 
-/** Minutes on the wire, as a card displays them. */
+/** 线上分钟数，按卡片展示口径。 */
 function minutes(n: number): number {
   return n * 60
 }
@@ -59,32 +54,29 @@ function minutes(n: number): number {
 interface LegSpec {
   seq?: number
   lineId?: string
-  /** `null` = never chosen. Absent = the default station pair. */
+  /** `null` = 从未选择。缺省 = 默认的站点配对。 */
   board?: { name: string, order: number } | null
   alight?: { name: string, order: number } | null
   transferExtraMinutes?: number | null
-  /** Seconds of the connection leading INTO this leg; `null` = unpriced. */
+  /** 进入本路段的接驳秒数；`null` = 未计价。 */
   connectionSeconds?: number | null
   /**
-   * Why the connection has no priced duration, as the caller that tried to price
-   * it knows the cause. Absent = the caller cannot name it.
+   * 接驳为什么没有计价时长，由尝试计价的调用方给出原因。缺省 = 调用方说不清。
    */
   connectionUnpricedReason?: ChainConnectionUnpricedReason
   connectionMode?: 'walk' | 'cycle'
-  /** `null` = the line was never read; `[]` = read, nothing on its way. */
+  /** `null` = 线路从未读取；`[]` = 读过，没有车在途。 */
   vehicles?: readonly ChainLegVehicle[] | null
   /**
-   * How many vehicles the BOARD read's own priced rows carried before pairing —
-   * the rows still to reach the board order. Defaults to the paired count, which
-   * is what a consistent (forward) reading has, since the paired rows are a
-   * subset of the board read's own; a test that wants the two to disagree states
-   * it explicitly.
+   * **看板**读数自己的已计价行在配对**之前**携带了多少辆车 —— 仍要抵达看板站序的行。
+   * 默认为配对后的计数，即一致（正向）读数的取值，因为配对行是看板读数自身行的子集；
+   * 想让两者不一致的用例需显式说明。
    */
   boardVehiclesOnTheWay?: number
   dataSource?: DataSourceType | null
   updatedAt?: number
   isDegraded?: boolean
-  /** The leg's F3 operating state, as the assembly derived it. Defaults to 运营中. */
+  /** 该路段的 F3 运营状态，按装配层的推导。默认 运营中。 */
   operatingStatus?: OperatingStatus
 }
 
@@ -112,8 +104,7 @@ function chainInput(specs: LegSpec[], extra: Partial<CommuteChainDeductionInput>
     legs: specs.map((spec, seq): ChainLegInput => ({
       leg: storedLeg(spec, spec.seq ?? seq),
       connectionSeconds: spec.connectionSeconds === undefined ? minutes(5) : spec.connectionSeconds,
-      // Only where the caller can name it: a leg with a priced connection, and a
-      // caller that cannot say why one is unpriced, both state no reason.
+      // 只在调用方能说出原因时才带原因：接驳已计价的路段，以及说不清某段为何未计价的调用方，都不给原因。
       connectionUnpricedReason: spec.connectionSeconds === null ? spec.connectionUnpricedReason : undefined,
       connectionMode: spec.connectionMode ?? 'walk',
       live: spec.vehicles === null
@@ -130,7 +121,7 @@ function chainInput(specs: LegSpec[], extra: Partial<CommuteChainDeductionInput>
   }
 }
 
-/** One candidate vehicle: the same vehicle's ETA at the board and at the alight station. */
+/** 一辆候选车辆：同一辆车在上车站与下车站的 ETA。 */
 function vehicle(
   vehicleId: string,
   boardSeconds: number,
@@ -154,9 +145,8 @@ function refusal(input: CommuteChainDeductionInput): ChainNoConclusionReason {
 
 describe('F10 deduction: the four bands, each from the same margin the row shows', () => {
   /**
-   * The whole mapping, driven end to end through the public entry point. Both
-   * columns must hold together: a band read from a quantity other than the
-   * reported margin fails one of them.
+   * 整张映射，经由公开入口端到端驱动。两列必须互相印证：
+   * 从「非所报余量」读出的带位会使其一失败。
    */
   const TABLE: readonly { name: string, connectionSeconds: number, boardSeconds: number, band: ChainMarginBand, marginMinutes: number }[] = [
     { name: '充裕: seven minutes of slack', connectionSeconds: minutes(5), boardSeconds: minutes(12), band: 'comfortable', marginMinutes: 7 },
@@ -177,7 +167,7 @@ describe('F10 deduction: the four bands, each from the same margin the row shows
 
       expect(result.marginMinutes).toBe(row.marginMinutes)
       expect(result.band).toBe(row.band)
-      // The band is a function of the margin this result reports, and of nothing else.
+      // 带位是本结果所报余量的函数，而不是别的任何东西的函数。
       expect(result.band).toBe(chainMarginBandOf(result.marginMinutes, CHAIN_TIGHT_MARGIN_MINUTES))
     })
   }
@@ -192,8 +182,8 @@ describe('F10 deduction: the four bands, each from the same margin the row shows
   })
 
   it('bands a one-leg chain the way F1 bands the same walk', () => {
-    // F1: slack = eta - walk, hurry at slack <= T. Same numbers, same boundary,
-    // because the chain's tolerance IS F1's.
+    // F1：slack = eta - walk，slack <= T 时为 hurry。同样的数字、同样的边界，
+    // 因为链的容忍值就是 F1 的。
     const walk = minutes(6)
     const result = deduced(chainInput([{ connectionSeconds: walk, vehicles: [vehicle('A', minutes(9), minutes(20))] }]))
     expect(result.marginMinutes).toBe(3)
@@ -219,7 +209,7 @@ describe('F10 deduction: 有余量就是这班, 不足就是下一班', () => {
 
     expect(result.band).toBe('insufficient')
     expect(result.marginMinutes).toBe(-2)
-    // The vehicle the chain was timed against is gone; the plan is the next one.
+    // 链所对的那辆车已经走了；方案是下一辆。
     expect(result.legs[0]?.vehicleId).toBe('B')
     expect(result.legs[0]?.waitMinutes).toBe(3)
     expect(result.legs[0]?.marginMinutes).toBe(-2)
@@ -227,9 +217,8 @@ describe('F10 deduction: 有余量就是这班, 不足就是下一班', () => {
   })
 
   it('puts no quantity beside a refusal — only the reason and which leg refused', () => {
-    // A refusal carries no margin, no minute and no plan: a number beside a
-    // refusal is exactly the guessed answer the refusal exists to avoid. WHICH
-    // leg refused is not such a number (see `ChainNoConclusion`), so it travels.
+    // 一次拒绝不携带余量、分钟与方案：拒绝旁边的数字正是该拒绝存在的意义所要避免的猜测答案。
+    // 而「哪一段拒绝」不是这样的数字（见 `ChainNoConclusion`），故它可以随行。
     const result = deduceCommuteChain(chainInput([{ vehicles: null }]))
     expect(result.status).toBe('no-conclusion')
     expect(Object.keys(result).sort()).toEqual(['leg', 'reason', 'status'])
@@ -238,7 +227,7 @@ describe('F10 deduction: 有余量就是这班, 不足就是下一班', () => {
 
 describe('F10 deduction: the tightest boarding decides the chain', () => {
   it('takes the smallest margin, not the first leg\'s', () => {
-    // Leg 0 has six minutes to spare (comfortable on its own); leg 1 has one.
+    // 第 0 段有 6 分钟富余（单独看是充裕）；第 1 段只有 1 分钟。
     const result = deduced(chainInput([
       { vehicles: [vehicle('A', minutes(11), minutes(25))] },
       { lineId: '202', vehicles: [vehicle('C', minutes(31), minutes(40))] },
@@ -262,9 +251,8 @@ describe('F10 deduction: the tightest boarding decides the chain', () => {
   })
 
   it('chains leg 1\'s ready time off the vehicle leg 0 is boarded on', () => {
-    // Leg 0 alights at 20 min; the transfer walk is 5 min, so the user is at the
-    // second board station at 25 min. A vehicle arriving at 26 min is catchable
-    // with one minute to spare, and one arriving at 22 min is not.
+    // 第 0 段在 20 分钟到达；换乘步行 5 分钟，故用户 25 分钟到第二段的上车站。
+    // 26 分钟到的车赶得上、富余 1 分钟；22 分钟到的赶不上。
     const catchable = deduced(chainInput([
       { vehicles: [vehicle('A', minutes(6), minutes(20))] },
       { lineId: '202', connectionSeconds: minutes(5), vehicles: [vehicle('C', minutes(26), minutes(40))] },
@@ -298,9 +286,8 @@ describe('F10 deduction: the tightest boarding decides the chain', () => {
 
 describe('F10 deduction: the band cannot drift from the numbers beside it', () => {
   it('decides on the rounded minutes the row shows, not on the raw seconds', () => {
-    // Raw margin 185 s is over 3 minutes; the displayed minutes are 6 - 3 = 3,
-    // which is inside the tolerance. A band computed from raw seconds would say
-    // 充裕 beside a 「余量 3 分」 — two quantities disagreeing in one row.
+    // 原始余量 185 秒超过 3 分钟；展示分钟是 6 - 3 = 3，在容忍值之内。
+    // 用原始秒算出的带位会在「余量 3 分」旁边说 充裕 —— 同一行里两个量互相矛盾。
     const result = deduced(chainInput([{
       connectionSeconds: 190,
       vehicles: [vehicle('A', 375, minutes(25))],
@@ -310,9 +297,8 @@ describe('F10 deduction: the band cannot drift from the numbers beside it', () =
   })
 
   it('rounds each reading as the row shows it and then subtracts, like F1', () => {
-    // 「3 分钟后到」 - 「车 6 分钟到」 = 余量 3 分. Rounding the difference instead
-    // (121 s) would print 余量 2 分 beside the same two readings: a third number
-    // that belongs to neither of them.
+    // 「3 分钟后到」-「车 6 分钟到」= 余量 3 分。改去取整那个差值（121 秒）会在同样两个读数旁印出 余量 2 分：
+    // 第三个既不属于前者也不属于后者的数字。
     const result = deduced(chainInput([{
       connectionSeconds: 209,
       vehicles: [vehicle('A', 330, minutes(25))],
@@ -335,7 +321,7 @@ describe('F10 deduction: the band cannot drift from the numbers beside it', () =
     ])
     for (const result of seen) {
       expect(result.band).toBe(chainMarginBandOf(result.marginMinutes, CHAIN_TIGHT_MARGIN_MINUTES))
-      // The displayed margin is the binding leg's own displayed margin.
+      // 展示的余量就是决定性路段自己展示的余量。
       const binding = result.legs.find(l => l.seq === result.bindingSeq)
       expect(binding?.marginMinutes).toBe(result.marginMinutes)
     }
@@ -362,9 +348,9 @@ describe('F10 deduction: a margin inside the error magnitude gets two branches',
 
     expect(result.band).toBe('uncertain')
     expect(result.marginMinutes).toBe(0)
-    // Branch A: the vehicle the chain is timed against is made.
+    // 分支 A：链所对的那辆车赶上了。
     expect(result.branches?.asPlanned).toEqual({ vehicleId: 'A', alightMinutes: 20 })
-    // Branch B: it is not, and the next vehicle is the one actually taken.
+    // 分支 B：没赶上，实际乘的是下一辆。
     expect(result.branches?.nextVehicle).toEqual({ vehicleId: 'B', alightMinutes: 26 })
   })
 
@@ -396,11 +382,9 @@ describe('F10 deduction: a margin inside the error magnitude gets two branches',
   })
 
   it('reads the branches off the BINDING leg, whatever leg that is', () => {
-    // Leg 0 is comfortable on its own (six minutes of slack). Leg 1 is the tight
-    // one: leg 0 alights at 25, the transfer is 5, so the user is at leg 1's board
-    // station at minute 30 — exactly when its reference vehicle arrives. The two
-    // readings are therefore about leg 1's vehicles, and naming leg 0's would be
-    // the wrong bus beside a margin that was never leg 0's.
+    // 第 0 段单独看很充裕（6 分钟富余）。紧的是第 1 段：第 0 段 25 分钟到达、换乘 5 分钟，
+    // 故用户在第 1 段上车站的 30 分钟处 —— 恰是其参考车抵达的时刻。
+    // 故两个读数都是关于第 1 段的车的，点名第 0 段的车就是在从不属于第 0 段的余量旁边放错公交。
     const result = deduced(chainInput([
       { connectionSeconds: minutes(5), vehicles: [vehicle('A', minutes(11), minutes(25))] },
       {
@@ -429,16 +413,17 @@ describe('F10 deduction: every leg\'s minute carries its F4 mark', () => {
     expect(result.provenance).toBe('live')
   })
 
-  it('marks this app\'s own arithmetic 位置推算, never 实时', () => {
+  it('states 实时 for a real vehicle\'s minute however that minute was produced', () => {
+    // 词汇表不再有「本应用自算」那一档，故真实车辆的非缺席分钟一律读作 实时。
     const result = deduced(chainInput([{
       vehicles: [vehicle('A', minutes(6), minutes(20), 'our_estimate')],
     }]))
-    expect(result.legs[0]?.provenance).toBe('position_estimate')
-    expect(result.provenance).toBe('position_estimate')
+    expect(result.legs[0]?.provenance).toBe('live')
+    expect(result.provenance).toBe('live')
   })
 
   it('marks an observation of the vehicle at the platform 实时', () => {
-    // The vehicle is at the platform as the user arrives (no walk between them).
+    // 用户抵达时车已在站台（两者之间没有步行）。
     const result = deduced(chainInput([{
       connectionSeconds: 0,
       vehicles: [vehicle('A', 0, minutes(20), 'at_platform')],
@@ -471,7 +456,7 @@ describe('F10 deduction: every leg\'s minute carries its F4 mark', () => {
       { lineId: '202', dataSource: 'subway_schedule', vehicles: [vehicle('train_1', minutes(30), minutes(40), 'upstream')] },
     ]))
     expect(result.legs.map(l => l.provenance)).toEqual(['live', 'schedule_simulation'])
-    // One word would be false about part of the chain, so the chain states none.
+    // 一个词会对链的一部分说谎，故链什么都不陈述。
     expect(result.provenance).toBeNull()
   })
 })
@@ -491,12 +476,10 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('names the chain\'s own unsaved origin as its own cause, because that is the one the user can act on', () => {
-    // A chain records an origin and never a destination, so a chain whose anchor
-    // was never saved has no origin to walk from at all — and that is a fact
-    // about the stored settings rather than about the service or about our
-    // reading of it. It travels under its own code, and under the SAME word F1's
-    // empty state already uses for it (`anchor-unset`), so the row can point at
-    // 设置 instead of printing a sentence about a connection nobody could price.
+    // 链记录起点而从不记录目的地，故锚点从未保存的链根本没有可出发的起点 ——
+    // 而那是关于已存设置的事实，不是关于服务、也不是关于我们对它读数的事实。
+    // 它走自己的码，且用 F1 的空状态对同一事实所用的同一个词（`anchor-unset`），
+    // 故该行可以指向设置，而不是印一句关于没人能计价的接驳的话。
     const result = deduceCommuteChain(chainInput([{
       connectionSeconds: null,
       connectionUnpricedReason: 'anchor-unset',
@@ -506,39 +489,28 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
     if (result.status !== 'no-conclusion') throw new Error(`expected a refusal, got ${result.band}`)
     expect(result.reason).toBe('anchor-unset')
     expect(result.reason).not.toBe('connection-unpriced')
-    // Which leg it is about is stated as for every other refusal: the first leg
-    // is the one whose connection starts at the anchor.
+    // 关于哪一段与其它拒绝一样陈述：接驳始于锚点的那一段就是第一段。
     expect(result.leg).toEqual({ seq: 0, lineId: '101', lineName: '101路' })
   })
 
   it('keeps every cause the user cannot act on in ONE code, whichever one the caller names', () => {
-    // The cause set is DERIVED from the engine's own table and never written down
-    // here: `CONNECTION_REFUSAL_CODES` is a total `Record` over
-    // `ChainConnectionUnpricedReason`, so its keys ARE the whole vocabulary — the
-    // engine cannot compile while any cause lacks a code. A hand-written set
-    // cannot be exact, because the only moment it could go stale is the moment
-    // nobody looks: a cause added to the vocabulary would simply be missing from
-    // it, and the loop below would have one fewer iteration to be wrong about, so
-    // the guard would pass while covering less. Deriving the set instead means a
-    // cause added upstream appears here automatically, and a cause MOVED into
-    // another code fails below rather than dropping out of a loop.
+    // 原因集**推导**自引擎自己的表，绝不在此手写：`CONNECTION_REFUSAL_CODES` 是
+    // `ChainConnectionUnpricedReason` 上的全量 `Record`，故它的键**就是**整套词汇 ——
+    // 任何原因缺码时引擎都编译不过。手写的集合不可能精确，因为它唯一会变旧的时刻正是没人看的时刻：
+    // 往词汇里加了原因，它只是少一项，下面的循环就少一次可以出错的机会，于是守卫在覆盖更少的情况下通过。
+    // 改为推导则：上游加了一个原因，它会自动出现在此处；而被**移到**别个码的原因会在下面失败，而不是掉出循环。
     const CAUSES = Object.keys(CONNECTION_REFUSAL_CODES) as ChainConnectionUnpricedReason[]
 
-    // The chain's own origin anchor is the ONE cause the user can act on (the test
-    // above is what makes it actionable), so it is the only cause that travels
-    // under its own code. Asserting the partition — and not merely that the
-    // expected causes reach the generic code — is what fails when some OTHER cause
-    // is mapped to `anchor-unset`.
+    // 链自身的起点锚点是用户唯一可行动的原因（上面那个用例正是让它可行动的原因），
+    // 故只有它走自己的码。断言这个划分 —— 而不只是断言预期的原因落到通用码 ——
+    // 才在某个**别的**原因被映射到 `anchor-unset` 时失败。
     expect(CAUSES.filter(cause => CONNECTION_REFUSAL_CODES[cause] === 'anchor-unset'))
       .toEqual(['anchor-unset'])
 
-    // Every other cause — the line's detail could not be read, the stored station
-    // is not in the direction's stop list, the stop list carries it but states no
-    // coordinate, or the path service priced no route — shares ONE code. None of
-    // them leaves the user an action and none is a fact about the answer, so each
-    // is disclosed by a code the page can answer with one honest sentence:
-    // `connection-unpriced`. That sentence promises no retryability, because these
-    // causes do not share a permanence (see `ChainNoConclusionReason`).
+    // 其余每个原因 —— 线路详情读不到、已存车站不在该方向的停靠列表里、列表有该站但没给坐标、
+    // 或路径服务没计价出路线 —— 共用一个码。它们都不给用户任何动作，也不是关于答案的事实，
+    // 故各自由一个页面能用一句诚实的话作答的码披露：`connection-unpriced`。
+    // 那句话不承诺可重试，因为这些原因的持久性不同（见 `ChainNoConclusionReason`）。
     const unactable = CAUSES.filter(cause => cause !== 'anchor-unset')
     expect(unactable.length).toBeGreaterThan(0)
     for (const cause of unactable) {
@@ -547,8 +519,7 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
         .toBe('connection-unpriced')
     }
 
-    // A caller that cannot name the cause states none and reaches the same code —
-    // the only way into it that carries no cause of its own.
+    // 说不清原因的调用方就什么都不给，落到同一个码 —— 那是进入该码唯一不自带原因的途径。
     expect(refusal(chainInput([{ connectionSeconds: null }]))).toBe('connection-unpriced')
   })
 
@@ -558,19 +529,16 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('separates nothing on the way from a reading that shares no vehicle', () => {
-    // (1) the board read itself carried nothing: nothing is on its way to this
-    // board station. A fact about the service.
+    // (1) 看板读数本身什么都没带：没有车在开往这个上车站。这是关于服务的事实。
     expect(refusal(chainInput([{ vehicles: [], boardVehiclesOnTheWay: 0 }]))).toBe('no-vehicle')
-    // (2) the board read carried vehicles, but the two targeted reads share none
-    // of their ids. That is a fact about OUR OWN reading — the same empty pair —
-    // and calling it 「没有可乘的车」 would describe the service when the truth is
-    // about the two snapshots we compared.
+    // (2) 看板读数带了车，但两份定向读数没有共同 id。
+    // 那是关于**我们自己读数**的事实 —— 同样是空配对 ——
+    // 而把它叫做「没有可乘的车」会描述服务，实情却是关于我们比较的那两份快照。
     expect(refusal(chainInput([{ vehicles: [], boardVehiclesOnTheWay: 3 }]))).toBe('no-shared-vehicle')
   })
 
   it('refuses when nothing on the way is still catchable', () => {
-    // Everything has already passed, or arrives before the walk is done and
-    // nothing follows it: there is no plan to deduce from.
+    // 全都已经过站，或在步行走完前就到、其后也没有车：没有可供推演的方案。
     expect(refusal(chainInput([{
       connectionSeconds: minutes(5),
       vehicles: [vehicle('A', minutes(1), minutes(10))],
@@ -578,17 +546,15 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('separates the vehicle that left during the walk from one that left before it began', () => {
-    // (3) the user sets off, and a vehicle is still to come — but it reaches the
-    // board station before the 5-minute connection is walked: it left while the
-    // user was on their way. 「连走过去的那趟都赶不上」.
+    // (3) 用户出发时还有车要来 —— 但它在 5 分钟接驳走完前就抵达上车站：
+    // 它在用户还在路上时就走了。「连走过去的那趟都赶不上」。
     expect(refusal(chainInput([{
       connectionSeconds: minutes(5),
       vehicles: [vehicle('A', minutes(1), minutes(10))],
     }]))).toBe('no-vehicle-after-connection')
 
-    // (4) by the time the user can set off toward this board station, every
-    // vehicle has already been there: there is nothing even to be short of. Only
-    // a later leg can be in this state, because leg 0 sets off at minute 0.
+    // (4) 到用户来得及出发去这个上车站时，每辆车都已到过那里：连「差一点」都谈不上。
+    // 只有更靠后的路段会是这种状态，因为第 0 段在 0 分钟出发。
     expect(refusal(chainInput([
       { vehicles: [vehicle('A', minutes(6), minutes(20))] },
       { lineId: '202', vehicles: [vehicle('C', minutes(10), minutes(15))] },
@@ -620,8 +586,7 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('refuses a reading whose alight time precedes its board time', () => {
-    // A downstream minute that is not downstream of anything: the two numbers do
-    // not describe one journey, so no leg can be priced from them.
+    // 一个不在任何东西下游的下车分钟：这两个数不描述同一趟行程，无法从它们为任何路段定价。
     expect(refusal(chainInput([{ vehicles: [vehicle('A', minutes(20), minutes(6))] }]))).toBe('inconsistent-live')
   })
 
@@ -630,11 +595,9 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('refuses when no vehicle can still reach a leg\'s board station by the time the user sets off', () => {
-    // Leg 0 alights at minute 20. Every vehicle on leg 1's line reaches ITS board
-    // station at minute 10 — gone by the time the user can be there, so the
-    // vehicle the chain would be timed against does not exist at all. That is
-    // 「没有可乘的车」 because it has all gone, not a negative margin: there is
-    // nothing to be short of.
+    // 第 0 段在 20 分钟到达。第 1 段线路上的每辆车都在 10 分钟抵达它自己的上车站 ——
+    // 到用户能到那里时已经走了，故链所对的那辆车根本不存在。那是「没有可乘的车」（都走光了），
+    // 不是负余量：连「差一点」都谈不上。
     expect(refusal(chainInput([
       { vehicles: [vehicle('A', minutes(6), minutes(20))] },
       { lineId: '202', vehicles: [vehicle('C', minutes(10), minutes(15))] },
@@ -642,7 +605,7 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
   })
 
   it('refuses on the first leg that cannot be deduced from, in leg order', () => {
-    // Leg 0 is fine; leg 1 is stale. The reason reported is leg 1's.
+    // 第 0 段没问题，第 1 段过期。所报原因是第 1 段的。
     expect(refusal(chainInput([
       { vehicles: [vehicle('A', minutes(6), minutes(20))] },
       { lineId: '202', updatedAt: NOW - 10 * 60 * 1000, vehicles: [vehicle('C', minutes(30), minutes(40))] },
@@ -652,9 +615,8 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
 
 describe('F10 deduction: a refusal names the leg, its age and its service state', () => {
   it('names the leg that refused, so a page can point at the transfer point and its line', () => {
-    // Leg 1 is the one that cannot be deduced from: 「都走了」 is leg 1's fact, and
-    // without its sequence a page with a two-leg chain can neither say WHICH
-    // transfer point refused nor name the line that refused there.
+    // 无法据以推演的是第 1 段：「都走了」是第 1 段的事实，
+    // 而没有它的序号，两段链的页面既说不出是**哪个**换乘点拒绝，也点不出在那里拒绝的线路。
     const result = deduceCommuteChain(chainInput([
       { vehicles: [vehicle('A', minutes(6), minutes(20))] },
       { lineId: '202', vehicles: [vehicle('C', minutes(10), minutes(15))] },
@@ -666,7 +628,7 @@ describe('F10 deduction: a refusal names the leg, its age and its service state'
   })
 
   it('names no leg for a chain that carries none', () => {
-    // `no-legs` is a fact about the chain itself: there is no leg to point at.
+    // `no-legs` 是关于链自身的事实：没有路段可点。
     expect(deduceCommuteChain({ now: NOW, legs: [] })).toEqual({ status: 'no-conclusion', reason: 'no-legs' })
   })
 
@@ -677,9 +639,8 @@ describe('F10 deduction: a refusal names the leg, its age and its service state'
   })
 
   it('carries the refusing leg\'s service state, so an empty answer is governed by it', () => {
-    // 「暂无来车」 at 06:00 and 「暂无来车」 at 01:00 are not the same fact: the first
-    // is a gap in service, the second is a service day that has ended — and only
-    // the state distinguishes them.
+    // 06:00 的「暂无来车」与 01:00 的「暂无来车」不是同一个事实：
+    // 前者是服务中的间隙，后者是一个已经结束的服务日 —— 只有状态能分辨它们。
     const result = deduceCommuteChain(chainInput([{
       vehicles: [],
       operatingStatus: { state: 'after_last', firstDeparture: '05:00', lastDeparture: '23:00' },
@@ -690,8 +651,7 @@ describe('F10 deduction: a refusal names the leg, its age and its service state'
   })
 
   it('carries no age and no state when the leg was never read', () => {
-    // `no-live` means no reading exists: there is no obtained-at to state and no
-    // source that declared a service state, so neither is invented for the row.
+    // `no-live` 表示读数不存在：没有取得时刻可陈述，也没有声明服务状态的来源，故两者都不为该行编造。
     const result = deduceCommuteChain(chainInput([{ vehicles: null }]))
     if (result.status !== 'no-conclusion') throw new Error('expected a refusal')
     expect(result.reason).toBe('no-live')
@@ -731,11 +691,9 @@ describe('F10 deduction: every leg states its service state', () => {
 
 describe('F10 deduction: a leg recorded the wrong way round is its own answer', () => {
   it('names the record, not our reading, when the alight station is upstream of the board one', () => {
-    // The user recorded alight order 3 and board order 8 — the leg runs backwards.
-    // The two targeted reads cannot then share a vehicle, but that is a fact about
-    // the RECORD, and 「两个读数没有对上的车」 would blame this app's reading while
-    // quoting the user no fix at all. The honest answer is that the chain is
-    // recorded the wrong way round, which the user can correct.
+    // 用户记录的下车站序是 3、上车站序是 8 —— 路段反向运行。两份定向读数随后无法共享车辆，
+    // 但那是关于**记录**的事实，把它叫做「两个读数没有对上的车」是用本应用的读数背锅，
+    // 且完全不给用户修法。诚实的答案是这条链录反了，用户可以改。
     const result = deduceCommuteChain(chainInput([{
       board: { name: '丁丁路', order: 8 },
       alight: { name: '甲甲路', order: 3 },
@@ -750,9 +708,8 @@ describe('F10 deduction: a leg recorded the wrong way round is its own answer', 
   })
 
   it('refuses a leg that alights where it boards, because that is not a ride either', () => {
-    // Equality is not "downstream of", and a boarding station that is also the
-    // alighting one prices no ride: the same code covers it, which is why the
-    // recording rule is 「站序更大」 rather than 「不同」.
+    // 相等不是「在下游」，既是上车站又是下车站的站不做任何乘车计价：同一个码覆盖它，
+    // 故记录规则是「站序更大」而不是「不同」。
     const result = deduceCommuteChain(chainInput([{
       board: { name: '甲甲路', order: 3 },
       alight: { name: '甲甲路', order: 3 },
@@ -763,13 +720,10 @@ describe('F10 deduction: a leg recorded the wrong way round is its own answer', 
   })
 
   it('lets a SUBWAY leg run the other way round, because one subway lineId carries both directions', () => {
-    // On a bus the two directions are two lineIds, so a stored `lineId` names one
-    // of them and alight < board is a recording error. On a subway one lineId
-    // serves both ways and numbers the same station oppositely, so the very same
-    // pair of stored orders is a ride the OTHER way — the assembly reads the
-    // opposite direction for it (translating both orders), and there is nothing
-    // for the engine to refuse. The leg is timed against the reading the assembly
-    // produced, which is the only reading this leg has.
+    // 公交两个方向是两个 lineId，故已存的 `lineId` 已指明其一，`alight < board` 是录入错误。
+    // 地铁一条 lineId 服务两个方向并对同一站反向编号，故同一对已存站序是沿**另一**方向的真实乘车 ——
+    // 装配层为它读取相反方向（两个站序都翻译进去），引擎没有什么可拒绝的。
+    // 该路段对装配层产出的读数计时，那是这段唯一的读数。
     const result = deduced(chainInput([{
       lineId: 'subway_101',
       board: { name: '丁丁路', order: 8 },
@@ -785,9 +739,8 @@ describe('F10 deduction: a leg recorded the wrong way round is its own answer', 
   })
 
   it('still refuses a station-to-itself leg on a subway, because that is not a ride either', () => {
-    // The subway allowance covers the OTHER way round and nothing else: boarding
-    // and alighting at one station is not a shorter ride on any line, so equality
-    // keeps the same code it has on a bus.
+    // 地铁的宽容只覆盖**另一**方向，别无其他：任何线路上在同一站上下车都不是更短的乘车，
+    // 故相等保留它在公交上的同一个码。
     const result = deduceCommuteChain(chainInput([{
       lineId: 'subway_101',
       board: { name: '甲甲路', order: 3 },
@@ -800,14 +753,11 @@ describe('F10 deduction: a leg recorded the wrong way round is its own answer', 
   })
 
   it('keeps connection-unpriced AHEAD of the backwards rule, so a leg that did not locate keeps its honest diagnosis', () => {
-    // A leg can trip both rules at once: its stored ends run backwards AND its
-    // connection was never priced. The ORDER between the two checks is a product
-    // decision, not an accident. The connection necessarily comes first — a
-    // connection is priced only once both stored stations located in THIS
-    // direction's stop list, so 「站序反了」 without a price would be a diagnosis
-    // of a record this path could not even read, and flipping the two ends would
-    // not be the fix. (Swapping the two checks leaves every other test in this
-    // suite green; this fixture is the one that pins the order.)
+    // 一条路段可以同时触发两条规则：已存两端反向**且**它的接驳从未计价。
+    // 两个检查之间的**顺序**是产品决定而非偶然。接驳必然在前 —— 只有两个已存车站都定位到了
+    // **本**方向的停靠列表里，接驳才会被计价，故没有价格就说「站序反了」，
+    // 是在诊断一份这条路径根本读不了的记录，而对调两端不会是修法。
+    // （把两个检查对调，本套件其余用例仍然全绿；钉住顺序的就是这个 fixture。）
     expect(refusal(chainInput([{
       board: { name: '丁丁路', order: 8 },
       alight: { name: '甲甲路', order: 3 },
@@ -817,13 +767,10 @@ describe('F10 deduction: a leg recorded the wrong way round is its own answer', 
   })
 
   it('keeps the connection ahead of the backwards rule for each cause the caller can name', () => {
-    // The same leg that trips both rules at once, with the caller's reason
-    // stated. The ORDER must not depend on WHICH cause it is: a priced
-    // connection is what proves both stored stations located in the direction
-    // the leg runs, so 「站序反了」 without a price would diagnose a record this
-    // path could not even read. That includes the one cause the user can act on
-    // — a chain whose origin was never saved must not be told its ends are
-    // recorded the wrong way round.
+    // 同一条同时触发两条规则的路段，且调用方陈述了原因。顺序不得取决于**哪个**原因：
+    // 已计价的接驳正是两个已存车站都定位在路段所行方向的证明，故没有价格就说「站序反了」
+    // 是在诊断一份这条路径根本读不了的记录。这包括用户唯一可行动的那个原因 ——
+    // 起点从未保存的链不得被告知它两端录反了。
     const backwardsAndUnpriced = {
       board: { name: '丁丁路', order: 8 },
       alight: { name: '甲甲路', order: 3 },
@@ -854,12 +801,11 @@ describe('F10 schema: a leg must run downstream, and the order is checked on wri
   }
 
   it('rejects a leg whose alight order is not downstream of its board order', () => {
-    // The same spirit as the name/order refinements beside it: the pair is one
-    // value, so a leg that runs backwards is rejected at the boundary rather than
-    // stored and later explained away as a fact about our reading.
+    // 与旁边的站名 / 站序 refine 同一精神：配对是一个值，
+    // 故反向运行的路段在边界上被拒绝，而不是存下来再解释成关于我们读数的事实。
     const parsed = CommuteChainLegSchema.safeParse({ ...LEG, alightStationName: '乙乙路', alightStationOrder: 2 })
     expect(parsed.success).toBe(false)
-    // The rejection says what to fix, in the same register as the pair refinements.
+    // 拒绝信息说明该修什么，与配对 refine 同一语气。
     expect(parsed.success ? '' : parsed.error.issues[0]?.message).toContain('站序')
   })
 
@@ -869,39 +815,32 @@ describe('F10 schema: a leg must run downstream, and the order is checked on wri
 
   it('accepts a leg that runs downstream, and one whose station is not chosen yet', () => {
     expect(CommuteChainLegSchema.safeParse(LEG).success).toBe(true)
-    // An unchosen station has no order to compare, so the ordering rule must not
-    // double-refuse the leg the pair refinement already governs.
+    // 未选择的站没有站序可比，故排序规则不得对配对 refine 已经管辖的路段再拒一次。
     expect(CommuteChainLegSchema.safeParse({ ...LEG, alightStationName: null, alightStationOrder: null }).success).toBe(true)
     expect(CommuteChainLegSchema.safeParse({ ...LEG, boardStationName: null, boardStationOrder: null }).success).toBe(true)
   })
 
   it('accepts a SUBWAY leg recorded the other way round, while a bus one stays an error', () => {
-    // The ordering rule is about the DIRECTION a leg runs, and only the lineId
-    // says which way is downstream. A bus lineId names one of its two directions,
-    // so alight < board there is the user's entry the wrong way round. A subway
-    // lineId carries BOTH directions and numbers the same station oppositely, so
-    // the same stored pair is a real ride the other way — the assembly reads the
-    // opposite direction for it — and rejecting it would make a legitimate
-    // reverse subway chain unrecordable.
+    // 排序规则关乎路段运行的**方向**，而只有 lineId 说明哪个方向是下游。
+    // 公交 lineId 指明其两个方向之一，故那里的 `alight < board` 是用户录入反了。
+    // 地铁 lineId 承载**两个**方向并对同一站反向编号，故同一对已存站序是沿另一方向的真实乘车 ——
+    // 装配层为它读相反方向 —— 拒绝它会让一条合法的反向地铁链无法记录。
     const reverse = { ...LEG, lineId: 'subway_027_88', alightStationName: '乙乙路', alightStationOrder: 2 }
     expect(CommuteChainLegSchema.safeParse(reverse).success).toBe(true)
 
-    // The same pair on a bus is still refused, and its message still says what to
-    // fix.
+    // 同一对在公交上仍被拒绝，且其信息仍说明该修什么。
     const busReverse = CommuteChainLegSchema.safeParse({ ...reverse, lineId: '101' })
     expect(busReverse.success).toBe(false)
     expect(busReverse.success ? '' : busReverse.error.issues[0]?.message).toContain('站序')
 
-    // And a subway cannot be ridden from a station to itself any more than a bus
-    // can: the allowance is for the other way round, not for a shorter ride.
+    // 地铁也无法从一站乘到它自己，与公交一样：那项宽容是为另一方向准备的，不是为更短的乘车。
     expect(CommuteChainLegSchema.safeParse({ ...LEG, lineId: 'subway_027_88', alightStationName: '甲甲路', alightStationOrder: 3 }).success).toBe(false)
   })
 })
 
 describe('F10 deduction: connections are priced by the path service, never by a guess', () => {
   it('adds the user\'s cycling extra to a cycling connection', () => {
-    // 5 min of riding + the default finding/parking time: the vehicle that is
-    // 9 minutes away is no longer comfortable.
+    // 5 分钟乘车 + 默认的找车 / 停车时间：9 分钟远的车不再充裕。
     const walking = deduced(chainInput([{ connectionMode: 'walk', vehicles: [vehicle('A', minutes(9), minutes(20))] }]))
     expect(walking.band).toBe('comfortable')
 
@@ -938,11 +877,9 @@ describe('F10 deduction: connections are priced by the path service, never by a 
   })
 
   it('applies a leg\'s own extra to a WALKING connection too, because the field names no mode', () => {
-    // The stored field is the leg's own extra on the connection into it, and the
-    // chain stores no mode — so a configured 4 minutes is honoured for a walking
-    // connection as well (7 minutes of slack becomes 3). Intended, not an
-    // accident: dropping a number the user typed because the mode that motivated
-    // it is not stored would be this app deciding the user meant nothing.
+    // 已存字段是该路段「进入它的接驳」上的自己的附加时间，而链不存方式 ——
+    // 故配置的 4 分钟对步行接驳同样生效（7 分钟富余变成 3）。这是刻意的，不是偶然：
+    // 因为促使用户键入那个数字的方式没有存储就把它丢掉，等于本应用替用户决定他什么都没说。
     const withoutExtra = deduced(chainInput([{
       connectionMode: 'walk',
       transferExtraMinutes: null,
@@ -958,15 +895,13 @@ describe('F10 deduction: connections are priced by the path service, never by a 
       vehicles: [vehicle('A', minutes(12), minutes(25))],
     }]))
     expect(withExtra.marginMinutes).toBe(3)
-    // The extra moves the platform wait with it: leg 0 boards the same vehicle,
-    // but the user is at the board station four minutes later.
+    // 附加时间把站台等待一起推后：第 0 段上同一辆车，但用户晚四分钟到上车站。
     expect(withExtra.legs[0]?.waitMinutes).toBe(3)
     expect(withExtra.band).toBe('tight')
   })
 
   it('lets the engine\'s own default be configured', () => {
-    // 5 min of riding + the 2-minute default extra leaves 3 minutes on a vehicle
-    // 10 minutes away; with no extra at all it is 5.
+    // 5 分钟乘车 + 默认的 2 分钟附加，对 10 分钟远的车只剩 3 分钟；完全没有附加则是 5。
     const input = chainInput([{ connectionMode: 'cycle', vehicles: [vehicle('A', minutes(10), minutes(20))] }])
     expect(deduced(input).band).toBe('tight')
     expect(deduced(input).marginMinutes).toBe(3)
@@ -976,16 +911,14 @@ describe('F10 deduction: connections are priced by the path service, never by a 
 
 describe('F10 deduction: the numbers the row shows', () => {
   it('prices nothing past the last leg: no destination, no total arrival', () => {
-    // The product need is the per-transfer margin — 「我能不能赶上这个换乘点的车」
-    // — and nothing more. The chain ends at its last ride leg's alight station:
-    // there is no destination to walk to, so neither the engine's input carries a
-    // tail connection nor its output a total arrival minute. Both are GONE, not
-    // nulled: a field that always reads null is a promise the feature does not make.
+    // 产品需要的是每个换乘点的余量 ——「我能不能赶上这个换乘点的车」—— 别无其他。
+    // 链终止于最后一个乘车路段的到达站：没有目的地可走，故引擎的输入既不带尾接驳，
+    // 输出也没有总到达时刻。两者是**删掉**而不是置 null：一个永远读作 null 的字段是功能不作的承诺。
     const result = deduced(chainInput([{ vehicles: [vehicle('A', minutes(6), minutes(20))] }]))
     expect('arriveInMinutes' in result).toBe(false)
     expect('tailConnectionSeconds' in chainInput([{}])).toBe(false)
-    // The whole shape, so a total arrival minute cannot be added back quietly.
-    // `branches` is the only optional key and is `undefined` outside `uncertain`.
+    // 整个形状，使总到达时刻不可能被悄悄加回来。`branches` 是唯一的可选键，
+    // 且在 `uncertain` 之外为 `undefined`。
     expect(Object.keys(result).sort()).toEqual([
       'band', 'bindingSeq', 'branches', 'lastUpdatedAt', 'legs', 'marginMinutes', 'provenance', 'status',
     ])
@@ -1012,8 +945,7 @@ describe('F10 deduction: the numbers the row shows', () => {
 
 describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
   it('ties a non-negative margin to the vehicle the leg boards', () => {
-    // With a margin of zero or more the reference and the boarded vehicle are
-    // the same one, so the margin and 「哪班车」 agree by construction.
+    // 余量为零或正时，参考车与被上的车是同一辆，故余量与「哪班车」按构造一致。
     const result = deduced(chainInput([{ vehicles: [vehicle('A', minutes(12), minutes(23))] }]))
     expect(result.legs[0]?.vehicleId).toBe('A')
     expect(result.legs[0]?.marginMinutes).toBe(7)
@@ -1021,10 +953,9 @@ describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
   })
 
   it('ties a negative margin to the vehicle that has gone, NOT to the one boarded', () => {
-    // The 「余量 -2 分」 case: A was next when the user set off and is gone, and
-    // the plan is B. A page that put the −2 beside `vehicleId` alone would print
-    // 「余量 -2 分」 next to the bus the user will actually board — so the margin
-    // states WHICH vehicle it is about.
+    // 「余量 -2 分」的情形：用户出发时下一个到的是 A 且已走，方案是 B。
+    // 只把 −2 放在 `vehicleId` 旁边的页面会印出「余量 -2 分」紧挨用户实际要上的那辆车 ——
+    // 故余量说明它关于**哪辆**车。
     const result = deduced(chainInput([{
       connectionSeconds: minutes(5),
       vehicles: [vehicle('A', minutes(3), minutes(15)), vehicle('B', minutes(8), minutes(20))],
@@ -1053,17 +984,12 @@ describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
   })
 
   it('keeps the tie between margin and vehicle when the leg\'s own extra is negative', () => {
-    // The tie 「equal exactly when the margin is zero or more」 needs the ready
-    // moment to be no EARLIER than the set-off moment — a non-negative leg extra.
-    // `transferExtraMinutes` is guarded by the schema (`min(0)`), but
-    // `cycleExtraMinutes` and direct calls are not: a negative extra puts the user
-    // at the platform before they set off, makes a vehicle that left before the
-    // set-off moment look catchable, and then measures the margin against a LATER
-    // vehicle than the one it says is boarded — the review's margin +6 with
-    // mismatched ids. Clamping the effective extra at zero is what makes the tie
-    // true for every caller rather than only for the ones the schema happened to
-    // guard, and it cannot widen a margin (the clamp only ever delays the ready
-    // moment), so no existing answer moves.
+    // 「余量为零或正时两者相等」这个等价需要就绪时刻不**早于**出发时刻 —— 即路段附加时间非负。
+    // `transferExtraMinutes` 由 schema（`min(0)`）守住，但 `cycleExtraMinutes` 与直接调用没有：
+    // 负的附加时间会把用户放到他们出发之前的站台，让出发时刻之前已走的车看起来赶得上，
+    // 随后把余量衡量到比它声称所上的车更晚的一辆上。
+    // 把有效附加时间钳到零，才使该等价对每个调用方为真，而不只对 schema 恰好守住的那些；
+    // 它也不会放大余量（钳制只会推后就绪时刻），故没有任何既有答案会改变。
     const result = deduced(chainInput(
       [
         { connectionSeconds: 0, vehicles: [vehicle('A', minutes(3), minutes(30))] },
@@ -1071,7 +997,8 @@ describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
           lineId: '202',
           connectionSeconds: minutes(5),
           connectionMode: 'cycle',
-          // The board station is 29 minutes out; the reference is 35 minutes out.
+          // 上车站还有 29 分钟，参考车还有 35 分钟。附加时间为零，故用户在第 35 分钟到站台，
+          // 唯一还能上的是 V2 —— 参考车与被上的车是同一辆，与余量为零所要求的完全一致。
           vehicles: [vehicle('V1', minutes(29), minutes(40)), vehicle('V2', minutes(35), minutes(50))],
         },
       ],
@@ -1079,9 +1006,6 @@ describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
     ))
 
     const leg = result.legs[1]
-    // The extra is zero, so the user is at the platform at minute 35 and the only
-    // vehicle they can still board is V2 — the reference and the boarded vehicle
-    // are the same one, exactly as the margin of zero requires.
     expect(leg?.marginMinutes).toBe(0)
     expect(leg?.vehicleId).toBe('V2')
     expect(leg?.referenceVehicleId).toBe('V2')

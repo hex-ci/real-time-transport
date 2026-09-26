@@ -8,51 +8,34 @@ import { provenanceLabelOf } from '@/provenance-copy'
 const props = defineProps<{
   detail: LineDetail
   liveStatus: LiveLineStatus | null
-  /** Subway vs bus accent classes, resolved by the view (one rule, one place). */
+  /** 地铁与公交的配色类，由视图解析（一处规则）。 */
   accent: { lineName: string, stops: string }
 }>()
 
 /**
- * F4: what kind of vehicle reading this banner sits above, taken from the source
- * that answered rather than from the route type.
+ * F4：这个横幅所陈述的车辆读取是哪一种，取自应答的那个来源，而非线路类型。
  *
- * `detail.type === 'subway'` used to decide the wording here, which is the same
- * answer only while the timetable engine is the one that replies — and it is
- * wrong the moment the aggregator fails over, or the day a bus line is served by
- * a source that models its vehicles. Null (no reading yet, or a source this build
- * does not know) renders no mark at all, never 实时.
+ * 用线路类型决定措辞只在线路时刻表引擎作答时才是同一个答案，聚合器一失效就错。
+ * Null（还没有读取，或本构建不认识的来源）不渲染任何标记。
  */
 const dataMark = computed(() => provenanceLabelOf(vehicleProvenanceOf(props.liveStatus?.dataSource)))
 
 /**
- * F3: whether a REAL vehicle is on the line, from the payload's own declared
- * source — never from the size of the list.
+ * F3：线路上是否真有车，取自载荷自己声明的来源——绝不从列表大小判定。
  *
- * The engine places generated trains inside an internal simulation window, so a
- * non-empty list on its own says nothing about the line running: a subway line
- * whose hours are unknown can show movement while its state is 运营时间未知.
+ * 生成列车落在引擎内部的模拟窗口内，故非空列表本身不能说明线路在运行。
  */
 const hasRealVehicle = computed(() =>
   (props.liveStatus?.buses.length ?? 0) > 0
   && vehicleProvenanceOf(props.liveStatus?.dataSource) === 'live')
 
 /**
- * F3: the line's service state, from the first/last departure the header already
- * shows two lines above — 「待发车/停运」 was one label for two opposite facts, and
- * it never said which one applied.
+ * F3：线路的营运状态，取自头部上两行已经显示的首末班——「待发车/停运」曾用一个标签说两个相反的
+ * 事实，且从不说清适用哪一个。
  *
- * A real vehicle actually on the line outranks the schedule; a generated one does
- * not, so a state known to be unknown keeps its say. Only with nothing from a real
- * source in range does the state from the line's own hours get to speak.
- *
- * Read at call time through a function, not cached in a computed: the state is
- * derived from the wall clock (`operatingDaySecondsOf`) as well as from
- * `props.detail`, and the clock is a reactive dependency of neither. A computed
- * keyed on props would hold whatever clock reading the last prop-changing render
- * saw and hand that back on later renders, while this call re-reads the clock
- * every time it runs. Neither recomputes by itself as the clock advances, so with
- * no re-render the badge is as old as the render either way — the difference is
- * that the call never carries a stale clock reading across a render that happened.
+ * 真的在途车辆压过排班，生成的车不能，故已知为未知的状态也保留它的说法。
+ * 按调用时读取而非缓存进 computed：状态由墙上时钟与 props 共同导出，而时钟二者都不是响应式依赖；
+ * 缓存会把上一次渲染读到的钟回递给后来的渲染。
  */
 function operatingBadge(): string {
   return operatingBadgeOf(hasRealVehicle.value, operatingStatusOf({
@@ -92,7 +75,7 @@ function operatingBadge(): string {
         </div>
       </div>
 
-      <!-- Metric Badges -->
+      <!-- 指标徽标 -->
       <div class="flex shrink-0 items-center gap-2 text-xs">
         <div class="flex flex-1 flex-col items-center rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-1.5 sm:block sm:flex-none sm:px-3.5 sm:py-2">
           <span class="text-slate-400 block text-center text-xs leading-tight">当前在途</span>

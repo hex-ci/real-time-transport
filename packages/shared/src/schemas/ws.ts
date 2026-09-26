@@ -11,7 +11,7 @@ export const WsClientMessageSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('unsubscribe'),
     lineId: z.string(),
-    /** Optional: omit to drop every direction of the line. */
+    /** 省略表示退订该线路的全部方向。 */
     direction: z.number().int().min(0).max(1).optional(),
   }),
   z.object({
@@ -24,7 +24,7 @@ export const WsServerMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('line_update'),
     lineId: z.string(),
-    /** Direction this update belongs to, so the client can filter mismatches. */
+    /** 本条更新所属的方向，客户端据此过滤不匹配的更新。 */
     direction: z.number().int().min(0).max(1).default(0),
     status: LiveLineStatusSchema,
   }),

@@ -28,7 +28,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Freeze the clock at a Beijing wall-clock time. */
+/** 把时钟冻结在北京的墙上时间。 */
 function freezeAt(isoLocal: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(`${isoLocal}+08:00`))
@@ -50,10 +50,10 @@ async function profile(app: App): Promise<any> {
   return JSON.parse(res.body).data
 }
 
-/** A device fix in WGS-84, the form the browser sends — one anchor pair. */
+/** WGS-84 的设备定位，浏览器发来的形式。 */
 const ANCHOR_PAYLOAD = { homeLat: 39.90931, homeLng: 116.3974 }
 
-/** No payload field is a built-in hour, anywhere in the body. */
+/** 整个响应体里没有任何一个字段是内置时刻。 */
 function expectNoBuiltInHours(body: string, where: string): void {
   for (const invented of BUILT_IN) {
     expect(body.includes(invented), `${where} carries the built-in ${invented}`).toBe(false)
@@ -200,8 +200,8 @@ describe('(c) 读-改-写合并：一组字段的写入不动另一组', () => {
     try {
       await patch(app, { ...ANCHOR_PAYLOAD })
       const anchors = (await read(app)).json.data
-      // NON-EMPTY FIRST: the comparison below would pass for free if the anchor had
-      // never been stored and both sides were null.
+      // 先断言非空：如果锚点从未存过、两边都是 null，
+      // 下面的比较就会白通过。
       expect(anchors.homeLat, 'this test needs a stored anchor to protect').not.toBeNull()
 
       await patch(app, { morningStart: '07:15', morningEnd: '09:45' })
@@ -234,7 +234,7 @@ describe('(c) 读-改-写合并：一组字段的写入不动另一组', () => {
 })
 
 describe('(d) 时刻未配置时，引擎自己的跨度照旧到达消费方', () => {
-  /** A bus line that exists, with one vehicle heading for the fourth stop. */
+  /** 一条存在的公交线路，有一辆车正开向第 4 站。 */
   function stubBusLine(): void {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       const href = String(url)

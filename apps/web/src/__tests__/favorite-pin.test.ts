@@ -7,9 +7,8 @@ import type { UserFavoriteLine } from '@real-time-transport/shared'
 import { useTransitStore } from '../stores/transit.store'
 
 /**
- * F8 置顶: the pin is a STATE overlaid on the order, never a rewrite of it.
- * These tests hold that line: a pin moves one card to the top, un-pinning drops
- * it back into its own slot with every `displayOrder` untouched.
+ * F8 置顶：固定是覆盖在顺序之上的**状态**，绝不对顺序重写。这些测试守住这条线：
+ * 固定把一张卡移到顶部，取消固定让它落回自己的槽位，且每个 `displayOrder` 不变。
  */
 
 function favorite(id: string, displayOrder: number, isPinned = false): UserFavoriteLine {
@@ -25,7 +24,7 @@ function favorite(id: string, displayOrder: number, isPinned = false): UserFavor
   }
 }
 
-/** Response envelopes shaped like the favourites endpoint's. */
+/** 形如收藏端点的响应信封。 */
 function accepted(data: UserFavoriteLine) {
   return { json: async () => ({ success: true, data }) }
 }
@@ -60,7 +59,7 @@ describe('F8 pin is a state overlaid on the order', () => {
 
     const pending = store.togglePin('fa')
 
-    // Optimistic: the card is at the top while the PATCH is still open.
+    // 乐观更新：PATCH 尚未结束时卡片已在顶部。
     expect(ids(store)).toEqual(['fa', 'fb', 'fc'])
     expect(store.favorites[0]!.isPinned).toBe(true)
     expect(fetchMock).toHaveBeenCalledWith(
@@ -80,8 +79,8 @@ describe('F8 pin is a state overlaid on the order', () => {
 
   it('drops an un-pinned line back into its own place instead of re-sorting it to the front', async () => {
     const store = useTransitStore()
-    // The server's own order for `ORDER BY is_pinned DESC, display_order ASC`:
-    // `fa` leads on its pin, its stored position is last.
+    // 服务端对 `ORDER BY is_pinned DESC, display_order ASC` 的顺序：
+    // `fa` 凭固定打头，其存储位置在最后。
     store.favorites = [favorite('fa', 3, true), favorite('fb', 1), favorite('fc', 2)]
 
     vi.stubGlobal('fetch', vi.fn(async () => accepted(favorite('fa', 3, false))))
@@ -89,7 +88,7 @@ describe('F8 pin is a state overlaid on the order', () => {
     await store.togglePin('fa')
 
     expect(ids(store)).toEqual(['fb', 'fc', 'fa'])
-    // Position, not order-write: every display_order is exactly as it was.
+    // 这是位置而非顺序写入：每个 display_order 与原来完全一致。
     expect(store.favorites.map(f => f.displayOrder)).toEqual([1, 2, 3])
     expect(store.favorites.some(f => f.isPinned)).toBe(false)
   })
@@ -146,7 +145,7 @@ describe('F8 pin is a state overlaid on the order', () => {
 describe('F8 pin lives on the home list only', () => {
   const srcDir = fileURLToPath(new URL('../', import.meta.url))
 
-  /** Every source file under a view, so a pin control cannot hide in a child component. */
+  /** 某视图下的每个源文件，使固定控件无法藏在子组件里。 */
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const path = join(dir, entry.name)
@@ -156,11 +155,8 @@ describe('F8 pin lives on the home list only', () => {
   }
 
   /**
-   * Source with its comments removed, so a comment may STATE a rule without
-   * tripping a guard that is about rendered code. Handles the three comment
-   * forms this repo writes: HTML comments in templates, and both C-style
-   * block and line comments in scripts — the line pattern spares the `://`
-   * of a URL.
+   * 去掉注释的源码，使注释可以陈述规则而不触发针对渲染代码的守卫。处理本仓库写的三种
+   * 注释形式：模板里的 HTML 注释，脚本里的 C 风格块注释与行注释——行注释模式避开 URL 的 `://`。
    */
   function stripComments(source: string): string {
     return source
@@ -170,10 +166,8 @@ describe('F8 pin lives on the home list only', () => {
   }
 
   it('never exposes pin state to the settings screen', () => {
-    // F8: the settings screen is a pure order editor — it shows the stored
-    // order and is UNAWARE of pinning. A settings file whose rendered template
-    // reads `isPinned` or says 置顶 would break that rule. Comments are stripped
-    // first, so merely documenting the rule in this tree does not fail here.
+    // F8：设置页是纯排序编辑器——只显示存储顺序，对固定**无感知**。设置文件的渲染模板
+    // 若读到 `isPinned` 或说出「置顶」就破坏了该规则。先剥离注释，故在本树里记录规则本身不会失败。
     const settingsDir = join(srcDir, 'views/settings')
     for (const path of sourceFiles(settingsDir)) {
       const code = stripComments(readFileSync(path, 'utf8'))
@@ -185,13 +179,13 @@ describe('F8 pin lives on the home list only', () => {
   })
 
   it('strips comments without hiding rendered code, so the guard can still fail', () => {
-    // A comment that documents the rule is invisible to the guard...
+    // 记录该规则的注释对守卫不可见……
     expect(stripComments('<!-- 置顶 is handled on the home list -->\nconst a = 1')).not.toMatch(/置顶/)
     expect(stripComments('// 置顶\nconst a = 1')).not.toMatch(/置顶/)
     expect(stripComments('/* 置顶 */ const a = 1')).not.toMatch(/置顶/)
-    // ...but actual rendered code is not: these do trip it.
+    // ……但真正渲染的代码不是：这些会触发它。
     expect(stripComments('<span>{{ isPinned ? \'取消置顶\' : \'置顶\' }}</span>')).toMatch(/置顶/)
-    // A URL's `://` is not a line comment.
+    // URL 的 `://` 不是行注释。
     expect(stripComments('const u = "https://example.com/置顶"')).toMatch(/置顶/)
   })
 })

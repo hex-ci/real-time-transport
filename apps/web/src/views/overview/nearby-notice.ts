@@ -1,48 +1,30 @@
 /**
- * What a nearby card says when it has no platform to report — chosen by WHY it
- * has none.
+ * 一张附近卡片在没有站台可报时说的话 —— 按它为什么没有来选。
  *
- * The card used to word this from its own empty row list, which cannot tell the
- * causes apart: a card with no rows is empty BOTH before the app has a position
- * AND after a position arrives that no stop of this line can be resolved from.
- * The wording 「开启定位后…」 asserted the first cause for both, sending a user who
- * had already granted location off to enable it, and leaving the real answer —
- * this line has no platform near them — unsaid. A browser with no geolocation API
- * at all got that same sentence too, telling the user to switch on a capability
- * the browser does not have.
- *
- * So the position fact reaches the card as an explicit input, in the states the
- * location store can actually tell apart. This module turns that state into the
- * words; the card words none of it itself.
+ * 位置事实以显式输入到达卡片，用的就是位置 store 真的能分开的那几个状态。本模块把状态变成
+ * 措辞；卡片自己一个词都不说。
  */
 
 /**
- * The states of the app's position, as the store reports them.
+ * 应用位置的状态，按 store 报告它们的方式。
  *
- * `unsupported` is a browser with no geolocation API — nothing the user can switch
- * on. Permission-denied and never-asked stay together under `absent`, because for
- * both the next step is the same: grant the permission (through the browser
- * prompt, or the 定位最近站 button). `absent`'s sentence names exactly that step,
- * so splitting the refusal out would add a state whose wording says what `absent`
- * already says. Only a capability the browser lacks changes what the user can do,
- * which is why that case alone earns its own sentence.
+ * `unsupported` 是没有定位 API 的浏览器 —— 用户没有任何东西可以打开。权限被拒与从未询问
+ * 留在 `absent` 之下，因为两者的下一步相同：授予权限。`absent` 的句子说的正是这一步，所以
+ * 把拒绝单独拆出来只会多一个措辞与 `absent` 相同的状态。只有浏览器欠缺的能力会改变用户能做
+ * 的事，所以只有它挣得自己的一句话。
  */
 export type NearbyLocationState = 'absent' | 'locating' | 'fix' | 'unsupported'
 
 /**
- * The store's answer to 「是否有定位」, in those states.
+ * store 对「是否有定位」的回答，变成这些状态。
  *
- * Composed from the store's OWN reads rather than a second flag invented here:
- * `userCoords` is the fix, `isLocating` is a request in flight, `locationError` is
- * a request that answered with a failure, and `isSupported` is whether this
- * browser can locate at all. A failure is `absent`, never `locating` — a request
- * already refused is not one still coming, and saying 「正在获取定位…」 over it
- * would promise a fix that will not arrive.
+ * 由 store「自己」的那几项读取组合，而不是在这里另造一个标志：`userCoords` 是定位，
+ * `isLocating` 是请求在途，`locationError` 是请求以失败作答，`isSupported` 是这个浏览器
+ * 到底能不能定位。失败是 `absent`，绝不是 `locating` —— 一个已经被拒绝的请求不是还在来的
+ * 请求，在它上面说「正在获取定位…」会承诺一个不会到来的定位。
  *
- * Read order is the answer's order: a fix in hand is read first, because a
- * reported position is a position whatever the capability read says; the
- * capability is read next, because a browser with no API is not a request that
- * failed to answer and must not be worded as one.
+ * 读取顺序就是答案的顺序：手上已有定位先读，因为报了位置就是有位置，不管能力那一项说什么；
+ * 接着读能力，因为一个没有 API 的浏览器不是「失败了没答」的请求，不能按那个措辞。
  */
 export function nearbyLocationStateOf(input: {
   hasFix: boolean
@@ -55,14 +37,11 @@ export function nearbyLocationStateOf(input: {
   return input.requesting && !input.failed ? 'locating' : 'absent'
 }
 
-/** What a card with no platform to report says, by why it has none. */
+/** 一张没有站台可报的卡片说的一句，按它为什么没有来分。 */
 export function nearbyEmptyNoticeOf(state: NearbyLocationState): string {
-  // Four causes, four sentences: two of them can be told apart only by the
-  // position state, and a user who HAS a position must never be sent to enable
-  // one. Only `absent` has an action for the user (the page's 定位最近站 button /
-  // the browser permission); the other three state the fact and stop — and
-  // `unsupported` names the one thing that would change the outcome, a browser
-  // that can locate.
+  // 四种成因，四句话：其中两种只能由位置状态分开，而「已经有位置」的用户绝不能被送去开启
+  // 定位。只有 `absent` 有给用户的动作；另三种陈述事实后停下 —— 而 `unsupported` 点出唯一
+  // 能改变结果的东西：一个能定位的浏览器。
   const notices: Record<NearbyLocationState, string> = {
     absent: '开启定位后显示离你最近的站点车辆',
     locating: '正在获取定位…',

@@ -5,11 +5,6 @@ import { DEFAULT_USER_ID } from '@real-time-transport/shared'
 /**
  * T1 — 一个请求的 user id 只有一处解析，读与写因此不可能各说各话。
  *
- * 现状（修复前）：每条读路由各自内联 `(req.query as any)?.userId || 'default_user'`，
- * 而 `PATCH /settings` 根本不读 user id、直接写 'default_user'。于是「给 X 的写入」被
- * 「给 X 的读」读成「没有这一行」，而字面量 'default_user' 在服务端、契约层、前端各有
- * 一份副本 —— 同一个事实的四份抄本，任何一处改动都会让另一处变旧。
- *
  * 这里钉住的是行为：同一个 id 的写被同一个 id 的读看见（a），别人的读看不见（b），
  * 不带 id 的请求照旧落在默认用户并且默认读看得见（c，正对照），以及关注线路与通勤链路
  * 这两条同样带 user id 的路线走的是同一套解析（d）。
@@ -24,7 +19,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** A refused upstream: nothing in this file may reach the network. */
+/** 拒绝的上游：本文件里任何调用都不许触网。 */
 function refuseUpstream(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => ({
     ok: false,
@@ -41,7 +36,7 @@ const getSettings = (app: App, query = '') =>
 const patchSettings = (app: App, payload: Record<string, unknown>, query = '') =>
   app.inject({ method: 'PATCH', url: `/api/transit/settings${query}`, payload })
 
-/** The chain body of a chain that costs no upstream read (no station chosen yet). */
+/** 不花任何上游请求的链路体（还没选站）。 */
 const UNCHOSEN_LEG = {
   lineId: '010-2-0',
   lineName: '2路',
@@ -143,7 +138,7 @@ describe('(c) 正对照：不带 user id 的请求照旧落在默认用户', () 
       const saved = await patchSettings(app, { morningStart: '07:15', morningEnd: '09:45' })
       expect(saved.statusCode, saved.body).toBe(200)
 
-      // 今天的客户端一个 id 都不发：这条路径的行为必须与修复前逐字节相同。
+      // 今天的客户端一个 id 都不发：这条路径的行为不许变。
       const readBack = await getSettings(app)
       expect(json(readBack).settingsState).toBe('stored')
       expect(json(readBack).data).toMatchObject({ morningStart: '07:15', morningEnd: '09:45' })

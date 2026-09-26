@@ -11,35 +11,27 @@ import type { DayTimetable, DayType } from '../index.js'
 import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
 
 /**
- * F-B: the declared window and the departures must be the SAME table read twice.
+ * F-B：声明的窗口与发车必须是同一张表的两次读取。
  *
- * The shipped 群芳 table (real transcription, do not hand-edit) declares its
- * direction-1 window as `first 5:49 / last 0:01` while its own departures include
- * `05:48` and `00:08 / 00:16`. The declared ends fed `operatingStatusOf` while the
- * departures drove the arrival rows, so the two could state different things about
- * the same service: at 00:05 the API would answer `after_last` TOGETHER WITH
- * departures (the board saying the day is over while listing trains), and at 05:48
- * `before_first` beside a departure that had already gone.
+ * 声明的 ends 曾喂给 `operatingStatusOf`，而到达行由发车驱动，于是两者
+ * 可能对同一段服务说出不同的话：接口会在列出车次的同时答 `after_last`，
+ * 也会在刚发出的发车旁边答 `before_first`。
  *
- * The fix derives the window from the departures — the list the rows are built
- * from — so the state and the list cannot disagree. These assertions compare the
- * window against the departures mechanically (not against hard-coded clock strings
- * alone) so a table whose transcription changes is judged by its own numbers.
+ * 修正后窗口由发车 —— 行所依据的那张表 —— 推导，状态与列表就不可能
+ * 不一致。这里的断言机械地比较窗口与发车，而不是只比硬编码的时刻串。
  */
 
-/** Seconds of the operating day for a 「H:MM」 the table declares (tail shifted +24h). */
+/** 表声明的「H:MM」对应的运营日秒数（跨 0 点尾班 +24h）。 */
 function secsOf(clock: string): number {
   const [h = 0, m = 0] = clock.split(':').map(Number)
   const sec = h * 3600 + m * 60
   return h < 4 ? sec + 24 * 3600 : sec
 }
 
-/** The departures a table lists, in operating-day seconds: the ground truth. */
 function departureSeconds(day: DayTimetable): number[] {
   return operatingDaySeconds(day)
 }
 
-/** Every (direction, dayType) table the repo ships. */
 function everyTable(): Array<{ label: string, table: (typeof STATION_TIMETABLES)[number], direction: number, dayType: DayType, day: DayTimetable }> {
   const out: Array<{ label: string, table: (typeof STATION_TIMETABLES)[number], direction: number, dayType: DayType, day: DayTimetable }> = []
   for (const t of STATION_TIMETABLES) {
@@ -61,8 +53,8 @@ function everyTable(): Array<{ label: string, table: (typeof STATION_TIMETABLES)
 describe('F-B: the state\'s window is derived from the table\'s own departures', () => {
   it('pins the window to the departures for EVERY shipped table', () => {
     const tables = everyTable()
-    // The shipped table exists and is read: a suite that silently covered zero
-    // tables would pass this file's other assertions too.
+    // 已发布的表确实存在且被读到：静默覆盖零张表的测试套件也会
+    // 通过本文件其它断言。
     expect(tables.length).toBeGreaterThan(0)
 
     for (const { label, table, direction, dayType, day } of tables) {
@@ -78,8 +70,6 @@ describe('F-B: the state\'s window is derived from the table\'s own departures',
   })
 
   it('is 运营中 at the first departure the list itself has, not 首班前', () => {
-    // 05:48 workday: the declared `5:49` said 首班前 while the row right beside it
-    // was the 05:48 departure. The state and the list are the same table here.
     const nowSec = 5 * 3600 + 48 * 60
     const r = queryStationArrivals(STATION_TIMETABLES[0]!, 1, nowSec, { dayType: 'workday' })
     expect(r!.arrivals.length).toBeGreaterThan(0)
@@ -89,8 +79,6 @@ describe('F-B: the state\'s window is derived from the table\'s own departures',
   })
 
   it('is 运营中 after midnight while the tail departures are still listed', () => {
-    // 00:05 belongs to the previous operating day, whose tail runs 00:01 / 00:08 /
-    // 00:16. The declared `last 0:01` said 已过末班 over a list of departures.
     const nowSec = 24 * 3600 + 5 * 60
     const r = queryStationArrivals(STATION_TIMETABLES[0]!, 1, nowSec, { dayType: 'workday' })
     expect(r!.arrivals.map(a => a.time)).toEqual(['00:08', '00:16'])
@@ -107,19 +95,17 @@ describe('F-B: the state\'s window is derived from the table\'s own departures',
   })
 
   it('leaves a table that was already consistent exactly as it was', () => {
-    // Direction 0's declared 5:16 / 23:06 IS its own first and last departure, so
-    // deriving must not move it — a fix that changed this table would be rewriting
-    // data rather than making the window agree with it.
+    // 方向 0 声明的 5:16 / 23:06 就是它自己的首末班，所以推导不能移动它：
+    // 一个改动这张表的「修正」是在改写数据，而不是让窗口与数据一致。
     const r = queryStationArrivals(STATION_TIMETABLES[0]!, 0, 12 * 3600, { dayType: 'workday' })
     expect({ first: r!.first, last: r!.last }).toEqual({ first: '5:16', last: '23:06' })
   })
 })
 
 /**
- * The same rule one level up: the LINE's reported hours come from the same table,
- * so they cannot disagree with the platform's departures either. The engine
- * prefers upstream hours; when the upstream declares none, the table is the
- * source — and it is read through the same window derivation.
+ * 同一条规则再上一层：线路上报的服务时间来自同一张表，因此也不可能
+ * 与站台的发车不一致。引擎优先用上游的时间；上游没有声明时以该表为源，
+ * 并且同样经由这套窗口推导读取。
  */
 describe('F-B: the line\'s hours are read through the same window', () => {
   afterEach(() => {
@@ -140,7 +126,7 @@ describe('F-B: the line\'s hours are read through the same window', () => {
               type: '地铁线路',
               start_stop: '群芳',
               end_stop: '乙站',
-              // No start_time / end_time: the upstream genuinely does not know.
+              // 没有 start_time / end_time：上游确实不知道。
               busstops: [
                 { id: 's1', name: '群芳', sequence: 1, location: '116.392540,39.924299' },
                 { id: 's2', name: '乙站', sequence: 2, location: '116.399999,39.930001' },

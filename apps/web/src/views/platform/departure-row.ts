@@ -1,63 +1,43 @@
 /**
- * One platform-board row, built from one targeted live reading.
+ * 站台屏的一行，由一次定点实时读数构造。
  *
- * WHY THIS IS A MODULE. The board rendered 「无法估算 / 暂无到站耗时」 on every row at every
- * moment because the row builder read `travelTimeSec` off a reading that had asked for no
- * target stop — and upstream fills that field only when the request names the stop the
- * vehicle is travelling to. The builder sat inside the view, where nothing could state
- * what it had been handed, so the column's emptiness was only ever visible in a browser.
- * It lives here now for the same reason the other platform rules do (`landmark-distance`,
- * `congestion`): the answer for a given reading is a pure function with two outcomes that
- * a test can pin.
+ * 分钟只来自数据源自己给的 `travelTimeSec`（仅定点读数才有），刻意不退回逐站推算：
+ * 本行不替数据源陈述它没给的等车时间。
  *
- * THE MINUTE IS THE SOURCE'S OWN. This row states a minute only when the reading carries
- * one — `travelTimeSec`, which exists only on a targeted read. It deliberately does NOT
- * fall back to per-stop arithmetic the way the home card's arrival rows do: the board is a
- * departure board for a platform (「下一班还有几分钟」), and a row that computed its own
- * minute would be stating this app's estimate of the wait where the source stated none.
- * That is why 「无法估算 / 暂无到站耗时」 stays on the board: it is the honest answer for a
- * vehicle whose arrival time nobody published, and it is reachable — the row simply has no
- * minute. What was broken was the other half: with no target order the field was absent on
- * EVERY vehicle, so the known case could never be reached.
+ * 在范围内的车按车头方向（`nextOrder`）与数据源自己的「已过所请求的站」哨兵
+ * （`distanceToWaitStn === -1`）判定，绝不只看 `order`——与服务端定价到站行用的是同一套
+ * 划分，故站台屏与首页卡不会对哪些车已经过站给出不一致的答案。
  *
- * THE ROW IS ABOUT THE VEHICLE STILL HEADING HERE. Membership is decided on the vehicle's
- * nose (`nextOrder`) and the source's own 「already past the requested stop」 sentinel
- * (`distanceToWaitStn === -1`), never on `order` alone — this is the same partition the
- * server applies before it prices an arrival row (`TransitService.vehicleArrivals`), so the
- * board and the home card cannot disagree about which vehicles have gone by.
- *
- * The kind of number a row carries is not decided here: `provenanceOf` answers that from
- * the source the response declared, so one board can hold rows of different kinds.
+ * 行携带哪一类数字不在此决定：由 `platformRowProvenanceOf` 从响应声明的来源作答，
+ * 故一块屏可以同时持有不同类别的行。
  */
 import type { DataSourceType, LiveBus } from '@real-time-transport/shared'
 import { platformRowProvenanceOf } from './provenance'
 import type { DepartureItem, PlatformLineRule } from './types'
 
-/** The live answer a row is built from: the source it declared, and its vehicles. */
+/** 构造一行所依据的实时答案：它声明的来源，以及车辆列表。 */
 export interface LiveAnswer {
   /**
-   * The source the response declared. `null` when it declared none this build knows, in
-   * which case the row keeps its minute and shows no mark — never the flattering one.
+   * 响应声明的来源。本版本不认识时为 null，此时行保留分钟、不显示标记——绝不用好看的那个。
    */
   dataSource: DataSourceType | null
   buses: LiveBus[]
 }
 
 /**
- * The nearest vehicle still heading to this platform, or null when none is.
+ * 仍朝本站台行驶的最近一辆车。
  *
- * `nextOrder` is the stop the vehicle's nose is heading to, so it is the thing that decides
- * whether this vehicle will still reach the platform being displayed; `order` (the stop it
- * last passed) is only the tiebreak for which of them is nearest.
+ * `nextOrder` 是车头正驶向的站，故由它决定该车是否还会到达本站台；`order`（刚过的站）
+ * 只用于在候选之间取最近。
  */
 function vehicleHeadingTo(buses: LiveBus[], stationOrder: number): LiveBus | null {
   let nearest: LiveBus | null = null
   for (const bus of buses) {
     if (typeof bus.order !== 'number') continue
-    // The source saying it outright: this vehicle is already past the requested stop.
+    // 数据源直接说：这辆车已过所请求的站。
     if (bus.distanceToWaitStn === -1) continue
-    // No nose to read (a reading without ordinals) falls back to the tail, which is the
-    // only position such a reading carries.
+    // 无车头可读（没有站序的读数）退回车尾，
+    // 这是这种读数唯一携带的位置。
     const heading = bus.nextOrder ?? bus.order
     if (heading > stationOrder) continue
     if (!nearest || bus.order > (nearest.order ?? 0)) nearest = bus
@@ -66,12 +46,10 @@ function vehicleHeadingTo(buses: LiveBus[], stationOrder: number): LiveBus | nul
 }
 
 /**
- * The minute the source served for this platform, or null when it served none.
+ * 数据源为本站台给出的分钟。
  *
- * `0` is upstream's own statement that the vehicle is STANDING at the platform, not a
- * missing value: it floors to 1 分钟, the app's word for 「马上」, and dropping it into the
- * unknown branch would hide a vehicle that is already there. A negative or non-finite value
- * is not a duration and is treated as no statement at all.
+ * `0` 是「车正停在站台」的陈述而非缺值：它落到 1 分钟，丢进未知分支会藏起一辆
+ * 已经到站的车。负值与非有限值不算时长，视为没陈述。
  */
 function servedMinuteOf(bus: LiveBus): number | null {
   if (typeof bus.travelTimeSec !== 'number' || !Number.isFinite(bus.travelTimeSec)) return null
@@ -80,26 +58,24 @@ function servedMinuteOf(bus: LiveBus): number | null {
 }
 
 /**
- * One row: the stated minute and stops from the answer, or the row's own reason for not
- * having one.
+ * 一行：答案里陈述的分钟与站数，或本行自己没有分钟的原因。
  *
- * `answer: null` is the request that failed and nothing else — a response that arrived
- * without a reading (a 404 for the line, a body with no vehicles) is an ANSWERED reading
- * with nothing in range, and the row states the line's service fact instead of a failure.
+ * `answer: null` 只表示请求失败；到达了响应但没有读数（线路 404、车列表为空）是
+ * 「已作答、范围内无车」，此时陈述线路的运营事实而非失败。
  */
 export function departureRowOf(params: {
-  /** The row's own id, built by the caller from the rule it came from. */
+  /** 行的 id，由调用方按其来源规则构造。 */
   id: string
   rule: PlatformLineRule
-  /** The targeted live answer, or null when the request itself failed. */
+  /** 定点实时答案；请求本身失败时为 null。 */
   answer: LiveAnswer | null
 }): DepartureItem {
   const { id, rule, answer } = params
   const base = { id, lineName: rule.lineName, terminal: rule.terminal }
 
   if (!answer) {
-    // Nothing came back at all: neither a vehicle nor the service day is known here, so
-    // no operating fact and no provenance is claimed either.
+    // 什么都没有回来：车辆与运营日都未知，
+    // 故不陈运营事实，也不陈来源。
     return {
       ...base,
       etaMinutes: null,
@@ -113,8 +89,8 @@ export function departureRowOf(params: {
 
   const bus = vehicleHeadingTo(answer.buses, rule.stationOrder)
   if (!bus) {
-    // No vehicle with a reading for this platform: state the line's own service fact
-    // rather than a failure, because the request answered.
+    // 本站台没有可读的车：请求已作答，
+    // 故陈述线路自己的运营事实而非失败。
     return {
       ...base,
       etaMinutes: null,
@@ -122,7 +98,7 @@ export function departureRowOf(params: {
       congestion: 'unknown',
       unavailable: false,
       operatingText: rule.operatingText,
-      // A service fact is not a number, so there is nothing for a mark to qualify.
+      // 运营事实不是数字，没有可供标记限定的东西。
       provenance: platformRowProvenanceOf({ dataSource: answer.dataSource, hasMinute: false }),
     }
   }
@@ -131,15 +107,15 @@ export function departureRowOf(params: {
   return {
     ...base,
     etaMinutes,
-    // Hops from the nose to this platform, floored at 1 — the same arithmetic the server
-    // prices an arrival row with, so the two surfaces cannot count differently.
+    // 从车头到本站台的站数，下限 1——与服务端定价到站行
+    // 用同一算式，两个界面不会数出不同结果。
     stopsAway: Math.max(1, rule.stationOrder - (bus.nextOrder ?? bus.order!)),
-    // The crowding verdict is the vehicle's own and stands even with no minute.
+    // 拥挤度判决属于车辆自己，无分钟时依然成立。
     congestion: bus.congestion,
     unavailable: false,
-    // A vehicle IS in range: this row's answer is a number, or the absence of one.
+    // 范围内有车：本行的答案是数字，或数字的缺失。
     operatingText: null,
-    // A mark rides only on a minute that exists.
+    // 标记只搭载在存在的分钟上。
     provenance: platformRowProvenanceOf({ dataSource: answer.dataSource, hasMinute: etaMinutes !== null }),
   }
 }

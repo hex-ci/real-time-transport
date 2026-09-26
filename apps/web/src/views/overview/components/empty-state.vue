@@ -3,21 +3,14 @@ import { ChevronRight, RefreshCw, TriangleAlert } from '@lucide/vue'
 import { followedLinesUnreadableText, type ReadState } from '@/read-state'
 
 /**
- * The home screen with no card to show — and the THREE reasons that can happen, which must
- * not be told as one.
+ * 首页没有任何卡片可显示时的样子 —— 以及能造成它的「三种」原因，它们不能被说成一种。
  *
- * `state` is the followed-lines read's own state, handed down by the page that made the
- * read. It matters here because this card used to be rendered on an empty array alone, and
- * an array is empty both when the user follows nothing and when nobody read their list:
- * 「当前城市（北京市）还没有关注线路」 then states a fact about the stored rows that no answer
- * supports, and its link sends the user to re-follow lines they already follow. 设置's index
- * row was fixed for exactly this (`未读到`, not a count nobody obtained); the home screen is
- * the same failure with a bigger consequence.
+ * `state` 是做这次读取的页面传下来的关注线路读取状态。它在这里重要，因为这张卡片以前只凭
+ * 空数组渲染，而数组为空既可能是用户什么都没关注，也可能是没人读过他的列表。
  *
- *  - `reading`    nothing was answered yet, so nothing is claimed;
- *  - `unreadable` the read failed: it says so, and offers the one action that can change it;
- *  - `read`       the list answered and is empty — the only state this message is true in,
- *                 and the link is its action.
+ *  - `reading`    还没有答案，于是什么都不主张；
+ *  - `unreadable` 读取失败：说出来，并给出唯一能改变它的动作；
+ *  - `read`       列表答了且为空 —— 只有这个状态下这句话是真的，链接就是它的动作。
  */
 defineProps<{
   cityName: string
@@ -31,7 +24,7 @@ defineEmits<{
 
 <template>
   <div class="rounded-3xl border border-dashed border-slate-700 bg-slate-900/40 p-10 text-center">
-    <!-- An unreadable list: the cause is the read, and the action is another read. -->
+    <!-- 读不到的列表：原因是那次读取，动作是再读一次。 -->
     <template v-if="state === 'unreadable'">
       <p class="flex items-center justify-center gap-1.5 text-sm text-rose-400 lg:text-base">
         <TriangleAlert class="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -47,7 +40,7 @@ defineEmits<{
       </button>
     </template>
 
-    <!-- Still reading: a state of its own, and it does not borrow the empty one's words. -->
+    <!-- 还在读：它自己有状态，不借空状态的话说。 -->
     <p v-else-if="state === 'reading'" class="text-sm text-slate-400 lg:text-base">
       正在读取关注线路…
     </p>
@@ -56,9 +49,8 @@ defineEmits<{
       <p class="text-sm text-slate-400 lg:text-base">
         当前城市（{{ cityName }}）还没有关注线路
       </p>
-      <!-- 设置 is an index plus four pages now, so this pointer names the page that holds
-           what this screen is missing (关注线路) instead of the index, which would cost a
-           second tap on the one screen that exists to remove this state. -->
+      <!-- 「设置」现在是索引加四页，这个指针指向持有本屏所缺之物（关注线路）的那一页，而不是
+         索引 —— 在专为消除这个状态而存在的屏幕上，指向索引要多花一次点按。 -->
       <RouterLink
         to="/settings/lines"
         class="mt-3 inline-flex items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 lg:gap-1.5 lg:px-4.5 lg:py-2.5 lg:text-base"

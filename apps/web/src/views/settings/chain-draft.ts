@@ -7,61 +7,56 @@ import type {
 import type { ChainLineOption, ChainStopsState } from './types'
 
 /**
- * F10's chain editor, as one place of judgement.
+ * 通勤链路的编辑器，作为唯一的判断处。
  *
- * 「链路由使用者录入，不由系统规划」 is the feature's premise, so the rules that make a
- * record readable live HERE, where the user's entry is, rather than at the write
- * boundary: `CommuteChainLegSchema` can check that a (station name, station order)
- * pair agrees with itself, but it cannot see a line's stop list, so 「这一对确实在站序
- * 里」 is only checkable while the list is on screen. Every rule below is therefore
- * the same predicate the schema states, applied to the draft, and each refusal is
- * worded as the fact it is — not as a generic 「输入有误」.
+ * 「链路由使用者录入，不由系统规划」是本特性的前提，故让一条记录可读的规则住在这里，
+ * 也就是用户录入之处，而不是写入边界：`CommuteChainLegSchema` 能检查一对 (站名, 站序)
+ * 自洽，但它看不到线路的站点列表，故「这一对确实在站序里」只有在列表在屏上时才可检查。
+ * 故下面每条规则都是 schema 陈述的同一个谓词，作用在草稿上，而每条拒绝都按它本来的事实
+ * 措辞——不是笼统的「输入有误」。
  *
- * Nothing here reads the clock, a vehicle or a timetable, and nothing computes a
- * duration: the editor records facts, and the chain page is where conclusions are
- * drawn (F10's 「不给点结论的判据不是段数，而是每一段的来源等级」).
+ * 这里不读时钟、车辆或时刻表，也不计算任何时长：编辑器记录事实，
+ * 链路页才是得出结论的地方。
  */
 
 /**
- * Why a chain cannot be left without ride legs — the reason the last leg's remove
- * control is disabled with, and the substance of the refusal when a draft reaches
- * the save with none.
+ * 一条链路为何不能没有乘车段——最后一段的移除控件禁用的原因，
+ * 也是草稿在无段时到达保存处那份拒绝的实质。
  */
 export const LAST_LEG_REASON = '不能删除最后一段：没有乘车段的链路给不出任何结论'
 
 /**
- * Ride legs one chain may carry in this version.
+ * 本版本一条链路可以携带的乘车段数。
  *
- * The data model is N legs by design and the read side walks whatever it is given;
- * this is the entry screen's own bound, and the editor says so instead of silently
- * refusing the third one.
+ * 数据模型按设计允许 N 段，读侧照收到的走；这是录入屏自己的边界，
+ * 且编辑器会说明，而不是静默拒绝第三段。
  */
 export const MAX_CHAIN_LEGS = 2
 
 /**
- * Whether a line id names a subway line.
+ * 线路 id 是否命名一条地铁线路。
  *
- * The project's own convention (`subway_` prefix), which is what routes a read to
- * the subway engine — the same test `CommuteChainLegSchema`'s refinement applies, so
- * the editor and the write boundary cannot disagree about a line.
+ * 本项目自己的约定（`subway_` 前缀），它把一次读取路由到地铁引擎——与
+ * `CommuteChainLegSchema` 的细化所施加的同一个判断，
+ * 故编辑器与写入边界不会对一条线路产生分歧。
  */
 export function isSubwayLineId(lineId: string): boolean {
   return lineId.startsWith('subway_')
 }
 
-/** One ride leg while it is being filled in. A null value is 「未选」, never an empty string. */
+/** 一段正在填写的乘车段。null 值表示「未选」，绝不是空字符串。 */
 export interface ChainLegDraft {
-  /** The chosen line+direction, or null before one is chosen. */
+  /** 已选的线路+方向；还没选时为 null。 */
   lineKey: string | null
   boardStationName: string | null
   boardStationOrder: number | null
   alightStationName: string | null
   alightStationOrder: number | null
-  /** null = the user configured nothing; 0 = they configured 「no extra time at all」. */
+  /** null = 用户什么都没配；0 = 他配了「完全没有额外时间」。 */
   transferExtraMinutes: number | null
 }
 
-/** A chain while it is being filled in. */
+/** 一条正在填写的链路。 */
 export interface ChainDraft {
   name: string
   originAnchor: CommuteChainAnchor
@@ -69,13 +64,13 @@ export interface ChainDraft {
   legs: ChainLegDraft[]
 }
 
-/** A refusal, and which leg it is about — null when it is about the chain itself. */
+/** 一次拒绝，以及它关于哪一段——关于链路本身时为 null。 */
 export interface ChainRefusal {
   legIndex: number | null
   message: string
 }
 
-/** A leg to start from: no line chosen, no stations, nothing configured. */
+/** 起始的一段：没选线路、没有站点、什么都没配。 */
 export function emptyLegDraft(): ChainLegDraft {
   return {
     lineKey: null,
@@ -87,12 +82,12 @@ export function emptyLegDraft(): ChainLegDraft {
   }
 }
 
-/** A new chain's draft: one empty leg, so the shape is visible before anything is typed. */
+/** 新链路的草稿：一个空段，故在敲任何字之前形状就是可见的。 */
 export function emptyChainDraft(): ChainDraft {
   return { name: '', originAnchor: 'home', purpose: 'morning', legs: [emptyLegDraft()] }
 }
 
-/** 「第 2 段」 — the position word every sentence and label uses. */
+/** 「第 2 段」——每句话与每个标签所用的位置词。 */
 export function legPositionText(index: number): string {
   return `第 ${index + 1} 段`
 }
@@ -108,24 +103,19 @@ export function anchorText(anchor: CommuteChainAnchor): string {
 }
 
 /**
- * How an option is named wherever the user reads it: the line, then the direction's
- * own terminus label.
+ * 一个选项在用户读到它之处的命名方式：先线路，再方向自己的终点站标签。
  *
- * The fallback is 「方向 N」 rather than a guessed terminus: an upstream that stated
- * no `directionName` has stated no terminus, and inventing one would label a leg
- * with a destination nobody reported.
+ * 兜底是「方向 N」而不是猜一个终点站：没有陈述 `directionName` 的数据源就是没有陈述终点站，
+ * 造一个会给一段贴上无人报告过的目的地。
  *
- * WHEN THE DIRECTION ITSELF CANNOT BE READ AT ALL (`direction === null`, which is what a
- * stored leg's line lands in once that line is no longer followed), the label says which
- * fact is actually missing — and that depends on the line:
+ * 方向**本身完全读不出来**时（`direction === null`，也就是一条已存链路的线路在被取消关注后
+ * 落入的状态），标签说的是实际缺失的那个事实——而这取决于线路：
  *
- * - a bus route's two directions are TWO upstream line ids, so the stored id has already
- *   fixed which way the leg runs. Its direction is known; what cannot be read is the stop
- *   list, so the label says 「站序未知」. Calling the direction unknown here would overstate:
- *   it would claim an ignorance the id itself rules out;
- * - a subway reuses ONE id for both directions and numbers the same stations oppositely, so
- *   which way a stored subway leg runs is genuinely not in the record — 「方向未知」 is the
- *   fact, and the read side resolves the direction from the stored orders.
+ * - 公交线路的两个方向是**两个**线路 id，故已存的 id 已经定死了该段走哪边。它的方向是已知的；
+ *   读不到的是站点列表，故标签说「站序未知」。把此处的方向称为未知会夸大：
+ *   那会声称一种 id 本身就排除掉的无知；
+ * - 地铁两个方向复用**一个** id，并对同一批站反向编号，故一条已存地铁段走哪边确实不在记录里
+ *   ——「方向未知」就是那个事实，读侧从已存的站序解析方向。
  */
 export function lineOptionLabel(option: ChainLineOption): string {
   if (option.directionLabel) return `${option.lineName} · ${option.directionLabel}`
@@ -138,11 +128,10 @@ export function lineOptionLabel(option: ChainLineOption): string {
 }
 
 /**
- * The option a leg rides, or null while none is chosen.
+ * 一段所乘坐的选项；没选时为 null。
  *
- * `lines` is the whole set the editor offers (the followed routes' directions, plus
- * the line a stored leg already names when that line is no longer followed), so a
- * lookup that fails means the leg genuinely names nothing this screen can offer.
+ * `lines` 是编辑器提供的全集（已关注线路的各方向，加上一条已存段已命名、而该线路已不再被
+ * 关注时的那个），故查不到意味着该段确实没有命名本屏能提供的任何东西。
  */
 export function optionOfLeg(leg: ChainLegDraft, lines: ChainLineOption[]): ChainLineOption | null {
   if (leg.lineKey === null) return null
@@ -150,18 +139,16 @@ export function optionOfLeg(leg: ChainLegDraft, lines: ChainLineOption[]): Chain
 }
 
 /**
- * The one sentence a leg's stop list state earns when it cannot be picked from.
+ * 一段的站点列表状态在无法挑选时挣得的那一句话。
  *
- * Each state is worded as the fact it is, and the three are different facts: a read
- * that is still coming, a read that answered with nothing, and a line that is no
- * longer followed and whose list this screen therefore cannot read at all. The last one
- * names the LINE rather than one direction, because which direction it was recorded
- * from is exactly what cannot be read.
+ * 每种状态按它本来的事实措辞，而三者是不同的：仍在到来的读取、作答为空无的读取、
+ * 以及一条不再被关注、其列表本屏因此完全读不到的线路。最后一种点名的是**线路**而非某个方向，
+ * 因为它是从哪个方向记录的，正是读不出来的东西。
  */
 export function stopsStateSentence(option: ChainLineOption): string | null {
   const label = lineOptionLabel(option)
-  // A read that answered with no stops at all is not a read still on its way: waiting
-  // for it would never end, so it is told as the absence it is.
+  // 作答且一个站都没有的读取不是仍在途的读取：
+  // 等它永远不会结束，故按它本来的缺失陈述。
   const state: ChainStopsState = option.stops === 'ready' && option.stations.length === 0
     ? 'unavailable'
     : option.stops
@@ -178,9 +165,8 @@ export function stopsStateSentence(option: ChainLineOption): string | null {
 }
 
 /**
- * Whether a stored pair sits in a stop list exactly as stored: the name at that
- * order. The two travel together, so a name found at a different order is not this
- * pair — the list has been renumbered since it was recorded.
+ * 一个已存的对是否原样落在某个站点列表里：该站名在该站序上。
+ * 两者一起流动，故在另一个站序上找到的站名不是这一对——列表自那次记录以来被重编号过。
  */
 function pairIsInList(stations: ChainLineOption['stations'], name: string | null, order: number | null): boolean {
   if (name === null || order === null) return false
@@ -188,14 +174,12 @@ function pairIsInList(stations: ChainLineOption['stations'], name: string | null
 }
 
 /**
- * The option key a stored leg's line resolves to.
+ * 一段已存链路的线路解析到的选项 key。
  *
- * A subway line id carries BOTH directions, so the direction is only told apart by
- * the numbering the stored orders match: the option whose own stop list holds the
- * stored pair verbatim is the one the leg was recorded from. When no list matches —
- * a bus whose stops were renumbered upstream, or a line whose stops are not loaded —
- * the leg keeps the line it names, and the save is refused later by the pair rule
- * rather than the leg being silently re-numbered onto a guessed direction.
+ * 地铁线路 id 携带**两个**方向，故只有靠已存站序匹配的那套编号才能区分方向：其自己的站点
+ * 列表原样持有那一对的选项，就是该段录自的那个。没有列表匹配时——公交的站在数据源侧被重编号，
+ * 或线路的站点未加载——该段保留它命名的线路，稍后由配对规则拒绝保存，
+ * 而不是把该段静默重编号到一个猜出的方向上。
  */
 function lineKeyOfStoredLeg(leg: CommuteChainLeg, lines: ChainLineOption[]): string {
   const sameLine = lines.filter(option => option.lineId === leg.lineId)
@@ -207,9 +191,8 @@ function lineKeyOfStoredLeg(leg: CommuteChainLeg, lines: ChainLineOption[]): str
 }
 
 /**
- * The line a stored leg names, as an option — for the case where it is no longer
- * followed, so the editor can show the user what the leg holds instead of dropping
- * it silently. Its stop list is not readable at all, which `unfollowed` says.
+ * 一段已存链路命名的线路，作为选项——用于它已不再被关注的情况，好让编辑器把该段持有的东西
+ * 展示给用户，而不是静默丢掉它。它的站点列表完全读不到，由 `unfollowed` 说明。
  */
 function storedLineOption(leg: CommuteChainLeg): ChainLineOption {
   return {
@@ -225,8 +208,8 @@ function storedLineOption(leg: CommuteChainLeg): ChainLineOption {
 }
 
 /**
- * The option set one chain's draft needs: the followed routes' directions, plus a
- * line any of this chain's legs already names and can no longer be chosen from.
+ * 一条链路的草稿所需的选项集：已关注线路的各方向，加上本链路任一段已命名、
+ * 且已无法再从选项中选到的线路。
  */
 export function editorOptionsFor(chain: CommuteChain | null, lines: ChainLineOption[]): ChainLineOption[] {
   if (!chain) return lines
@@ -243,12 +226,10 @@ export function editorOptionsFor(chain: CommuteChain | null, lines: ChainLineOpt
 }
 
 /**
- * A stored chain, as the draft the editor opens on.
+ * 一条已存链路，作为编辑器打开的草稿。
  *
- * The stored pair is carried over VERBATIM — name and order together — because it is
- * the record the user already made: renumbering it from a freshly loaded list would
- * rewrite a leg nobody asked to change. A leg's line is matched to an option by that
- * same pair.
+ * 已存的那一对**原样**沿用——站名与站序一起——因为那是用户已经做出的记录：拿新加载的列表
+ * 给它重编号，会改写一段没人要求改动的行程。一段的线路靠同一对匹配到选项。
  */
 export function chainDraftOf(chain: CommuteChain, lines: ChainLineOption[]): ChainDraft {
   return {
@@ -266,7 +247,7 @@ export function chainDraftOf(chain: CommuteChain, lines: ChainLineOption[]): Cha
   }
 }
 
-/** One leg as the write carries it: no `seq`, which the server writes from the array's order. */
+/** 写入所携带的一段：没有 `seq`，由服务端按数组顺序写入。 */
 export interface ChainLegWrite {
   lineId: string
   lineName: string
@@ -278,7 +259,7 @@ export interface ChainLegWrite {
   transferExtraMinutes: number | null
 }
 
-/** The chain as the write carries it — the same shape for a create and an edit. */
+/** 写入所携带的链路——创建与编辑同一个形状。 */
 export interface ChainWrite {
   name: string
   originAnchor: CommuteChainAnchor
@@ -287,25 +268,21 @@ export interface ChainWrite {
 }
 
 /**
- * The rules, applied to the draft: null when the draft can be written, or the ONE
- * refusal the user has to deal with.
+ * 规则，作用于草稿：可以写入时为 null，否则是用户必须处理的那**一条**拒绝。
  *
- * The first rule that fails wins, chain-level checks before per-leg ones and the legs
- * in their own order, so the sentence names the earliest thing to fix rather than the
- * last. Each is the predicate of `CommuteChainLegSchema`, stated here at the point of
- * entry:
+ * 第一条失败的胜出，链路级检查先于逐段检查、段按自身顺序，故句子点名最早要修的东西而不是
+ * 最晚的。每一条都是 `CommuteChainLegSchema` 的谓词，在录入之处再陈述一遍：
  *
- * 1. a bus leg runs downstream only — its stored line id already fixes the direction;
- * 2. a subway leg may run the other way — one id carries both directions and the
- *    orders say which, so refusing it would make a real ride unrecordable;
- * 3. a leg cannot start and end at the same stop;
- * 4. a station is a pair — name AND order, or neither;
- * 5. a chain has at least one ride leg;
- * 6. every leg's stations are chosen before the save.
+ * 1. 公交段只沿下游运行——它已存的线路 id 已定死方向；
+ * 2. 地铁段可以走另一边——一个 id 携带两个方向，站序说明是哪一个，故拒绝它会让一趟真实的
+ *    乘车无法被记录；
+ * 3. 一段不能始于并止于同一个站；
+ * 4. 一个站是一对——站名与站序，或两者皆无；
+ * 5. 一条链路至少有一段乘车段；
+ * 6. 每段的站点在保存前都已选好。
  *
- * Every sentence states the fact the user is in. None of them is 「输入有误」, because
- * the user's entry is not wrong in general — one particular thing about it is, and it
- * has a name.
+ * 每句话陈述的都是用户所处的事实。没有一句是「输入有误」，因为用户的录入总体上并不错——
+ * 是其中某一处错了，而它有名字。
  */
 export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): ChainRefusal | null {
   if (draft.name.trim() === '') {
@@ -322,8 +299,8 @@ export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): C
       return { legIndex: index, message: `${position}还没选线路与方向：每一段都要先选一条线路` }
     }
 
-    // The list the pair must be checked against is not there: which of the three
-    // reasons it is decides the sentence, and none of them is 「输入有误」.
+    // 那一对必须对着核对的列表不在此：是三种原因中的哪一种决定句子，
+    // 而没有一种是「输入有误」。
     const stateSentence = stopsStateSentence(option)
     if (stateSentence) {
       return { legIndex: index, message: `${position}的${stateSentence}` }
@@ -356,8 +333,8 @@ export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): C
       }
     }
 
-    // From one stop to itself is not a ride at all — neither a shorter leg nor a
-    // legitimate reverse one.
+    // 从一个站到它自己根本不是乘车——
+    // 既不是更短的一段，也不是合法的反向一段。
     if (leg.boardStationOrder === leg.alightStationOrder) {
       return {
         legIndex: index,
@@ -365,11 +342,10 @@ export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): C
       }
     }
 
-    // Downstream only on a bus, either way on a subway. The line id is what decides
-    // which of the two this is: a bus route's two ways are two ids, so a lesser alight
-    // order on a stored id is this leg entered backwards; a subway reuses one id while
-    // numbering the same station oppositely, so the same descending pair is a real ride
-    // the other way — and both layers read the direction from the orders themselves.
+    // 公交只沿下游，地铁可以走任一边。线路 id 决定这是哪一种：公交线路的两条路是两个 id，
+    // 故已存 id 上较小的下车站序说明这段录反了；地铁复用一个 id 而对同一站反向编号，
+    // 故同样降序的一对是真实的反向一程——
+    // 而两层都从站序本身读方向。
     if (option.stops === 'ready' && !isSubwayLineId(option.lineId)
       && leg.alightStationOrder! < leg.boardStationOrder!) {
       return {
@@ -383,11 +359,10 @@ export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): C
 }
 
 /**
- * The draft as the write carries it. Call only on a draft `refuseChainDraft` passed —
- * the rules are what guarantee the option and the pair are there.
+ * 草稿作为写入所携带的样子。只在 `refuseChainDraft` 通过的草稿上调用——
+ * 是规则保证选项与那一对都在。
  *
- * `seq` is absent by design: the array's order IS the sequence, and the server writes
- * the number from it.
+ * `seq` 按设计缺席：数组顺序**就是**段序，服务端据此写入编号。
  */
 export function chainBodyOf(draft: ChainDraft, lines: ChainLineOption[]): ChainWrite {
   return {
@@ -410,7 +385,7 @@ export function chainBodyOf(draft: ChainDraft, lines: ChainLineOption[]): ChainW
   }
 }
 
-/** 「上车站 东大桥 第 3 站 → 下车站 建国门 第 4 站」, with an unchosen half left absent. */
+/** 「上车站 东大桥 第 3 站 → 下车站 建国门 第 4 站」，未选的那一半留为空缺。 */
 export function stationPairText(name: string | null, order: number | null): string {
   if (name === null) return '未设置'
   if (order === null) return name

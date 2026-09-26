@@ -49,19 +49,14 @@ export class ApizeroProvider implements ITransitProvider {
       }
 
       const entry = json.data[0]
-      // An empty `data` is the upstream saying it has NO RECORD of this line —
-      // the same miss chelaile answers with no name and no stop list. Building
-      // `{buses: []}` out of it would hand the boundary a reading identical to a
-      // real line with nothing in transit, which is exactly the shape the live
-      // route must be able to refuse.
+      // 空的 `data` 表示上游没有这条线路的记录，是未命中而不是读数：
+      // 据此构造 `{buses: []}` 与「线路存在但此刻无车」无法区分，
+      // 而后者正是 live 路由必须能拒绝的形态。
       if (!entry) {
         return null
       }
       const rawBuses = entry?.buses || []
 
-      // Realtime upstream only exposes stops_remaining / travel_minutes.
-      // Fields it does not provide (progress, coordinates, speed, order) are
-      // passed through as undefined — the frontend renders 暂无 honestly.
       const buses: LiveBus[] = rawBuses.map((b: any, idx: number) => {
         const stopsRemainingRaw = b.stops_remaining
         const travelMinutes = Number(b.travel_minutes || 0)
@@ -83,11 +78,9 @@ export class ApizeroProvider implements ITransitProvider {
         direction,
         buses,
         dataSource: 'apizero',
-        // This declaration IS the fallback fact — the aggregator reports what a
-        // provider says about its own answer rather than deriving degradation
-        // from list position, so nothing else can mark this reading a stand-in.
-        // apizero answers only when chelaile could not, and the fields it lacks
-        // (progress, coordinates, speed) are why it is the lesser source.
+        // 这条声明本身就是「备用」这个事实：聚合层报告的是 provider
+        // 对自身答案的说法，不按列表位置推导降级，所以别处无法标记它。
+        // apizero 只在车来了答不出时作答，因此这里必须声明 true。
         isDegraded: true,
         updatedAt: Date.now(),
       }

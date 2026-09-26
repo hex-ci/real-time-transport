@@ -2,28 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 
 /**
- * G-D3 at the HTTP boundary: a settings read says whether there is a stored row
- * at all, and the surfaces that ask for the commute window take the honest branch.
+ * G-D3 在 HTTP 边界：设置读取要说清到底有没有存下来的行，而追问通勤窗口的那些界面走的是
+ * 诚实的那条分支。
  *
- * Measured live: `GET /api/transit/settings?userId=never_saved_probe_xyz`
- * answered 200 with a complete, plausible set of windows —
- * `{morningStart: '06:30', morningEnd: '11:30', eveningStart: '17:00',
- * eveningEnd: '22:00', homeLat: null, ...}` — byte-identical to what a user who
- * HAD configured those hours would read, and marked as nothing. Every surface
- * downstream treated them as stored configuration: the 设置 index row printed
- * 「06:30–11:30 · 17:00–22:00」 as the user's own hours, and
- * `GET /api/transit/commute-profile` answered 「早通勤时段」 at 08:30 for a user
- * who had never opened 设置.
+ * 规则本身在 `apps/web/src/read-state.ts` §4.1（读失败与确实为空必须分得开）。修法是同一
+ * 形状降一层：响应用一个**词**携带这次的读取状态，未设置行的值就是「什么都没有」—— 于是
+ * 忽略这个词的消费者不可能印出看似合理的时刻，只能印出明显为空的。
  *
- * `apps/web/src/read-state.ts` already states the rule this violates (§4.1:
- * 读失败与确实为空必须分得开). The fix is the same shape one level down: the
- * response carries the state of the read as a WORD, and the value of an unset
- * row as nothing at all — so a consumer that ignores the word cannot print
- * plausible hours, only an obviously empty one.
- *
- * Both halves are pinned: an unset read states 'unset' with no row, and a saved
- * read states 'stored' with the row it read. The positive control matters as much
- * here as in G-D1: a blanket \"no settings\" would break every configured user.
+ * 两面都钉住：未设置的读取说 'unset' 且无行，存过的读取说 'stored' 并带上读到的行。正对照
+ * 与 G-D1 一样重要：一刀切的「没有设置」会打断每一个配置过的用户。
  */
 
 afterEach(() => {
@@ -32,13 +19,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Freeze the clock at a Beijing wall-clock time. */
+/** 把时钟冻结在北京的墙上时间。 */
 function freezeAt(isoLocal: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(`${isoLocal}+08:00`))
 }
 
-/** GET /settings through the real route. */
 async function readSettings(app: Awaited<ReturnType<typeof buildApp>>, userId?: string) {
   const url = userId ? `/api/transit/settings?userId=${encodeURIComponent(userId)}` : '/api/transit/settings'
   const res = await app.inject({ method: 'GET', url })
@@ -46,14 +32,12 @@ async function readSettings(app: Awaited<ReturnType<typeof buildApp>>, userId?: 
   return res.json() as { success: boolean, settingsState?: string, data: unknown }
 }
 
-/** GET /commute-profile through the real route. */
 async function readProfile(app: Awaited<ReturnType<typeof buildApp>>) {
   const res = await app.inject({ method: 'GET', url: '/api/transit/commute-profile' })
   expect(res.statusCode, res.body).toBe(200)
   return res.json().data as { mode: string, description: string, windowState?: string }
 }
 
-/** PATCH the stored settings through the real endpoint. */
 async function saveSettings(app: Awaited<ReturnType<typeof buildApp>>, body: Record<string, unknown>) {
   const res = await app.inject({ method: 'PATCH', url: '/api/transit/settings', payload: body })
   expect(res.statusCode, res.body).toBe(200)
@@ -67,8 +51,8 @@ describe('G-D3: a read that found nothing says so, and carries nothing to print'
       const body = await readSettings(app, 'never_saved_user')
 
       expect(body.settingsState, body.data === undefined ? 'the answer carries no state at all' : undefined).toBe('unset')
-      // The value level says nothing, so a consumer that ignores the state prints
-      // an empty row rather than a plausible one.
+      // 值这一层什么也不说，所以忽略状态的消费者印出的是
+      // 空行，而不是一行看似合理的东西。
       expect(body.data).toBeNull()
     }
     finally {
@@ -82,10 +66,9 @@ describe('G-D3: a read that found nothing says so, and carries nothing to print'
       const res = await app.inject({ method: 'GET', url: '/api/transit/settings?userId=never_saved_user' })
       const raw = res.body
 
-      // The strongest form of the rule: the built-in 06:30–11:30 / 17:00–22:00
-      // must not appear ANYWHERE in the payload. A default that travels is a
-      // default some surface will print as the user's own configuration — the
-      // 设置 index row did exactly that.
+      // 这条规则最强的形式：内置的 06:30–11:30 / 17:00–22:00
+      // 不许出现在载荷里的任何地方。会传出去的默认值就是
+      // 某个界面会当成使用者自己的配置印出来的默认值。
       for (const invented of ['06:30', '11:30', '17:00', '22:00']) {
         expect(raw.includes(invented), `the unset answer carries ${invented}`).toBe(false)
       }
@@ -115,9 +98,9 @@ describe('G-D3: a read that found nothing says so, and carries nothing to print'
       const res = await app.inject({ method: 'GET', url: '/api/transit/settings?userId=never_saved_user' })
       const body = JSON.parse(res.body)
 
-      // §4.1's two states are told apart by the status and the `success` flag the
-      // app already uses: nothing was read for a FAILED read, and this read
-      // answered — it found no row.
+      // §4.1 的两个状态靠状态码与应用已有的 `success` 标志
+      // 区分：读取失败时什么都没读到，而这次读取
+      // 是作答了 —— 它没找到行。
       expect(res.statusCode).toBe(200)
       expect(body.success).toBe(true)
       expect(body.error).toBeUndefined()
@@ -136,8 +119,8 @@ describe('G-D3: the commute profile does not invent a window the user never set'
       const profile = await readProfile(app)
 
       expect(profile.windowState).toBe('unset')
-      // 08:30 is inside the built-in morning window, and that is precisely why
-      // this answer may not claim it: nobody configured one.
+      // 08:30 落在那段内置早高峰里，而这正是这个答案
+      // 不能声称它的原因：没有人配置过窗口。
       expect(profile.mode).not.toBe('work')
       expect(profile.description).not.toContain('早通勤时段')
     }
@@ -180,7 +163,7 @@ describe('G-D3: the commute profile does not invent a window the user never set'
 })
 
 describe('G-D3: the departure reference keeps its own honest answer with no stored row', () => {
-  /** A bus line that exists, with one vehicle heading for the fourth stop. */
+  /** 一条存在的公交线路，有一辆车正开向第 4 站。 */
   function stubBusLine(): void {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       const href = String(url)
@@ -217,14 +200,14 @@ describe('G-D3: the departure reference keeps its own honest answer with no stor
   }
 
   it('names the anchor to go and set, and spends no walk on it', async () => {
-    // F1's reference resolves which anchor means 「where you are」 through the
-    // commute window. With NO stored row there is no window OF THE USER'S, so the
-    // engine uses its own named span — the same pattern `serviceWindowSeconds`
-    // uses for a line whose hours nobody stated — and the answer it gives is the
-    // actionable one: this leg's anchor was never saved (真话: no row means no
-    // stored anchor at all, so whichever leg it names, the sentence is true).
+    // F1 的参考行通过通勤窗口解析「你在哪里」指哪个锚点。
+    // 没有存下来的行时，就不存在属于使用者的窗口，于是引擎
+    // 用它自己的具名跨度 —— 与 `serviceWindowSeconds` 对没人
+    // 声明时刻的线路所用的同一模式 —— 而它给出的答案是可行动的那个：
+    // 这一段乘车的锚点从未存过（真话：没有行就等于根本没有存下的
+    // 锚点，所以无论它点名哪一段，这句话都成立）。
     //
-    // What must NOT happen is the built-in window travelling as configuration.
+    // 不许发生的是内置窗口作为配置传出去。
     freezeAt('2026-09-24T08:30:00')
     stubBusLine()
     const app = await buildApp({})
@@ -233,7 +216,7 @@ describe('G-D3: the departure reference keeps its own honest answer with no stor
       const data = JSON.parse(res.body).data
 
       expect(data.reference).toEqual({ status: 'anchor-unset', anchor: 'home' })
-      // No walking request: this is a statement about the stored row.
+      // 没有步行请求：这句话说的是存下来的行。
       expect(vi.mocked(fetch).mock.calls.filter(c => !String(c[0]).includes('encryptedLineDetail'))).toHaveLength(0)
       for (const invented of ['06:30', '11:30', '17:00', '22:00']) {
         expect(res.body.includes(invented), `the arrivals answer carries ${invented}`).toBe(false)
@@ -245,9 +228,9 @@ describe('G-D3: the departure reference keeps its own honest answer with no stor
   })
 
   it('draws no conclusion outside the span the engine uses for an unconfigured user', async () => {
-    // 15:00 is between the two windows the engine's own span draws, and with no
-    // stored row there is nothing to tell the user about where they are: the
-    // reference row is absent rather than priced from an invented leg.
+    // 15:00 落在引擎自己的跨度划出的两个窗口之间，而没有
+    // 存下来的行时，关于使用者在哪里没有任何话可说：
+    // 参考行就是缺失，而不是拿一段编出来的乘车去定价。
     freezeAt('2026-09-24T15:00:00')
     stubBusLine()
     const app = await buildApp({})

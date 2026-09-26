@@ -6,146 +6,126 @@ import type {
 } from '@real-time-transport/shared'
 
 /**
- * F10's chain page, as its own render models.
+ * 链路页自己的渲染模型。
  *
- * The engine's answer is a DECISION — a band read from a signed margin, or a
- * refusal code — and this page only reads it. Nothing below adds a fact to that
- * decision: every number is the engine's own, every word is the page's
- * (`margin.ts`, `refusal.ts`), and where the engine stated no value the model
- * carries null rather than a stand-in. The engine's internal vehicle ids are
- * deliberately absent: they decide WHICH vehicle a margin belongs to, which
- * `margin.ts` settles, and no screen in this app prints one.
+ * 引擎的答案是决定（从带符号余量读出的档位，或一个拒绝码），本页只读它：
+ * 每个数字是引擎自己的，每个词是本页的，引擎未陈述值处模型带 null 而非替身。
+ * 引擎内部的车辆 id 刻意缺席：它们决定余量属于哪一班车，那由 `margin.ts` 处理。
  */
 
-/** One purpose chip's own identity. */
 export interface PurposeOption {
   purpose: CommuteChainPurpose
   label: string
 }
 
 /**
- * One transfer, as its row renders it.
+ * 一段换乘，如它的行所渲染。
  *
- * The row is about ONE vehicle — the one being boarded — except for `marginText`,
- * which is stated only while the vehicle it measures is still there. In the case
- * where it is not, `referenceGone` is true, `marginMinutes`/`marginText` are null
- * (a negative margin beside the vehicle about to be boarded is the failure this
- * model exists to prevent) and `basisText` says the row's numbers belong to the
- * next vehicle.
+ * 这一行关于一班车，即正要上的那一班——`marginText` 除外，它只在所量的车仍在时才陈述。
+ * 车已走时 `referenceGone` 为 true，`marginMinutes`/`marginText` 为 null，
+ * 而 `basisText` 说明该行的数字属于下一班。
  */
 export interface TransferRowView {
-  /** The stored leg's `seq`. */
   seq: number
-  /** 「第 2 段」 — the transfer point this row is. */
+  /** 「第 2 段」——本行是哪一个换乘点。 */
   positionText: string
   lineName: string
-  /** The band of THIS leg's margin — the same number `marginMinutes` carries. */
+  /** 本段余量的档位，与 `marginMinutes` 是同一个数字。 */
   band: ChainMarginBand
   bandLabel: string
   verdict: string
-  /** Which vehicle is taken, in the user's terms: this one, or the next one. */
+  /** 上的是哪一班，用使用者的说法：这一班，或下一班。 */
   vehicleText: string
-  /** Whole minutes of platform wait for the boarded vehicle. Never negative. */
+  /** 要上的那班车在本站台的等待整分钟数，绝不为负。 */
   waitMinutes: number
   waitText: string
-  /** The margin printed, or null when it must not be printed. */
+  /** 所印的余量，或不得印时的 null。 */
   marginMinutes: number | null
   marginText: string | null
-  /** What the row's numbers are measured against. Always stated. */
+  /** 本行的数字所对照之物，总是陈述。 */
   basisText: string
   referenceGone: boolean
   rideText: string
   alightText: string
-  /** F4's kind for this leg's own numbers, straight from the engine. */
+  /** 本段自己数字的 F4 种类，直接来自引擎。 */
   provenance: DataProvenance
 }
 
-/** One reading of a margin too small to resolve. */
 export interface BranchView {
   outcomeText: string
-  /** The vehicle and its minute, or the absence of either — stated as absent. */
+  /** 车辆与它的分钟，或两者之一的缺失——缺失也照实陈述。 */
   detailText: string
 }
 
-/** A deduced chain, as its card renders it. */
 export interface ChainConclusionView {
   band: ChainMarginBand
   bandLabel: string
   verdict: string
-  /** The chain's tightest margin, printed only while its vehicle is still there. */
+  /** 链路最紧的余量，只在它量的车仍在时印。 */
   marginMinutes: number | null
   marginText: string | null
-  /** The transfer the binding margin belongs to. */
+  /** 绑定余量所属的那一段。 */
   bindingSeq: number
   bindingText: string
-  /** Present exactly when the binding margin is unresolvable. */
+  /** 恰在绑定余量不可解析时存在。 */
   branches: BranchView[] | null
   legs: TransferRowView[]
 }
 
 /**
- * The one action a refusal can offer. It lives on 设置's anchor card.
+ * 拒绝唯一能提供的动作，它落在设置的位置锚点行上。
  *
- * The anchor is the only refusal cause with a screen behind it, so this stays a one-member
- * type: a refusal never offers the chain-recording page, because a refusal is not an absent
- * chain — one is recorded and cannot be walked.
+ * 锚点是唯一有屏幕在背后的拒绝成因，故这里是一个单成员类型：拒绝绝不提供链路录制页——
+ * 拒绝不是缺失的链路，而是已记录且走不通的链路。
  */
 export type RefusalAction = 'settings'
 
 /**
- * The screen an empty state may offer, which is one more than a refusal has.
+ * 空态可以提供的页面，比拒绝多一个。
  *
- * An empty purpose has two causes and each has its own page: an anchor the user never saved
- * is repaired on 设置's 位置锚点 page (`'settings'`), and a chain nobody has recorded is
- * recorded on its 通勤链路 page (`'chains'`). `'chains'` is offered BECAUSE that surface
- * exists — an empty state that named a screen the build does not have would promise a
- * control nobody can press.
+ * 空时段有两个成因，各有自己的页面：从未保存的锚点在位置锚点页修，没人录过的链路在通勤链路页录。
+ * `'chains'` 只因为那个页面存在才提供——空态不得承诺一个本构建没有的控件。
  */
 export type EmptyStateAction = RefusalAction | 'chains'
 
-/** A refusal, as its card renders it: a code, its one sentence, and the transfer. */
 export interface RefusalView {
-  /** The engine's own code, verbatim — the page never re-words it. */
+  /** 引擎自己的码，逐字保留：本页绝不改词。 */
   reason: string
   sentence: string
-  /** 「第 2 段 · 快线 1 路」, or null for a chain that names no leg. */
+  /** 「第 2 段 · 快线 1 路」；不点名任何一段的链路为 null。 */
   legText: string | null
-  /** F3's service state, worded, for the refusals whose empty answer is about the service day. */
+  /** F3 的服务状态，措辞后；只给空答案关乎营运日的那些拒绝。 */
   serviceText: string | null
   action: RefusalAction | null
 }
 
-/** A reading's own instant, with the kind of value the answer is. */
 export interface ChainReadingView {
   time: string
   mark: string | null
   text: string
 }
 
-/** The page's empty state, when nothing is recorded for the purpose on screen. */
 export interface ChainEmptyStateView {
   headline: string
   detail: string | null
   action: EmptyStateAction | null
 }
 
-/** One chain, as its card is rendered. */
 export interface ChainCardView {
   chainId: string
   name: string
-  /** 「从「家」出发」 — the chain's own stored start. */
+  /** 「从「家」出发」——链路自己存的起点。 */
   originText: string
-  /** The answer when there is one, and null when the chain refused. */
+  /** 有答案时的答案；链路拒绝时为 null。 */
   conclusion: ChainConclusionView | null
-  /** The refusal when there is one, and null when the chain concluded. */
+  /** 有拒绝时的拒绝；链路给出结论时为 null。 */
   refusal: RefusalView | null
   /**
-   * F4's chain-level KIND, verbatim — null when its legs disagree, which is what
-   * makes every leg state its own mark instead.
-   */
+ * F4 的链路级种类，逐字保留；各段不一致时为 null，于是每段改为陈述自己的标记。
+ */
   chainProvenance: DataProvenance | null
-  /** The reading the answer came from; null for a leg that was never read. */
+  /** 本答案来自哪次读取；从未读取过的段为 null。 */
   reading: ChainReadingView | null
-  /** The engine's answer, verbatim — what the page's own tests compare against. */
+  /** 引擎的答案，逐字保留：本页自己的测试所对照之物。 */
   deduction: CommuteChainDeduction
 }

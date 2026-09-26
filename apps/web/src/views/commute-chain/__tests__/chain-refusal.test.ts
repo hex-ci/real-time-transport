@@ -6,26 +6,21 @@ import { REFUSAL_SENTENCE, anchorNameOf, anchorUnsetSentenceOf, refusalOf } from
 import { READ_AT, OPERATING, refusal } from './chain-fixtures'
 
 /**
- * Every 「不给结论」 code the page can receive, and the ONE sentence it gets.
+ * 页面可收到的每个「不给结论」代码，以及它得到的**唯一**一句话。
  *
- * A code with no sentence is a hole; a sentence that is true of only some of a
- * code's causes is a lie for the rest. So the code set is not typed out here from
- * memory — it is read off the contract's own `ChainNoConclusionReason` union, and
- * the copy table is a total `Record` over that union, which makes a code added
- * upstream a COMPILE error before it is a test failure.
+ * 没有句子的代码是个洞；只对某代码的部分成因成立的句子，对其余成因就是谎。故代码集不在此凭记忆抄出——
+ * 它取自契约自己的 `ChainNoConclusionReason` 联合，文案表是对该联合的全量 `Record`，使上游新增的代码
+ * 先是**编译**错误，再才是测试失败。
  *
- * Two documented traps are held below:
+ * 下方守住两个已记录的坑：
  *
- *  - `connection-unpriced` covers four causes that differ in PERMANENCE — an
- *    unplaced stop is a permanent upstream data gap, an unpriced route is a
- *    momentary one — so its sentence states only the fact the code carries and
- *    promises no retry (a retry would be true of the last and false of the first);
- *  - no two codes may be answered with one another's words: 「暂时没有开往这一站
- *    的车」 is not 「这条线停运」, and our own reading failing is not the service
- *    being empty.
+ *  - `connection-unpriced` 覆盖四个在**持久性**上不同的成因——未放置的站是永久的上游数据缺口，
+ *    未定价的路径是暂时的——故其句子只陈述该代码所携带的事实、不承诺重试；
+ *  - 任意两个代码不得用彼此的措辞作答：「暂时没有开往这一站的车」不是「这条线停运」，我们自己的
+ *    读取失败也不是服务为空。
  */
 
-/** The contract's own union, read from the source that declares it. */
+/** 契约自己的联合，从声明它的源码读出。 */
 function declaredReasons(): string[] {
   const source = readFileSync(
     fileURLToPath(new URL('../../../../../../packages/shared/src/commute-chain.ts', import.meta.url)),
@@ -36,7 +31,7 @@ function declaredReasons(): string[] {
   return [...block![1].matchAll(/'([a-z-]+)'/g)].map(match => match[1]!)
 }
 
-/** A sentence per code, with the anchor the only parameter one of them needs. */
+/** 每个代码一句话，锚点是其中唯一需要参数的。 */
 function sentencesOf(): Array<[string, string]> {
   return Object.entries(REFUSAL_SENTENCE).map(([reason, copy]) => [reason, copy({ anchor: 'home' })])
 }
@@ -54,9 +49,8 @@ describe('every refusal code the contract declares has exactly one sentence', ()
   })
 
   it('states the fact and stops: no sentence is a sentence about a different code', () => {
-    // 停运 is the trap in miniature: an empty board read is 「nothing is on its way
-    // to this station」, and a line whose day has ended is stated by the service
-    // state beside it — never by turning one into the other.
+    // 「停运」是缩影式的坑：空的到站屏读数是「没有车正在开往这一站」，而一天已结束的线路由其旁的
+    // 运营状态陈述——绝不可把一个变成另一个。
     for (const [reason, sentence] of sentencesOf()) {
       expect(sentence, reason).not.toMatch(/停运|停驶|取消/)
     }
@@ -67,11 +61,8 @@ describe('an unpriced connection promises no retry it cannot keep', () => {
   it('states only that the connection has no duration', () => {
     const sentence = REFUSAL_SENTENCE['connection-unpriced']({ anchor: 'home' })
     expect(sentence).toBe('这一段接驳的时长取不到，无法判断余量')
-    // Two of its causes are permanent (a stop the stop list carries without a
-    // coordinate, which upstream may never state) and one is transient (a route
-    // the path service happened not to price). 「稍后重试」 would be true of the
-    // last and false of the first, on a row that cannot tell the page which one
-    // fired — so it is not said.
+    // 其成因中两个是永久的（站表携带却没有坐标的站，上游可能永不陈述）而一个是暂时的（路径服务恰好
+    // 未定价的路径）。「稍后重试」对后者为真、对前者为假，而该行无法告诉页面是哪一个触发——故不说。
     expect(sentence).not.toMatch(/重试|稍后|再试|稍候|过一会儿/)
   })
 
@@ -84,21 +75,18 @@ describe('an unpriced connection promises no retry it cannot keep', () => {
 
 describe('a sentence is true of every cause its code can carry', () => {
   it('states no ordering for the code whose causes include two ends that are one station', () => {
-    // `leg-recorded-backwards` has TWO documented causes: a bus leg whose alight
-    // station is not downstream, and any leg whose two ends are the SAME station.
-    // There is no order to be wrong in the second, so a sentence naming the order
-    // is false for part of its own set — and the row cannot tell the page which
-    // cause fired, so the wording has to hold for both.
+    // `leg-recorded-backwards` 有两个已记录的成因：下车站不在下游的公交段，以及两端为**同一站**的
+    // 任意段。后者没有顺序可言，故点名顺序的句子对其自身集合的一部分为假——而该行无法告诉页面是哪个
+    // 成因，措辞必须对两者都成立。
     const sentence = REFUSAL_SENTENCE['leg-recorded-backwards']({ anchor: 'home' })
     expect(sentence).not.toMatch(/顺序|颠倒|反向|反了|录反|先后|前后|站序|倒/)
-    // …and it still states the fact BOTH causes share: this leg cannot be ridden.
+    // ……且仍陈述两个成因共有的事实：本段走不通。
     expect(sentence).toMatch(/走不通|乘不了|不能乘车|无法乘车/)
   })
 
   it('states the same-station case as the ordering one, in one sentence', () => {
-    // The sentence a row prints does not depend on the cause (the code carries no
-    // second field), so the only way to be true of both is to be about neither
-    // cause in particular — which is what makes the words above the whole contract.
+    // 一行所印的句子不取决于成因（该代码不带第二个字段），故对两者都为真的唯一方式是两者都不专指——
+    // 这正是上述措辞覆盖整个契约的原因。
     const sentence = REFUSAL_SENTENCE['leg-recorded-backwards']({ anchor: 'home' })
     expect(sentence).toBe('这条链路有乘车段的上车站与下车站填得走不通')
   })
@@ -106,8 +94,7 @@ describe('a sentence is true of every cause its code can carry', () => {
 
 describe('no sentence names a data source or an internal mechanism', () => {
   it('keeps every vendor out of the wording', () => {
-    // The source names come from the contract's own enum rather than from a list
-    // kept here, so a new source is covered the moment it is declared.
+    // 来源名取自契约自己的枚举而非此处维护的列表，故新来源一经声明即被覆盖。
     for (const [reason, sentence] of sentencesOf()) {
       for (const source of DataSourceTypeSchema.options) {
         expect(sentence, `${reason} names ${source}`).not.toContain(source)
@@ -128,9 +115,8 @@ describe('an empty answer about the service is governed by the service state', (
       anchor: 'home',
     })
     expect(view.sentence).toBe('暂时没有开往这一站的车')
-    // 已过末班 is the answer an empty board must not be given as 暂无来车, and it
-    // rides beside the arrival fact rather than replacing it: the two are different
-    // facts and neither may stand for the other.
+    // 「已过末班」是空屏不得被给成「暂无来车」的答案，它随到站事实并列而非取代它：
+    // 两者是不同的事实，任一不得代表另一个。
     expect(view.serviceText).toBe('已过末班 · 末班 23:00')
   })
 
@@ -155,8 +141,8 @@ describe('an empty answer about the service is governed by the service state', (
   })
 
   it('says nothing about the service day beside a refusal about our own reading', () => {
-    // 「数据太旧」 is a fact about the reading, and a service state beside it would
-    // read as its cause — the one thing these two facts must not be confused for.
+    // 「数据太旧」是关于读取的事实，其旁的运营状态会被读成它的成因——
+    // 这正是这两种事实不得混淆之处。
     for (const reason of ['stale', 'degraded', 'provenance-unknown', 'inconsistent-live', 'no-live'] as const) {
       const view = refusalOf({
         deduction: refusal(reason, legOf({ updatedAt: READ_AT, operatingStatus: { ...OPERATING, state: 'after_last' } })),
@@ -195,18 +181,15 @@ describe('the cause the user can act on is the anchor, and nothing may take its 
   })
 
   it('keeps the anchor\'s affordance when the leg was never read', () => {
-    // The engine settles the anchor BEFORE it reads a leg's line or locates a
-    // station, so this is the state a chain with an unreadable line arrives in:
-    // the user is told the cause they can repair rather than one they cannot. The
-    // page must not weaken that into a line problem, and its action may not depend
-    // on any other field.
+    // 引擎在读取某段的线路、定位站点**之前**就定下锚点，故这就是线路读不出的链路到达的状态：
+    // 用户被告知他们能修复的成因，而非修不了的。页面不得把它弱化成线路问题，其动作也不得取决于任何其他字段。
     const unread = refusalOf({
       deduction: refusal('anchor-unset', { leg: { seq: 0, lineId: 'bus_027_1', lineName: '快线 1 路' } }),
       anchor: 'home',
     })
     expect(unread.serviceText).toBeNull()
     expect(unread.action).toBe('settings')
-    // …and with no leg at all the sentence and its action are unchanged.
+    // ……而没有段时，句子与其动作不变。
     const noLeg = refusalOf({ deduction: refusal('anchor-unset'), anchor: 'home' })
     expect(noLeg.legText).toBeNull()
     expect(noLeg.sentence).toBe(unread.sentence)
@@ -249,10 +232,8 @@ describe('a refusal states which transfer refused', () => {
   })
 
   it('carries no field the card never renders (a shape guard: a dead field is not left behind)', () => {
-    // The instant a reading was obtained is NOT here: the card prints it from the
-    // reading line it renders for both kinds of answer, and a second copy of one
-    // instant is a field no view reads. `reason` is the engine's code itself — the
-    // page never re-words it, and the tests below compare against it.
+    // 取得读取的时刻**不在**这里：卡片从它为两类答案都渲染的读取行印它，而同一时刻的第二份副本是
+    // 没有视图读的字段。`reason` 是引擎的代码本身——页面绝不改写它。
     const view = refusalOf({
       deduction: refusal('no-vehicle', {
         leg: { seq: 1, lineId: 'bus_027_1', lineName: '快线 1 路' },

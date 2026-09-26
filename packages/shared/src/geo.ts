@@ -1,11 +1,10 @@
 /**
- * Shared geodesic helpers. Pure functions, no I/O — safe for both the Node
- * providers and the browser client.
+ * 共享的测地计算。纯函数、无 I/O，Node 侧提供方与浏览器共用。
  */
 
 const EARTH_RADIUS_M = 6371000
 
-/** Great-circle distance between two WGS-84 points, in meters. */
+/** 两点间的大圆距离（米）；入参为 WGS-84 坐标。 */
 export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const rad = Math.PI / 180
   const dLat = (lat2 - lat1) * rad
@@ -15,10 +14,7 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(a)))
 }
 
-/**
- * Cumulative distance (meters) from the first point to each point of a
- * polyline given as [lat, lng] pairs. Result starts at 0.
- */
+/** 折线各点距首点的累计距离（米）；结果自 0 开始。 */
 export function cumulativeDistances(points: Array<[number, number]>): number[] {
   const cum = [0]
   for (let i = 1; i < points.length; i++) {
@@ -29,21 +25,17 @@ export function cumulativeDistances(points: Array<[number, number]>): number[] {
   return cum
 }
 
-/** Total length of a polyline given as [lat, lng] pairs, in meters. */
+/** 折线总长（米）。 */
 export function polylineLengthMeters(points: Array<[number, number]>): number {
   const cum = cumulativeDistances(points)
   return cum[cum.length - 1] ?? 0
 }
 
 /**
- * Locate a distance-from-start (meters) on a route described by per-station
- * cumulative distances, returning the SCREEN-SPACE segment primitive:
- *   - index: 0-indexed station the vehicle is LEAVING (clamped to [0, n-2])
- *   - progress: 0..1 along the segment toward station index+1
- *
- * Feed straight into getInterpolatedPosition(index + 1, progress), which treats
- * its first argument as the 1-indexed leaving station. At/past the terminal the
- * result is { index: n-2, progress: 1 } so the vehicle rests on the last stop.
+ * 折线累计距离 → 屏幕绘制用的段原语。
+ * index：**驶离**站的 0 基下标，钳制在 [0, n-2]；progress：该段内 0..1 的比例。
+ * 末站及之后返回 { index: n-2, progress: 1 }（车停在最后一站）。
+ * index 供 getInterpolatedPosition 的 1 基下标使用（传入 index + 1）。
  */
 export function distanceToSegment(
   distanceFromStart: number,
@@ -55,13 +47,11 @@ export function distanceToSegment(
   if (!(total > 0)) return null
 
   const d = Math.max(0, Math.min(distanceFromStart, total))
-  // Last station whose cumulative distance <= d
   let i = 0
   for (let k = 0; k < n; k++) {
     if (stationDistances[k]! <= d) i = k
     else break
   }
-  // Clamp the leaving index into a real segment [i, i+1]
   if (i > n - 2) i = n - 2
   const segStart = stationDistances[i]!
   const segEnd = stationDistances[i + 1]!
@@ -71,12 +61,9 @@ export function distanceToSegment(
 }
 
 /**
- * Cumulative distance (meters) for a vehicle given its `order` and `progress`.
- *
- * Convention: `order` is the 1-indexed station the vehicle is AT / has just
- * left (matches LiveBusSchema "last passed / is serving"); the vehicle travels
- * from station order-1 toward station order (0-indexed order-1 -> order).
- * Returns null for degenerate geometry.
+ * 由车辆的 order 与 progress 反推累计距离（米）。
+ * order 为 1 基、车辆**所在/刚驶离**的站（与 LiveBusSchema 同一口径），车辆自 order-1 行至 order。
+ * 几何退化时返回 null。
  */
 export function stationProgressToDistance(
   order: number,
@@ -88,7 +75,6 @@ export function stationProgressToDistance(
   const total = stationDistances[n - 1]!
   if (!(total > 0)) return null
 
-  // leaving station 0-indexed = order-1, clamped to a real segment start
   const fromIdx = Math.max(0, Math.min(order - 1, n - 2))
   const segStart = stationDistances[fromIdx]!
   const segEnd = stationDistances[fromIdx + 1]!
@@ -97,43 +83,13 @@ export function stationProgressToDistance(
 }
 
 /**
- * A number the payload stated, or `undefined` when it stated none.
- *
- * THE RULE FOR A STATED NUMBER lives here, written once so that the reads which
- * price a value by it read ONE rule rather than several copies that can drift.
- * It accepts what a JSON payload can spell a number as — a number, or a string
- * holding one — and answers `undefined` for everything else: a field the payload
- * left out, an empty or whitespace-only string, a non-numeric one, a non-finite
- * number, `false`, and every other non-number.
- *
- * A `0` is NOT absence here: it is a number the payload stated, and for both
- * fields read below a stated zero is a legal measurement (two coincident points
- * are a 0-metre walk; a POI on the measured point is genuinely 0 m away). 「No
- * value」 therefore needs an encoding of its own, and `undefined` is it — which is
- * why this is not `value || 0`, the expression that turns absence into a
- * real-looking zero.
- *
- * WHICH READS APPLY IT:
- *
- *  - Amap's walking-route price, on both axes (`distanceMeters` /
- *    `durationSeconds` of a priced leg): a path stating one axis and not the
- *    other states no price this app can use;
- *  - Amap's nearby POI radar, per POI: the distance to the platform the landmark
- *    hint prints, absent for a POI the radar did not measure.
- *
- * WHICH READS DELIBERATELY DO NOT — the fields where a zero means the opposite
- * thing, so that this rule must never be applied to them:
- *
- *  - any COORDINATE: a zero on either axis is a position nobody stated, not a
- *    position whose value is zero. Those reads go through `statedCoordinate`,
- *    which is this function plus the zero-is-absence rule;
- *  - any stop ORDINAL: `0` is not an order a line's stop list contains, and the
- *    reader is `statedStopOrder`, which falls back to the stop's list position;
- *  - the user's own point — the stored anchor and the device fix. It is not
- *    upstream station data, and its absence already has an encoding of its own (a
- *    NULL column on the settings row, an infinite seed from `watchPosition`
- *    before the first fix), so reading a zero there as 未设置 would invent a
- *    second spelling of absence for a row the user never cleared.
+ * 上游声明的数字；未声明时为 `undefined`。
+ * 本规则只此一份，故各处读取共享一条规则而非多份可能漂移的副本。
+ * 接受数字或含数字的字符串；缺字段、空串、非数字、非有限数、`false` 一律 `undefined`。
+ * `0` 是真实声明值而非缺省 —— 这也是它不写成 `value || 0` 的原因。
+ * 坐标、站序与用户自身点**不得**走这里（0 在那里的含义相反）：
+ * 坐标走 `statedCoordinate`，站序走 `statedStopOrder`，用户自身点的缺省各自由
+ * NULL 列与 watchPosition 首帧前的无限种子编码。
  */
 export function statedNumber(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
@@ -145,52 +101,12 @@ export function statedNumber(value: unknown): number | undefined {
 }
 
 /**
- * A coordinate the payload stated that sits on this app's datum, or `undefined`
- * when it stated none.
- *
- * THE RULE FOR A POSITION lives here, stated once so that the reads that apply
- * it apply ONE rule rather than several copies of one that can drift: a zero on
- * EITHER axis is no position at all. Everything this app places is GCJ-02, and
- * no placed stop on that datum sits at 0 on either axis — a latitude of 0 is the
- * equator, a longitude of 0 the Greenwich meridian, and the nearest stop to
- * either is thousands of kilometres away. A zero is therefore the ABSENCE of a
- * coordinate rather than a coordinate whose value is zero: it is what a row
- * carries for a stop nobody placed, and reading it as a position prices a
- * walking route to a point in the Atlantic and makes an unplaced platform look
- * located enough to conclude from.
- *
- * WHICH READS APPLY IT — every coordinate this app reads out of UPSTREAM data:
- *
- *  - chelaile's line detail and its live vehicles (`getLiveStatus`, which applies
- *    the same rule in place rather than through this helper);
- *  - chelaile's jxPath road trajectory, vertex by vertex: the arc-length of a
- *    road through a point nobody placed is not this line's road;
- *  - Amap's static stop list and its nearby POI radar;
- *  - the subway engine's stop list (`stopPositions`) and each train's position,
- *    which is the position of the stop that train is at;
- *  - `nearestStopOnLine`'s stop list, likewise in place, so a stop nobody placed
- *    can never be the nearest thing to the user;
- *  - the server's read of a STORED station (`stationPoint`) — the same upstream
- *    datum written down, so a stored row reads no differently from a freshly
- *    parsed payload.
- *
- * WHICH READS DELIBERATELY DO NOT — the user's OWN point, on every path it
- * travels: `storedCoord`'s read of the settings row and the two anchor reads fed
- * by it (`anchorPoint`, and `departureReference`'s walk origin), plus the device
- * fix a caller compares stops against (`nearestStopOnLine`'s `coords`). This is
- * the user/device datum against upstream station data: an anchor is the fix the
- * user's own device reported, saved from the settings screen and brought into
- * this datum once at the HTTP boundary — not a row that upstream left blank. And
- * its absence already has an encoding of its own: a NULL column, which the read
- * reports as unset and the deduction answers as `anchor-unset`. A zero there is
- * therefore not the sentinel it is in upstream data, and reading it as 未设置
- * would invent a second spelling of absence for a row the user never cleared.
- *
- * An absent field must stay absent rather than become a number, and the two are
- * ONE answer here — a payload that stated no coordinate and a payload that stated
- * a zero both yield `undefined`. The rule covers every spelling a payload can use
- * (a number, or a string holding one); a malformed, empty or non-finite value is
- * the same absence.
+ * 上游声明的、位于本应用基准面上的坐标；未声明时为 `undefined`。
+ * 本规则只此一份。任一轴为 0 即视为**没有坐标**：本基准面上没有落点站会落在 0 上，
+ * 而把 0 当成坐标会向大西洋某点计价步行路线，还让未落点的站台看起来足以推出结论。
+ * 只适用于**上游**坐标（线路详情、实时车辆、道路轨迹、amap 停靠表与雷达、地铁引擎站表等）。
+ * 用户自身点（已存锚点、设备定位）**不得**走这里：其缺省由 NULL 列编码，
+ * 读成 0 即「未设置」等于为用户从未清除的行凭空造出第二种缺省写法。
  */
 export function statedCoordinate(value: unknown): number | undefined {
   const stated = statedNumber(value)
@@ -198,16 +114,9 @@ export function statedCoordinate(value: unknown): number | undefined {
 }
 
 /**
- * A stop's ordinal along its line, as the payload states it or as the stop's own
- * position in the list.
- *
- * The list IS the sequence by construction — every provider here reads its stops
- * in stop order — so a stop's position in it is its real position and not a
- * substitute for one. The payload's own numbering is preferred when it is a
- * positive whole number, because upstream's numbering is the authority when it
- * exists; anything else (a missing field, a non-numeric one, 0) would otherwise
- * travel as NaN or 0 and name an order no stop of the line occupies, which is
- * what a caller locating a station BY order reads.
+ * 站在其线路上的站序：上游声明的正整数优先，否则取该站在停靠列表中的下标。
+ * 列表本身即按站序构造（各提供方都按站序读取停靠），故下标就是真实站序，不是替代值。
+ * 缺字段、非数字或 0 都会以 NaN/0 出行，指到一个该线并不存在的站序。
  */
 export function statedStopOrder(value: unknown, position: number): number {
   const stated = statedNumber(value)

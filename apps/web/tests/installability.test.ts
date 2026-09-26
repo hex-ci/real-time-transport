@@ -5,42 +5,31 @@ import { inflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 
 /**
- * F7's install contract, held against the bytes the browser actually receives.
+ * F7 的安装契约，对着浏览器实际收到的字节守住。
  *
- * Installability is a set of files and values that no other layer in this repo
- * reads: a manifest the bundler merely copies, head tags nothing imports, and four
- * PNGs no module references. Nothing else in the test suite or in the type checker
- * can notice when one of them goes missing, so the contract is pinned here — and
- * pinned against decoded pixels and parsed JSON rather than against text, because
- * a `toContain` on a file passes just as happily when the value it names has been
- * changed to the wrong one (`default` instead of `black-translucent`, a 1×1
- * placeholder instead of 180×180, an RGBA icon instead of an opaque one).
+ * 可安装性是一组本仓库其他层都不读的文件与值：打包器只负责复制的 manifest、没人 import 的 head 标签、
+ * 四个没有模块引用的 PNG。测试套件与类型检查器都无法察觉其中任何一个的缺失，故契约在此钉住——且对着
+ * 解码像素与解析后的 JSON 而非文本，因为对文件的 `toContain` 在它所指名的值被改成错值时同样愉快地通过。
  *
- * Test names say which half they are: `(behavioural: …)` means the assertion is
- * made against parsed data or decoded pixels — the file is actually opened and
- * understood — while `(structural: …)` means it is a presence check on a tag or a
- * config line, which is all that can be said about an attribute no runtime reads.
+ * 测试名已说明它属于哪一半：`(behavioural: …)` 表示断言针对解析数据或解码像素——文件确实被打开并理解——
+ * 而 `(structural: …)` 表示它是对标签或配置行的存在性检查，这是对一个没有运行时会读取的属性所能说的全部。
  *
- * This file lives outside `src/` on purpose: it verifies the install surface of the
- * package (index.html, public/, vite.config.ts), none of which is a module.
+ * 本文件刻意位于 `src/` 之外：它验证包的安装表面（index.html、public/、vite.config.ts），这些都不是模块。
  */
 
 /* ---------------------------------------------------------------- PNG reader */
 
 /**
- * The smallest PNG reader that can answer what installability asks: is this really
- * a PNG, how big is it, does it carry transparency, and which pixels are not the
- * backdrop? `zlib` is the only dependency — the format is a signature, a chunk
- * list, and per-row filters over one inflated stream.
+ * 能回答可安装性所需的最小 PNG 读取器：这真是 PNG 吗、多大、是否携带透明、哪些像素不是背景？
+ * `zlib` 是唯一依赖——该格式即一个签名、一个块列表，以及一条解压流上的逐行滤波器。
  *
- * 8-bit colour types 0/2/3/4/6, non-interlaced, are accepted; anything else throws
- * with the file name so a regenerated icon in an unexpected encoding fails loudly
- * rather than being read as an empty image.
+ * 接受 8 位颜色类型 0/2/3/4/6、非隔行；其他一律带文件名抛出，使以意外编码重新生成的图标大声失败，
+ * 而非被读成空图像。
  */
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
-/** Channels per pixel, by PNG colour type. 4 and 6 are the ones with an alpha channel. */
+/** 每像素通道数，按 PNG 颜色类型。4 与 6 是带 alpha 通道的那些。 */
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
 
 type Rgb = readonly [number, number, number]
@@ -49,11 +38,11 @@ interface DecodedPng {
   name: string
   width: number
   height: number
-  /** IHDR colour type: 2 is truecolour with no channel to be transparent in. */
+  /** IHDR 颜色类型：2 是真彩色，没有可作透明的通道。 */
   colourType: number
-  /** True for colour types 4 and 6 — the alpha-channel case iOS composites onto black. */
+  /** 颜色类型 4 与 6 时为真——即 iOS 会合成到黑色上的 alpha 通道情形。 */
   hasAlphaChannel: boolean
-  /** True when a `tRNS` chunk also marks pixels transparent (colour types 0/2/3). */
+  /** `tRNS` 块也把像素标为透明（颜色类型 0/2/3）时为真。 */
   hasTransparency: boolean
   pixel(x: number, y: number): Rgb
 }
@@ -67,7 +56,7 @@ function paeth(a: number, b: number, c: number): number {
   return pb <= pc ? b : c
 }
 
-/** PNG's per-scanline predictors: None, Sub, Up, Average, Paeth. */
+/** PNG 的逐扫描线预测器：None、Sub、Up、Average、Paeth。 */
 function predictorOf(filter: number, left: number, up: number, upLeft: number): number {
   if (filter === 1) return left
   if (filter === 2) return up
@@ -160,7 +149,7 @@ function decodePng(name: string, bytes: Buffer): DecodedPng {
   }
 }
 
-/* -------------------------------------------------------------- fixtures */
+/* -------------------------------------------------------------- 夹具 */
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url))
 
@@ -170,7 +159,7 @@ const readPublic = (name: string) => readFileSync(publicFile(name))
 
 const loadPng = (name: string) => decodePng(name, readPublic(name))
 
-/** A 6-digit hex colour, as the manifest spells colours. */
+/** 6 位十六进制颜色，即 manifest 拼写颜色的方式。 */
 function rgbOf(hex: unknown, key: string): Rgb {
   const match = typeof hex === 'string' ? /^#([0-9a-f]{6})$/i.exec(hex) : null
   if (!match) throw new Error(`${key} must be a 6-digit hex colour, got ${JSON.stringify(hex)}`)
@@ -199,10 +188,10 @@ const BACKGROUND = rgbOf(manifest.background_color, 'background_color')
 const appleTouchIcon = 'apple-touch-icon.png'
 const manifestIconFiles = iconEntries.map(entry => entry.src.replace(/^\//, ''))
 
-/** `index.html` sits at the package root, beside `public/` — not inside it. */
+/** `index.html` 位于包根，在 `public/` 旁——不在其内。 */
 const indexHtml = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8')
 
-/** The `name`/`rel`-keyed attributes of the head's `meta` and `link` tags, as data. */
+/** head 的 `meta` 与 `link` 标签按 `name`/`rel` 键的属性，作为数据。 */
 function headTags(tag: 'meta' | 'link'): Array<Record<string, string>> {
   const head = indexHtml.slice(indexHtml.indexOf('<head'), indexHtml.indexOf('</head>'))
   const tags: Array<Record<string, string>> = []
@@ -221,16 +210,15 @@ const links = headTags('link')
 const metaContent = (name: string) => metas.find(meta => meta.name === name)?.content
 const linkFor = (rel: string) => links.find(link => link.rel === rel)
 
-/** How far a pixel is from the backdrop, summed over its channels. */
+/** 一个像素离背景有多远，按其各通道求和。 */
 const distanceFrom = (pixel: Rgb, backdrop: Rgb) =>
   Math.abs(pixel[0] - backdrop[0]) + Math.abs(pixel[1] - backdrop[1]) + Math.abs(pixel[2] - backdrop[2])
 
 /**
- * Thresholds for "this pixel is part of the artwork, not the backdrop".
+ * 「该像素属于画面而非背景」的阈值。
  *
- * ImageMagick writes lossless PNGs of a flat two-colour drawing, so the backdrop is
- * exact and every anti-aliased edge pixel sits far from it: 24 ignores nothing real,
- * 300 counts only pixels that are essentially the glyph's own colour.
+ * ImageMagick 写出平涂两色画的无损 PNG，故背景是精确的，每个抗锯齿边缘像素都远离它：24 不忽略任何
+ * 真实像素，300 只计入基本是字形自身颜色的像素。
  */
 const ARTWORK = 24
 const STROKE = 300
@@ -252,18 +240,17 @@ function pixelStats(icon: DecodedPng, backdrop: Rgb) {
   return { artwork, stroke, furthest, total: icon.width * icon.height }
 }
 
-/* ----------------------------------------------------------------- tests */
+/* ----------------------------------------------------------------- 测试 */
 
 describe('F7 · the manifest an installer reads', () => {
   it('launches standalone, with no browser chrome around the board (behavioural: parsed manifest)', () => {
-    // `standalone` is not cosmetic: it is the only mode in which the viewport
-    // reaches under the status bar and the home indicator, which is what the safe
-    // -area insets on the header and <main> are clearing space for.
+    // `standalone` 不是装饰：它是视口能伸到状态栏与 home indicator 之下的唯一模式，
+    // 而 header 与 <main> 的安全区内边距正是为此留空间。
     expect(manifest.display).toBe('standalone')
   })
 
   it('starts at the board, not at a sub-page (behavioural: parsed manifest)', () => {
-    // From a home-screen icon there is no address bar to correct a wrong start_url.
+    // 从主屏图标进入时没有地址栏可纠正错误的 start_url。
     expect(manifest.start_url).toBe('/')
   })
 
@@ -276,7 +263,7 @@ describe('F7 · the manifest an installer reads', () => {
   })
 
   it('does not defer to a native app store listing it has no app in (behavioural: parsed manifest)', () => {
-    // `prefer_related_applications` disqualifies a web app from being installable.
+    // `prefer_related_applications` 会让一个 web 应用失去可安装资格。
     expect(manifest).not.toHaveProperty('prefer_related_applications')
   })
 
@@ -293,8 +280,7 @@ describe('F7 · the manifest an installer reads', () => {
     expect(manifest.name).toBeTruthy()
     expect(manifest.short_name).toBeTruthy()
     expect(metaContent('apple-mobile-web-app-title')).toBe(manifest.short_name)
-    // A vendor name or a marketing register would make the home-screen label a claim
-    // about a source or a product rather than the name of the thing being opened.
+    // 厂商名或营销语域会让主屏标签变成关于某个来源或产品的断言，而非所打开之物的名字。
     for (const label of [manifest.name, manifest.short_name, metaContent('apple-mobile-web-app-title')]) {
       expect(label ?? '').not.toMatch(/车来了|高德|极数本源|chelaile|apizero/i)
       expect(label ?? '').not.toMatch(/官方|免费|最好|最佳|\b(?:app|pro|lite|plus|beta)\b/i)
@@ -306,8 +292,8 @@ describe('F7 · the icon files themselves', () => {
   it('ships the apple-touch-icon opaque, with no alpha channel to composite onto black (behavioural: decoded IHDR)', () => {
     const icon = loadPng(appleTouchIcon)
     expect([icon.width, icon.height]).toEqual([180, 180])
-    // Two separate ways a PNG can be transparent: an alpha channel, which iOS paints
-    // onto black before masking, and a tRNS chunk on a channel-less type.
+    // PNG 可以透明的两种不同方式：alpha 通道（iOS 在遮罩前把它涂到黑上），
+    // 以及无通道类型上的 tRNS 块。
     expect(icon.hasAlphaChannel, 'the icon has an alpha channel').toBe(false)
     expect(icon.hasTransparency, 'the icon has transparent pixels').toBe(false)
     expect(icon.colourType).toBe(2)
@@ -322,9 +308,8 @@ describe('F7 · the icon files themselves', () => {
   })
 
   it('backs every icon with the manifest\'s own background colour, so a mask shows no seam (behavioural: decoded pixels)', () => {
-    // The launcher, the splash screen and the mask's padding all sit against the
-    // manifest's declared colours; an icon drawn on a slightly different backdrop
-    // shows as a visible rectangle the moment the platform rounds its corners.
+    // 启动器、闪屏与遮罩的内边距都对着 manifest 声明的颜色；画在略不同背景上的图标
+    // 会在平台圆角的那一刻显示为可见矩形。
     expect(rgbOf(manifest.theme_color, 'theme_color')).toEqual(BACKGROUND)
     const files = [appleTouchIcon, ...manifestIconFiles]
     for (const file of files) {
@@ -342,8 +327,7 @@ describe('F7 · the icon files themselves', () => {
   })
 
   it('draws real artwork on every icon, so no blank render can ship (behavioural: decoded pixels)', () => {
-    // The failure this catches is silent: a rasteriser that drops the artwork still
-    // writes a valid, correctly sized, fully opaque PNG.
+    // 这里抓住的失败是静默的：丢掉画面的光栅化器仍会写出一个有效、尺寸正确、完全不透明的 PNG。
     for (const file of [appleTouchIcon, ...manifestIconFiles]) {
       const icon = loadPng(file)
       const { artwork, stroke, total } = pixelStats(icon, BACKGROUND)
@@ -353,10 +337,9 @@ describe('F7 · the icon files themselves', () => {
   })
 
   it('keeps the maskable artwork inside the 80% safe circle, and pads instead of copying (behavioural: decoded pixels)', () => {
-    // A maskable icon can be cropped to a circle, a squircle or a teardrop, so its
-    // artwork has to survive a crop to the inner 80% diameter. The plain icon draws
-    // to a wider margin than that, which is exactly why the maskable one is a padded
-    // render rather than a copy — and why a copy would fail the comparison below.
+    // 可遮罩图标可被裁成圆形、超椭圆或泪滴形，故其画面必须经受裁到内侧 80% 直径。普通图标画到比那
+    // 更宽的边距，这正是可遮罩那个是加过内边距的渲染而非复制品的原因——也是复制品会在下面的比较中
+    // 失败的原因。
     const maskable = loadPng('icon-512-maskable.png')
     const plain = loadPng('icon-512.png')
     const maskableStats = pixelStats(maskable, BACKGROUND)
@@ -377,8 +360,7 @@ describe('F7 · the head of index.html', () => {
 
     const appleLink = linkFor('apple-touch-icon')
     expect(appleLink?.sizes).toBe('180x180')
-    // The href is what iOS fetches; the file it names is what the assertions above
-    // hold to 180x180 and opaque, so the two must be the same path.
+    // href 是 iOS 去取的；它指名的文件正是上面断言要求 180x180 且不透明的那个，故两者必须是同一路径。
     expect(appleLink?.href).toBe(`/${appleTouchIcon}`)
   })
 
@@ -395,9 +377,8 @@ describe('F7 · the head of index.html', () => {
 
   it('opens an installed launch with no URL bar and no button bar (structural: the Apple metas\' exact values)', () => {
     expect(metaContent('apple-mobile-web-app-capable')).toBe('yes')
-    // `default` and `black` reserve an opaque strip at the top: the page then starts
-    // below the status bar, `safe-area-inset-top` stays 0 and the header's clearance
-    // does nothing. Only `black-translucent` lets the page paint underneath.
+    // `default` 与 `black` 在顶部留出一条不透明带：页面随后从状态栏之下开始，
+    // `safe-area-inset-top` 保持 0，header 的避让不起作用。只有 `black-translucent` 让页面画到下面。
     expect(metaContent('apple-mobile-web-app-status-bar-style')).toBe('black-translucent')
     expect(metaContent('theme-color')).toBe(manifest.theme_color)
   })
@@ -405,10 +386,8 @@ describe('F7 · the head of index.html', () => {
 
 describe('F7 · no service worker', () => {
   it('ships no worker file and no PWA plugin (structural: file and config absence)', () => {
-    // Installability does not require a worker, and this app has none by decision:
-    // a second cache to invalidate on every deploy, for nothing. These checks are the
-    // ones that can only be structural — the absence of a thing, in files no runtime
-    // reads — so they are stated as such rather than dressed up as behaviour.
+    // 可安装性不要求 worker，而本应用按决定没有：一个每次部署都要失效的缓存，换不来什么。
+    // 这些检查是只能结构性的那些——某个东西的缺席，在没人读的文件里——故如此陈述，而不装扮成行为。
     const publicFiles = readdirSync(publicFile('.'))
     expect(publicFiles.filter(file => /service-?worker|workbox|^sw\.[jt]s$/i.test(file))).toEqual([])
     expect(Object.keys(manifest).filter(key => /service-?worker|workbox|^prefer_related_applications$/i.test(key))).toEqual([])

@@ -3,53 +3,30 @@ import type { ChainNoConclusion, ChainNoConclusionReason, CommuteChainAnchor } f
 import type { RefusalView } from './types'
 
 /**
- * Every 「不给结论」 code, and the ONE sentence it gets.
+ * 每个「不给结论」的码，以及它唯一的那句话。
  *
- * The engine answers with a code rather than a sentence, so the wording is this
- * side's — and it is the strictest copy in the feature. A code with no sentence is
- * a hole; a sentence that is true of only some of a code's causes is a lie for the
- * rest. The table below is therefore TOTAL over `ChainNoConclusionReason` (`Record`
- * rather than a chain of comparisons, the same shape as the engine's own
- * `CONNECTION_REFUSAL_CODES`), which makes a code added upstream a COMPILE error
- * rather than a row that quietly stops being true.
+ * 引擎用码而不是句子作答，措辞是本侧的事，且是这里最严的文案：码没有句子是一个洞，
+ * 只对一部分成因成立的句子对其余是假话。下表对 `ChainNoConclusionReason` 是 TOTAL 的
+ * （`Record` 而非一串比较），故上游新增一个码是编译错误，而不是一行悄悄失效。
  *
- * Three of the codes need care and get it here:
+ * 三个码需要小心：`anchor-unset` 是唯一用户可行动的成因，且动作取该成因自己的；
+ * `leg-recorded-backwards` 覆盖两类无共同顺序的成因，故措辞不能提顺序；
+ * `connection-unpriced` 的成因永久性不同，故不承诺重试、也不给动作。
  *
- *  - `anchor-unset` is the ONLY cause of an unpriced connection the user can act
- *    on, and it keeps F1's own sentence for the same settings row. Its action is
- *    the reason's own, never a field's: the engine settles the anchor BEFORE it
- *    reads a leg's line or locates a station, so a chain whose line is also
- *    unreadable arrives with this code — and the page must send the user to the one
- *    row they can repair rather than let a line problem speak for it.
- *  - `leg-recorded-backwards` covers TWO causes with no ordering in common: a bus
- *    leg whose alight station is not downstream, and any leg whose two ends are the
- *    SAME station. A sentence naming the order is therefore false for the second —
- *    there is no order to be wrong when both ends are one station — so the wording
- *    states only what is true of both: a leg filled in so it cannot be ridden.
- *  - `connection-unpriced` covers four causes with DIFFERENT permanence: a stop the
- *    stop list carries without a coordinate is a permanent upstream data gap, while
- *    a route the path service happened not to price is momentary. 「稍后重试」 would
- *    be true of the last and false of the first, on a row that cannot tell the page
- *    which one fired — so no sentence here promises a retry, and none offers an
- *    action, because for these causes there is none the user can take.
- *
- * A refusal is a CODE, not a smaller answer: a sentence about why states the fact
- * and stops. It never carries a minute, and no sentence names a data source,
- * describes how a number is computed, or tells the user what to do.
+ * 拒绝是一个码，不是更小的答案：它不带分钟，也不描述数字是怎么算出来的。
  */
 
-/** One sentence per code. The parameter is the anchor, which only one code needs. */
+/** 一个码一句话；参数是锚点，只有一个码需要它。 */
 export interface RefusalSentenceParams {
-  /** The anchor this chain starts from — `CommuteChainDeductionView.originAnchor`. */
+  /** 这条链路起步的锚点，即 `CommuteChainDeductionView.originAnchor`。 */
   anchor: CommuteChainAnchor
 }
 
-/** The anchor's own name, as F1's reference line states the same two settings rows. */
 export function anchorNameOf(anchor: CommuteChainAnchor): string {
   return anchor === 'home' ? '家' : '公司'
 }
 
-/** F1's sentence for an anchor that was never saved, word for word. */
+/** 锚点从未保存时的句子，与 F1 对同一设置行的措辞逐字相同。 */
 export function anchorUnsetSentenceOf(anchor: CommuteChainAnchor): string {
   return `未设置「${anchorNameOf(anchor)}」位置 · 在「设置」中设置`
 }
@@ -72,27 +49,17 @@ export const REFUSAL_SENTENCE: Record<ChainNoConclusionReason, (params: RefusalS
 }
 
 /**
- * A code this build has never heard of — a newer server, an older page.
+ * 本构建从未听过的码（更新的服务端、更旧的页面）。
  *
- * It says what is certainly true (this chain has no conclusion) and nothing else:
- * no cause is invented, no action is offered, and the row is not dressed as one of
- * the codes above. The known set is total at compile time; this is the wire's
- * forward-compatibility, not a substitute for a missing entry.
+ * 只说必然为真的事（这条链路没有结论）：不编造成因、不给动作、不扮成上面的码。
  */
 const UNKNOWN_CODE_SENTENCE = '这条链路无法给出结论'
 
 /**
- * The codes whose empty answer is a question about the SERVICE DAY rather than
- * about this app's reading.
+ * 空答案是营运日的问题（而非本应用读取的问题）的那些码。
  *
- * For these, the refusing leg's F3 state rides BESIDE the sentence: 首班前 /
- * 运营中 / 已过末班 are three different facts, and 「暂时没有开往这一站的车」 must
- * never be answered as 「这条线停运」, nor a line that has ended as a bare 暂无来车.
- * The state is F3's own wording rather than a second one, so the chain page and a
- * platform board cannot state two different service states for one line.
- *
- * Everywhere else the state is deliberately NOT shown: beside 「数据太旧」 or
- * 「来源未知」 it would read as the cause of a refusal that is about our reading.
+ * 对这些码，拒绝段的 F3 状态与句子并列。其余各处刻意不显示该状态：
+ * 在「数据太旧」「来源未知」旁它会被读成拒绝的成因。
  */
 const SERVICE_GOVERNED_REASONS: ReadonlySet<string> = new Set([
   'no-vehicle',
@@ -101,15 +68,9 @@ const SERVICE_GOVERNED_REASONS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * A refusal, as its card renders it: the sentence for the code, which transfer it
- * is about, F3's service state where that is the question, and the one action the
- * cause leaves the user.
+ * 一条拒绝，如它的卡片所渲染：码的句子、它关于哪一段、该有营运日状态时的 F3 状态，以及成因留下的动作。
  *
- * Nothing beyond that: every field here is either rendered by the card or is the
- * engine's code itself (`reason`, which the page's own tests compare against).
- * The instant the reading was obtained is NOT a field of this model — the card
- * states it from the reading line it already renders (`ChainCardView.reading`), and
- * a second copy of one instant would be a field no view reads.
+ * 此外别无所有。读取时刻不是本模型的字段：卡片从它已渲染的读取行陈述它。
  */
 export function refusalOf(params: {
   deduction: ChainNoConclusion
@@ -126,8 +87,7 @@ export function refusalOf(params: {
     serviceText: SERVICE_GOVERNED_REASONS.has(reason) && deduction.operatingStatus
       ? operatingTextOf(deduction.operatingStatus)
       : null,
-    // The action belongs to the CAUSE, not to a field: an anchor that was never
-    // saved is repaired on 设置, and no other code has a screen to send anyone to.
+    // 动作属于成因，不属于某个字段：只有从未保存的锚点在设置里有可修的行。
     action: reason === 'anchor-unset' ? 'settings' : null,
   }
 }

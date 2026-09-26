@@ -37,17 +37,43 @@ const {
   buses,
   morningStopName = null,
   eveningStopName = null,
+  morningStopOrder = null,
+  eveningStopOrder = null,
+  shownDirection = null,
+  morningStopDirection = null,
+  eveningStopDirection = null,
 } = defineProps<{
   lineDetail: LineDetail
   buses: LiveBus[]
   nearestStation?: Station | null
-  /** Currently selected station, drawn with a highlight ring. */
+  /** 当前选中的站，用高亮环画出。 */
   selectedStation?: Station | null
-  /** Optional initial layout mode ('folded' or 'linear'). Defaults to persisted preference or 'folded'. */
+  /** 可选的初始排布模式（'folded' 或 'linear'）。默认取持久化的偏好，否则 'folded'。 */
   initialLayoutMode?: RouteLayoutMode
-  /** Commute board stop names, marked on the diagram when they appear in this direction. */
+  /** 通勤上车点的站名，出现在这个方向上时在图上标出。 */
   morningStopName?: string | null
   eveningStopName?: string | null
+  /**
+   * 存下来的上车点的站序，行里有的话。一个站的身份是**一对**：同名站在一条线路上出现两次时，
+   * 只按名字比对会把两个都标上——声称一个使用者从未选的站台。`null`（没有站序列的旧行）使名字
+   * 成为唯一的比对依据，而那正是这样一行自己断言的东西。
+   */
+  morningStopOrder?: number | null
+  eveningStopOrder?: number | null
+  /**
+   * 收藏行自己的编号里，这一屏画的是哪个方向（不关注这条线路时为 null）。
+   *
+   * 下面的 `*StopDirection` 与它是同一套编号，`lineDetail.direction` 是另一套——对同一条真实
+   * 线路两者可以相反，不能拿来互相比。
+   */
+  shownDirection?: 0 | 1 | null
+  /**
+   * 两个上车点各自属于哪个方向（同一套收藏行编号），或 null（两向线路还没选过方向）。
+   *
+   * 方向与这一屏画的不是同一个时，这一对 (站名, 站序) 再像也不是本屏的站。
+   */
+  morningStopDirection?: 0 | 1 | null
+  eveningStopDirection?: 0 | 1 | null
 }>()
 
 const emit = defineEmits<{
@@ -57,28 +83,49 @@ const emit = defineEmits<{
   (e: 'layout-change', mode: RouteLayoutMode): void
 }>()
 
+/**
+ * 存下来的上车点是否就是这个站——行里有站序时按那一对判定。
+ *
+ * 只看名字会给每个同名站都标上，故站序说了算；没有站序列的旧行里，名字是它自己唯一的断言。
+ */
+function storedStopAt(
+  station: { name: string, order: number },
+  name: string | null,
+  order: number | null,
+): boolean {
+  if (name === null || station.name !== name) return false
+  return order === null || station.order === order
+}
+
+/**
+ * 这个上车点的角标是否属于本屏画的这个方向。
+ *
+ * 方向不同就不是本屏的站：方向是使用者存下来的选择。两条方向的站序可以各自给同一站同一个号，
+ * 故 (站名, 站序) 对上并不足以说明「本屏就是它的方向」。方向未知（两向线路还没选过方向）时
+ * 按这一对走。
+ */
+function onShownDirection(purposeDirection: 0 | 1 | null): boolean {
+  if (purposeDirection === null || shownDirection === null) return true
+  return purposeDirection === shownDirection
+}
+
 const containerRef = useTemplateRef('containerEl')
 
 /**
- * Floating mobile controls. They are absolutely positioned overlays, so the
- * canvas box starts underneath them and a fit has to inset by their real
- * height. Desktop's HUD sits in normal flow and is already excluded from the
- * canvas box; these elements are `display: none` there, which measures as a
- * zero-size rect — so one measurement covers both cases, with no breakpoint
- * check that could drift from the `md:` visibility classes.
+ * 浮动的移动端控件。它们是绝对定位的覆盖层，故画布盒子从它们下面开始，适应宽度时必须按它们真实的
+ * 高度留出内缩；桌面端这些元素是 display: none，量得零尺寸——一次测量同时覆盖两种情况，
+ * 无需可能与 `md:` 可见性类漂开的断点判断。
  */
 const mobileModePillRef = useTemplateRef('mobileModePillEl')
 /**
- * The FAB trigger only, not its container: the container grows when the tool
- * list expands, and insetting by that transient stack would push the board
- * down for chrome the user just opened deliberately.
+ * 只有 FAB 触发按钮，不含它的容器：工具列表展开时容器会长大，按那个临时的堆叠内缩会把报站板
+ * 往下推。
  */
 const mobileFabTriggerRef = useTemplateRef('mobileFabTriggerEl')
 
-/** Clearance kept between the toolbar's lower edge and the first row of stops. */
+/** 工具栏下沿与第一行站之间保留的间距。 */
 const TOOLBAR_GAP = 8
 
-// Layout mode: 'folded' (compact multi-row) vs 'linear' (continuous straight line)
 function loadPersistedMode(): RouteLayoutMode {
   if (initialLayoutMode) return initialLayoutMode
   try {
@@ -86,7 +133,6 @@ function loadPersistedMode(): RouteLayoutMode {
     if (saved === 'linear' || saved === 'folded') return saved
   }
   catch {
-    // ignore
   }
   return 'folded'
 }
@@ -94,7 +140,6 @@ function loadPersistedMode(): RouteLayoutMode {
 const layoutMode = shallowRef<RouteLayoutMode>(loadPersistedMode())
 const mobileToolsOpen = shallowRef(false)
 
-// Automatic reactive container resize tracking via VueUse
 useResizeObserver(containerRef, () => handleResize())
 useEventListener(window, 'resize', handleResize)
 useEventListener(document, 'visibilitychange', handleVisibilityChange)
@@ -116,7 +161,7 @@ function onContainerClick(): void {
 
 useEventListener(containerRef, 'click', onContainerClick)
 
-/** Zoom limits for wheel / pinch interaction. */
+/** 滚轮与双指缩放的缩放上下限。 */
 const MIN_SCALE = 0.35
 const MAX_SCALE = 3.5
 
@@ -125,9 +170,9 @@ let trackLayer: Konva.Layer | null = null
 let stationLayer: Konva.Layer | null = null
 let dynamicLayer: Konva.Layer | null = null
 let anim: Konva.Animation | null = null
-/** True once the user has zoomed/panned manually; disables further auto-fit. */
+/** 使用者手动缩放/平移过之后为 true；此后不再自动适应。 */
 let userHasTransformed = false
-/** Pinch state for touch zoom. */
+/** 触摸缩放的双指状态。 */
 let isPinching = false
 let isStageDragging = false
 let lastPinchDistance: number | null = null
@@ -141,48 +186,48 @@ let rippleCircle2: Konva.Circle | null = null
 
 interface AnimatedVehicle {
   id: string
-  /** Smoothed distance-from-start (meters) currently rendered. */
+  /** 当前渲染的、平滑后的起点距离（米）。 */
   displayedDist: number
-  /** Latest upstream fix (meters), consumed by the motion loop. */
+  /** 最新的引擎侧定位（米），由运动循环消费。 */
   fixDist: number | null
-  /** True when `fixDist` holds a fix the motion loop has not yet reacted to. */
+  /** `fixDist` 里的定位还未被运动循环处理过时为 true。 */
   fixPending: boolean
-  /** Upstream `updatedAt` stamp of the fix currently in `fixDist`. */
+  /** 当前放在 `fixDist` 里的定位的引擎 `updatedAt` 时间戳。 */
   fixUpdatedAt: number
-  /** `updatedAt` of the last ACCEPTED fix. */
+  /** 上一次**被接受**的定位的 `updatedAt`。 */
   lastFixUpdatedAt: number
-  /** Active motion mode: cruise, catchup, hold */
+  /** 当前运动模式：巡游（cruise）、追赶（catchup）、保持（hold）。 */
   mode: 'cruise' | 'catchup' | 'hold'
-  /** Target the 'catchup' mode converges to. */
+  /** 'catchup' 模式收敛到的目标。 */
   convergeTo: number
-  /** Real upstream speed in m/s; undefined when the source reports none. */
+  /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
   speedMs: number | undefined
-  /** Parked at a platform (upstream reports ~0 speed): no dead-reckoning. */
+  /** 停靠站台（引擎报约 0 速度）：不做航位推算。 */
   dwell: boolean
-  /** Fading out because the vehicle vanished upstream; removed at opacity 0. */
+  /** 因车辆在引擎侧消失而淡出；透明度到 0 时移除。 */
   removing: boolean
-  /** Konva frame-time (ms) when the fade-in started; -1 until first frame. */
+  /** 淡入开始时的 Konva 帧时间（ms）；首帧之前为 -1。 */
   spawnAt: number
-  /** Konva frame-time (ms) of the last accepted upstream fix. */
+  /** 上一次被接受的引擎定位的 Konva 帧时间（ms）。 */
   lastFixAt: number
-  /** Outer group positioned at (x,y), NOT rotated — keeps the label upright. */
+  /** 外层组定位在 (x,y)，**不**旋转——使标签保持正向。 */
   container: Konva.Group
-  /** Inner group holding the bus art, rotated to the heading. */
+  /** 内层组承载车身，按航向旋转。 */
   body: Konva.Group
-  /** Speed label, always rendered above the vehicle in screen space. */
+  /** 速度标签，始终渲染在车辆上方的屏幕空间里。 */
   label: Konva.Text | null
 }
 
 const vehicleMap = new Map<string, AnimatedVehicle>()
 
-const MAX_BUS_SPEED_MS = 16.0 // 57.6 km/h physical speed limit for city transit
-const CATCHUP_CONVERGE_SEC = 3.5 // Smoothly close position gap over 3.5 seconds
+const MAX_BUS_SPEED_MS = 16.0 // 城市公交的物理速度上限 57.6 km/h
+const CATCHUP_CONVERGE_SEC = 3.5 // 用 3.5 秒平滑合上位置差
 const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
-const FREERUN_CRUISE_MS = 8000 // 8s at full cruise speed
-const MAX_FREERUN_MS = 20000 // 20s total with smooth dampening to 0
+const FREERUN_CRUISE_MS = 8000 // 满速巡游 8 秒
+const MAX_FREERUN_MS = 20000 // 之后 20 秒内平滑衰减到 0
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -265,19 +310,16 @@ function initStage(): void {
     draggable: true,
   })
 
-  // Three-layer separation:
-  // Layer 1 (trackLayer): Completely static lines and arcs. No listeners.
+  // 三层分离：轨道层完全静态、不监听；站点层是静态站点、点击热区与文字；动态层只放运动的车辆与
+  // 涟漪（按 60FPS 重画）。
   trackLayer = new Konva.Layer({ listening: false })
-  // Layer 2 (stationLayer): Static station nodes, click hits and texts.
   stationLayer = new Konva.Layer()
-  // Layer 3 (dynamicLayer): ONLY moving vehicles and ripple waves. 60FPS redraw.
   dynamicLayer = new Konva.Layer()
 
   stage.add(trackLayer)
   stage.add(stationLayer)
   stage.add(dynamicLayer)
 
-  // Wheel zoom
   stage.on('wheel', (e) => {
     e.evt.preventDefault()
     userHasTransformed = true
@@ -292,7 +334,6 @@ function initStage(): void {
     applyZoomAt(newScale, pointer)
   })
 
-  // Drag tracking
   stage.on('dragstart', () => {
     isStageDragging = true
   })
@@ -307,7 +348,6 @@ function initStage(): void {
     }, 100)
   })
 
-  // Tapping on empty board canvas closes active station popover
   stage.on('click tap', (e) => {
     if (isStageDragging) return
     if (e.target === stage) {
@@ -325,10 +365,8 @@ function initStage(): void {
     fitWidth()
   }
 
-  // A station may already be selected by the time the stage finishes initialising
-  // (the GPS-nearest stop is chosen as soon as the fix and line detail exist).
-  // The selection watchers ran before this layout existed, so their
-  // notifyAnchorChange was a no-op — emit now that the anchor can be measured.
+  // 舞台初始化完成时可能已经有站被选中（定位与线路详情一到就会选出最近站）。选中的 watcher
+  // 在这个排布存在之前就跑过了，那时发出锚点变化是空操作——现在锚点可测，发出一次。
   notifyAnchorChange()
 
   initAnimation()
@@ -456,7 +494,6 @@ function initAnimation(): void {
     const dt = (frame.timeDiff || 16.6) / 1000
     const time = frame.time || 0
 
-    // 1. Station Water Ripple Wave Animation
     if (nearestAuraCircle && rippleCircle1 && rippleCircle2) {
       const scale = 1 + 0.12 * Math.sin(time / 350)
       nearestAuraCircle.scale({ x: scale, y: scale })
@@ -470,7 +507,6 @@ function initAnimation(): void {
       rippleCircle2.opacity(Math.max(0, 0.6 * (1 - phase2)))
     }
 
-    // 2. Predict-correct vehicle motion
     const L = routeLength()
     for (const [id, v] of vehicleMap.entries()) {
       if (!currentLayout) continue
@@ -523,10 +559,7 @@ function initAnimation(): void {
       }
 
       const sinceLastFix = time - v.lastFixAt
-      // Smooth extrapolation damping:
-      // 0 ~ 8s: full speed (100%)
-      // 8 ~ 20s: linear decay from 100% to 0% (simulating approaching intersections / signals)
-      // > 20s: 0% (gracefully hold position until new live fix arrives)
+      // 平滑外推衰减：0 ~ 8 秒满速；8 ~ 20 秒线性衰减到 0（模拟接近路口/信号）；之后保持位置，直到新的实时定位到来。
       let extrapolationFactor = 0
       if (sinceLastFix < FREERUN_CRUISE_MS) {
         extrapolationFactor = 1.0
@@ -543,13 +576,13 @@ function initAnimation(): void {
           effectiveSpeed = base * extrapolationFactor
         }
         else {
-          // Bounded smooth catchup: closes gap gently over 3.5s, strictly capped by MAX_BUS_SPEED_MS (16 m/s = 57.6 km/h)
+          // 有界的平滑追赶：3.5 秒内温和合上差距，且严格受物理速度上限封顶。
           const targetCatchup = Math.max(base, remaining / CATCHUP_CONVERGE_SEC)
           effectiveSpeed = Math.min(MAX_BUS_SPEED_MS, targetCatchup)
         }
       }
       else if (v.mode === 'hold') {
-        // If real bus was held at a light/station, wait gently at 0 speed until real position advances
+        // 真车在路口或站被拦住时，以 0 速度温和等待，直到真实位置前进。
         if (v.fixDist !== null && v.displayedDist <= v.fixDist + 0.5) {
           v.mode = 'cruise'
           effectiveSpeed = base * extrapolationFactor
@@ -583,14 +616,13 @@ function initAnimation(): void {
 
       if (v.dwell) {
         const plat = nearestPlatformDist(nextDist)
-        // Forward-only dwell snap: only glide forward into the platform if approaching from behind.
-        // Never pull backwards!
+        // 只向前停靠：只有从后方接近站台时才滑入，绝不往回拉。
         if (plat !== null && plat > nextDist && (plat - nextDist) < DWELL_SNAP_M) {
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
 
-      // Golden Rule: Strict Monotonic Non-Decreasing Invariant (0 backwards motion, ever)
+      // 铁律：严格单调不减（永不向后运动）。
       v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
 
       const pos = layoutPosition(v.displayedDist)
@@ -631,11 +663,8 @@ function boardMetrics(): BoardMetrics {
     return {
       paddingX: 20,
       paddingY: 24,
-      // Sized for the tallest wrapped label the board must lay out: a 14-character
-      // name (甲甲路（乙乙路丙丙路丁丁站）) wraps to 4 lines in a 54px column, which at
-      // lineHeight 1.4 needs ~62px. The row must clear stationRadius + 4 label
-      // offset + those 4 lines + a gap + the next row's dot radius — the original
-      // 64px did not, leaving that label overlapping the row below by 8px.
+      // 按报站板必须排的最高的折行标签设定：14 个字的站名在 54px 的列里折成 4 行，按 lineHeight
+      // 1.4 需要约 62px。行高必须容下站半径 + 标签偏移 + 这 4 行 + 一个间隔 + 下一行的点半径。
       rowHeight: 86,
       labelFontSize: 11,
       labelWidth: 54,
@@ -662,7 +691,6 @@ function boardMetrics(): BoardMetrics {
   }
 }
 
-// 1. Static Board
 function renderStaticBoard(): void {
   if (!stage || !trackLayer || !stationLayer) return
 
@@ -685,7 +713,6 @@ function renderStaticBoard(): void {
   })
   currentLayout = layout
 
-  // Render Track Lines
   for (let r = 0; r < layout.totalRows; r++) {
     const rowPoints = layout.points.filter(p => p.row === r)
     if (rowPoints.length < 2) continue
@@ -693,7 +720,6 @@ function renderStaticBoard(): void {
     const first = rowPoints[0]!
     const last = rowPoints[rowPoints.length - 1]!
 
-    // Base track
     trackLayer.add(new Konva.Line({
       points: [first.x, first.y, last.x, last.y],
       stroke: '#1e293b',
@@ -701,7 +727,6 @@ function renderStaticBoard(): void {
       lineCap: 'round',
     }))
 
-    // Inner guide
     trackLayer.add(new Konva.Line({
       points: [first.x, first.y, last.x, last.y],
       stroke: '#0ea5e9',
@@ -711,7 +736,6 @@ function renderStaticBoard(): void {
     }))
   }
 
-  // Render U-Turn Arcs (folded mode only)
   for (const arc of layout.arcs) {
     trackLayer.add(new Konva.Arc({
       x: arc.centerX,
@@ -735,13 +759,11 @@ function renderStaticBoard(): void {
     }))
   }
 
-  // Render Station Nodes
   for (const pt of layout.points) {
     const isNearest = nearestStation && nearestStation.id === pt.station.id
     const isInterchange = pt.station.interchanges && pt.station.interchanges.length > 0
     const isSelected = selectedStation?.id === pt.station.id
 
-    // Interchange marker ring
     if (isInterchange && !isNearest) {
       stationLayer.add(new Konva.Circle({
         x: pt.x,
@@ -753,7 +775,7 @@ function renderStaticBoard(): void {
       }))
     }
 
-    // Purely visual node: listening: false delegates all hits to `hit` circle
+    // 纯视觉节点：listening: false 把所有命中交给 hit 圆。
     const circle = new Konva.Circle({
       id: `station-visual-${pt.station.id}`,
       x: pt.x,
@@ -765,7 +787,6 @@ function renderStaticBoard(): void {
       listening: false,
     })
 
-    // Sized hit area for mouse & touch
     const hit = new Konva.Circle({
       x: pt.x,
       y: pt.y,
@@ -823,12 +844,8 @@ function renderStaticBoard(): void {
     stationLayer.add(circle)
     stationLayer.add(hit)
 
-    // Station Label
-    // lineHeight 1.4: CJK glyphs fill nearly the whole em box, so the default
-    // lineHeight of 1 leaves two-line names touching (measured clear ink between
-    // lines: 0px). 1.4 measures 2-4px, the value chosen visually. Antialiasing
-    // eats most of the nominal leading, so this is not the CSS intuition of 1.4.
-    // Taller labels need a taller row — see the rowHeight budget in boardMetrics().
+    // lineHeight 1.4：CJK 字形几乎填满整个字身框，默认的 1 会让两行站名贴在一起，而 1.4 量得
+    // 2-4px。更高的标签需要更高的行——见 boardMetrics() 里的行高预算。
     stationLayer.add(new Konva.Text({
       id: `station-label-${pt.station.id}`,
       x: pt.x - m.labelWidth / 2,
@@ -843,15 +860,12 @@ function renderStaticBoard(): void {
       listening: false,
     }))
 
-    // Commute board-stop marker. A separate node rather than a prefix on the
-    // label text: station names already wrap to four lines at their worst
-    // (14-character names in the mobile column), and widening the label would
-    // break the row-height budget. Both board stops are marked whenever they
-    // appear in this direction's stop list — seeing them together is what makes
-    // the direction verdict legible, since the leg is derived from their order.
-    const boardStop = pt.station.name === morningStopName
+    // 通勤上车点角标。单独一个节点，而不是给站名前缀：站名在最窄的移动端列里已经要折到四行，
+    // 加宽标签会撑破行高预算。两个上车点各自只标在它自己那个方向上（`onShownDirection`），
+    // 而按站序推断方向的那套推导 005 已删，不能再拿它当角标的依据。
+    const boardStop = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
       ? { text: '上', fill: '#34d399' }
-      : pt.station.name === eveningStopName
+      : onShownDirection(eveningStopDirection) && storedStopAt(pt.station, eveningStopName, eveningStopOrder)
         ? { text: '下', fill: '#c084fc' }
         : null
     if (boardStop) {
@@ -882,7 +896,6 @@ function renderStaticBoard(): void {
     }
   }
 
-  // Dedicated selection highlight ring
   selectionRing = new Konva.Circle({
     radius: m.stationRadius + 6,
     stroke: '#22d3ee',
@@ -898,7 +911,6 @@ function renderStaticBoard(): void {
   stationLayer.batchDraw()
 }
 
-// 2. Dynamic Elements
 let rippleGroup: Konva.Group | null = null
 
 function renderDynamicElements(): void {
@@ -1094,7 +1106,7 @@ function syncVehicles(): void {
   dynamicLayer.batchDraw()
 }
 
-/** Focus the camera on the key station (selected > nearest > first bus > first station). */
+/** 把镜头对准关键站（选中 > 最近 > 第一辆车 > 首站）。 */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
 
@@ -1134,7 +1146,7 @@ function focusKeyStation(smooth = false): void {
   }
 }
 
-/** Fit the board to the canvas WIDTH (top-aligned, folded mode default). */
+/** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */
 function fitWidth(): void {
   if (!stage || !trackLayer || !stationLayer || !currentLayout) return
   if (currentLayout.points.length === 0) return
@@ -1151,9 +1163,7 @@ function fitWidth(): void {
   const m = boardMetrics()
   const scale = clampScale((viewW - m.fitPadding * 2) / box.w)
 
-  // Push the first row below the floating toolbar. max() keeps this from
-  // shrinking the inset on desktop, where the controls are hidden (0).
-  // fitWidth is folded-only: linear mode returns early via focusKeyStation.
+  // 把第一行推到浮动工具栏之下。max() 使桌面端（控件隐藏、量为 0）不会缩小该内缩；本函数只用于折返模式。
   const topInset = Math.max(m.fitTopMargin, toolbarInsetTop())
 
   stage.scale({ x: scale, y: scale })
@@ -1164,7 +1174,7 @@ function fitWidth(): void {
   stage.batchDraw()
 }
 
-/** Fit entire board into current viewport. */
+/** 把整块报站板放进当前视口。 */
 function fitToViewport(): void {
   if (!stage || !trackLayer || !stationLayer || !currentLayout) return
   if (currentLayout.points.length === 0) return
@@ -1176,9 +1186,7 @@ function fitToViewport(): void {
   const viewH = Math.max(1, stage.height())
   const m = boardMetrics()
 
-  // The floating toolbar only overlaps the top of a folded (serpentine) board.
-  // Linear mode's single row is centred vertically, well clear of it, so it
-  // keeps the plain margin and its behaviour is untouched.
+  // 浮动工具栏只与折返（蛇形）报站板的顶部重叠；线性模式的单行垂直居中，故保留普通边距。
   const topInset = layoutMode.value === 'folded'
     ? Math.max(m.fitTopMargin, toolbarInsetTop())
     : m.fitTopMargin
@@ -1216,9 +1224,8 @@ function contentBounds(): { minX: number, minY: number, w: number, h: number } |
 }
 
 /**
- * Vertical space the floating mobile controls occupy inside the canvas box, or
- * 0 when they are hidden (desktop). Measured from the live DOM rather than
- * hardcoded, so the inset cannot drift from the `md:` visibility classes.
+ * 浮动移动端控件在画布盒里占的竖直空间，隐藏时（桌面端）为 0。从活的 DOM 测量而非写死，
+ * 故内缩不会与 `md:` 可见性类漂开。
  */
 function toolbarInsetTop(): number {
   const els = [mobileModePillRef.value, mobileFabTriggerRef.value].filter(Boolean) as HTMLElement[]
@@ -1227,8 +1234,8 @@ function toolbarInsetTop(): number {
   let inset = 0
   for (const el of els) {
     const rect = el.getBoundingClientRect()
-    if (rect.height <= 0) continue // display:none on desktop
-    // Distance from the canvas top down to this overlay's lower edge.
+    if (rect.height <= 0) continue // 桌面端为 display:none
+    // 从画布顶到这个覆盖层下沿的距离。
     inset = Math.max(inset, rect.bottom - containerTop)
   }
   return inset > 0 ? inset + TOOLBAR_GAP : 0
@@ -1277,7 +1284,6 @@ function setLayoutMode(mode: RouteLayoutMode): void {
     localStorage.setItem('realtime_transit_layout_mode', mode)
   }
   catch {
-    // ignore
   }
 
   userHasTransformed = false
@@ -1305,7 +1311,7 @@ function getStationAnchor(stationId: string): StationAnchor | null {
   const screenX = stageBox.left + stage.x() + pt.x * scale
   const screenY = stageBox.top + stage.y() + pt.y * scale
 
-  // Visual station radius in screen pixels (outer edge of selection ring)
+  // 站台的视觉半径（选中环的外沿）。
   const radius = (m.stationRadius + 7.25) * scale
 
   const container = containerRef.value
@@ -1356,7 +1362,7 @@ function updateSelectionVisual(): void {
   const m = boardMetrics()
   const selId = selectedStation?.id
 
-  // 1. Position & toggle the selection ring without destroying nodes
+  // 不销毁节点地定位并开关选中环。
   if (selectionRing) {
     if (selId) {
       const pt = currentLayout.points.find(p => p.station.id === selId)
@@ -1375,7 +1381,6 @@ function updateSelectionVisual(): void {
     }
   }
 
-  // 2. Refresh node fills and labels
   for (const pt of currentLayout.points) {
     const isNearest = nearestStation && nearestStation.id === pt.station.id
     const isSelected = selId === pt.station.id
@@ -1404,10 +1409,7 @@ watch(
     else {
       fitWidth()
     }
-    // A station can be selected before the board lays out (the GPS-nearest stop
-    // is set as soon as the fix and the line detail both exist, either order).
-    // Re-emit now that currentLayout exists, otherwise the popover anchor stays
-    // null and the popover never opens.
+    // 站可以在报站板排布之前就被选中。现在 currentLayout 存在了，再发一次；否则弹窗锚点永远是 null，弹窗不会打开。
     if (selectedStation) notifyAnchorChange()
   },
 )
@@ -1431,24 +1433,19 @@ watch(
 watch(
   () => nearestStation,
   () => {
-    // The nearest-stop marker is applied in two places: the static render (which
-    // may run before a fix exists) and updateSelectionVisual. Refresh the fills
-    // here too, otherwise a fix arriving after the board laid out would move the
-    // ripple but leave the stop unmarked.
+    // 最近站标记在静态渲染与 updateSelectionVisual 两处生效；这里也刷新填充，否则报站板排好之后才到的定位只会动涟漪而站点不被标上。
     updateSelectionVisual()
     renderRipple()
     dynamicLayer?.batchDraw()
   },
-  // The board's layout is built in renderStaticBoard, which runs after this
-  // watcher can first fire (the store already holds a fix when the view mounts),
-  // so defer to post-flush to observe the layout the render just produced.
+  // 报站板的排布在 renderStaticBoard 里建立，而它晚于本 watcher 可能首次触发，故延到 flush 之后，以观察到渲染刚产出的排布。
   { flush: 'post' },
 )
 
-// Board-stop markers live on the static layer and depend on which stops are
-// set, so a change (or a different direction's detail) needs a redraw.
+// 上车点标记在静态层上，取决于哪些站被设定，故它们（或另一个方向的详情）变化时需要重画。
+// 方向也在键里：角标只出现在属于本屏那个方向的上车点上，使用者改了方向就该重画。
 watch(
-  () => [morningStopName, eveningStopName, lineDetail.lineId, lineDetail.direction].join('|'),
+  () => [morningStopName, morningStopOrder, eveningStopName, eveningStopOrder, shownDirection, morningStopDirection, eveningStopDirection, lineDetail.lineId, lineDetail.direction].join('|'),
   () => {
     renderStaticBoard()
   },
@@ -1491,7 +1488,7 @@ function handleResize(): void {
 
 <template>
   <div class="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-    <!-- Desktop Top HUD / Legend bar (md: and up) -->
+    <!-- 桌面端顶部 HUD / 图例栏（md 及以上） -->
     <div class="hidden md:flex shrink-0 items-center justify-between gap-2 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 text-xs backdrop-blur-md">
       <div class="flex items-center gap-3">
         <span class="flex items-center gap-1.5 font-medium text-slate-300">
@@ -1564,8 +1561,8 @@ function handleResize(): void {
       </div>
     </div>
 
-    <!-- Mobile Floating Controls (screens < md) -->
-    <!-- Mode pill badge: tap to toggle layout instantly on mobile -->
+    <!-- 移动端浮动控件（md 以下） -->
+    <!-- 模式药丸：移动端点一下即切换排布 -->
     <div
       ref="mobileModePillEl"
       class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md"
@@ -1585,9 +1582,9 @@ function handleResize(): void {
       </span>
     </div>
 
-    <!-- Mobile Right FAB Action Buttons: Collapsible to save visual area on mobile (default collapsed) -->
+    <!-- 移动端右侧 FAB 操作按钮：可折叠以省下可视面积（默认折叠） -->
     <div class="md:hidden absolute right-2.5 top-2.5 z-10 flex flex-col items-end gap-1.5">
-      <!-- Toggle Trigger Button -->
+      <!-- 切换触发按钮 -->
       <button
         ref="mobileFabTriggerEl"
         type="button"
@@ -1603,7 +1600,7 @@ function handleResize(): void {
         <X v-else class="h-4 w-4" />
       </button>
 
-      <!-- Expandable Tool List -->
+      <!-- 可展开的工具列表 -->
       <Transition
         enter-active-class="transition duration-200 ease-out"
         enter-from-class="opacity-0 -translate-y-2 scale-95"
@@ -1657,7 +1654,7 @@ function handleResize(): void {
       </Transition>
     </div>
 
-    <!-- Canvas Container -->
+    <!-- 画布容器 -->
     <div
       ref="containerEl"
       class="min-h-0 w-full flex-1 cursor-grab touch-none select-none active:cursor-grabbing"

@@ -1,37 +1,21 @@
 /**
- * F-E: the seconds this page estimates for itself while the arrivals answer is
- * in flight — the SERVER's own subway model, not a second opinion.
+ * 到站答案在途时本页自己估的秒数——服务端自己的地铁模型，不是第二个意见。
  *
- * `TransitService.vehicleArrivals` prices a targeted row from the payload's own
- * `travelTimeSec` when it carries one, from the subway engine's 135 s/station
- * model for a subway line, and otherwise states NO minute at all. The
- * position/dwell estimate that used to live on BOTH sides (a real position, a
- * real speed, a nominal per-stop dwell) is gone from the server — its error had
- * no fixed sign, ~12 minutes mean and 28 minutes worst — and the copy here had to
- * go with it: a pending answer that priced a bus minute would state exactly the
- * number the arrivals answer no longer states, and the two surfaces would
- * contradict each other for the same vehicle in the same instant. With no minute
- * to state, the page states the same absence the row does (`@/arrival-copy`).
+ * 位置/驻站估时（真实位置、真实速度、每站名义停站）已从服务端移除，此处也必须一并删：一个给公交
+ * 分钟估价的待定答案会陈述到站答案不再陈述的数字，两个屏幕会为同一辆车在同一时刻互相矛盾。
+ * 没有分钟可陈述时，页面陈述与行相同的缺失。
  *
- * What remains is the ONE model both sides still share, and it is shared exactly:
- * a subway minute is the engine's arithmetic on this side too. The minutes
- * happened to round the same, which is precisely how a divergence survives review —
- * the client once lacked the server's `Math.max(30, …)` floor under the estimated
- * seconds, so the two stated different numbers for the same vehicle and only the
- * rounding hid it. One formula, floored, and the page keeps the server's own
- * 1-minute display minimum on top.
- *
- * Nothing here reads a clock: `progress` and `stopsAway` come from the live
- * board, so the two sides cannot drift on where the vehicle is either.
+ * 剩下的是两侧仍共享的唯一模型，且被完全共享：客户端曾缺服务端的下限，两侧于是对同一辆车给出不同
+ * 的数，只被取整到分钟掩盖。此处不读时钟：进度与剩余站数都来自 live 板。
  */
 
-/** The floor under any estimated arrival: the server's own, never a smaller one. */
+/** 任何估时之下的下限：用服务端自己的，绝不用更小的。 */
 export const ARRIVAL_ESTIMATE_FLOOR_SECONDS = 30
 
-/** Seconds the subway model assumes per inter-station run (the server's 135 s). */
+/** 地铁模型假设的每站运行秒数（服务端自己的 135 s）。 */
 export const SUBWAY_STATION_RUN_SECONDS = 135
 
-/** The subway model's estimate: full hops remaining, less the progress made on this one. */
+/** 地铁模型的估时：剩余整程，减去本程已走的进度。 */
 export function estimateSubwayArrivalSeconds(stopsAway: number, progress: number): number {
   return Math.max(
     ARRIVAL_ESTIMATE_FLOOR_SECONDS,

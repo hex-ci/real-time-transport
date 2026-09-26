@@ -3,73 +3,57 @@ import { isAnchorSet, pickAnchors, type StoredAnchors } from './anchors'
 import type { ReadValue } from '@/read-state'
 
 /**
- * What a 设置 index row may say about its own domain.
+ * 设置索引行可以就自己那个域说什么。
  *
- * The row states the CURRENT STATE as a fact, and a fact about a read has three states,
- * not two: still reading, READ AND FAILED, and read. §4.1 requires the second one to be
- * distinguishable from the first and to be told as itself — 「读不到就是读不到」 — so the
- * model carries a read that failed rather than folding it into an empty value. Every
- * wording function below is therefore total over the three, and none of them has a
- * default to fall back on: the collapsed 通勤时段 summary used to keep `06:30–11:30` when
- * `GET /api/transit/settings` threw, which reads as the user's own configuration.
+ * 行把**当前状态**作为事实陈述，而关于一次读取的事实有三种、不是两种：仍在读取、
+ * 读取失败、已读到。第二种必须与第一种可区分，并照原样陈述——「读不到就是读不到」——
+ * 故模型携带「读取失败」，而不是把它折成一个空值。下面每个措辞函数都对三种状态穷尽，
+ * 没有一个留有可退回的默认值。
  *
- * 「读取中…」 is the one state that says nothing about the stored row, and it is stated
- * anyway: a row that is silent before its read answers looks like a row with no fact.
+ * 「读取中…」是唯一对已存记录什么都不说的状态，但它仍要说：读取作答前保持沉默的行，
+ * 看起来像一行没有事实。
  *
- * The three states themselves are `@/read-state`'s — the same model the four sub-pages and
- * the screens outside 设置 read the followed-lines store through — so the index cannot
- * drift into a fourth one. The settings row adds exactly one member of its own (`unset`),
- * and `settingsReadOf` is the single place a `/settings` answer is turned into these
- * states: the index row, the 通勤时段 page and the hours editor all read through it, so
- * none of them can decide for itself what 「未设置」 means.
+ * 三种状态本身来自 `@/read-state`——四个子页面与设置以外的界面读关注线路 store 用的是
+ * 同一套模型——故索引不会漂出第四种。设置行只新增自己的一员（`unset`），而
+ * `settingsReadOf` 是把 `/settings` 应答变成这些状态的唯一处。
  */
 
-/** A value the index may state: pending, unreadable, or read. */
+/** 索引行可以陈述的值：读取中、读不到、已读到。 */
 export type SummaryValue<T> = ReadValue<T>
 
 /**
- * A SETTINGS-domain value: the three states above, plus the two a settings row adds.
+ * 设置域的值：上面三种状态，加上设置行新增的两种。
  *
- * `unset` — the read answered and there is NO row. §4.1 separates 读失败 from 确实为空,
- * and this is the second: nobody stored anything, so there is nothing to print and
- * nothing to apologise for.
+ * `unset`——读取已作答且没有记录：没人存过任何东西，故没有东西可印，也没什么可道歉的。
  *
- * `unchosen` — the read answered, the row EXISTS, and the four times on it were never
- * chosen (`null` on the wire since 009 dropped the columns' NOT NULL DEFAULT). It is
- * a third fact, not a shade of the other two: `unset` would be false about the row
- * (there is one — it may carry anchors), and `read` would be false about the times
- * (nobody picked them, so there is no window to print). Before 009 this state was
- * unrepresentable: an anchors-only write stored the built-in window, so the row came
- * back looking exactly like a user who had configured 06:30–11:30 / 17:00–22:00, and
- * every surface below printed it as his own.
+ * `unchosen`——读取已作答、记录存在，但四个时刻从未被选过（线路上为 `null`）。
+ * 它是第三种事实，不是另两种的变体：`unset` 对记录说错（记录在，可能带锚点），
+ * `read` 对时刻说错（没人选过，故没有窗口可印）。
  *
- * Its own member rather than being folded into `unset`, because the two differ in a
- * fact a surface acts on: whether a saved row is there to be updated. The WORD the
- * user reads is the same (「未设置」) — from where he stands, 「我还没设置过通勤时段」 is
- * true in both cases — and that shared word is `hoursText`'s business, not this
- * model's. What must never happen is a `null` being printed as a time; the state is
- * what makes that impossible.
+ * 自带一员而不并入 `unset`，因为两者在一个界面会据以行动的事实上不同：有没有一条已存
+ * 记录可供更新。用户读到的**词**相同（「未设置」），而那个共享的词是 `hoursText` 的事，
+ * 不是本模型的。绝不能发生的，是把 `null` 印成一个时刻；这个状态就是让它不可能发生的东西。
  */
 export type SettingsSummaryValue<T> = SummaryValue<T> | { state: 'unset' } | { state: 'unchosen' }
 
-/** Still reading. Before the first answer nothing about the stored row is known. */
+/** 仍在读取。首次作答前，关于已存记录一无所知。 */
 function reading(): string {
   return '读取中…'
 }
 
-/** Read and FAILED. The one wording every row shares for it. */
+/** 读取失败。每行共用这一种措辞。 */
 export function unreadableText(): string {
   return '未读到'
 }
 
-/** How many lines of the active city are followed. */
+/** 当前城市关注了多少条线路。 */
 export function followedLinesText(value: SummaryValue<number>): string {
   if (value.state === 'reading') return reading()
   if (value.state === 'unreadable') return unreadableText()
   return `已关注 ${value.value} 条`
 }
 
-/** How many chains are recorded. */
+/** 录入了多少条链路。 */
 export function chainsText(value: SummaryValue<number>): string {
   if (value.state === 'reading') return reading()
   if (value.state === 'unreadable') return unreadableText()
@@ -77,42 +61,40 @@ export function chainsText(value: SummaryValue<number>): string {
 }
 
 /**
- * The saved hours, in the collapsed summary's own wording: `06:30–11:30 · 17:00–22:00`.
+ * 已保存的时段，按折叠摘要自己的写法。
  *
- * One spelling of one value, shared by the index row and the 通勤时段 page's collapsed
- * card — two spellings would let the same stored hours read as two different settings.
+ * 一个值只有一种拼法，由索引行与通勤时段页的折叠卡片共享——
+ * 两种拼法会让同一条已存时段读成两个不同的设置。
  */
 export function hoursSummaryOf(hours: UserSettings): string {
   return `${hours.morningStart}–${hours.morningEnd} · ${hours.eveningStart}–${hours.eveningEnd}`
 }
 
 /**
- * 未设置: the read answered and there are no hours to show — no row at all, or a row
- * whose four times were never chosen. §4.1's own word for a value nobody saved, and
- * NOT 「未读到」, which is a claim about a read that failed.
+ * 未设置：读取已作答且没有时段可展示——没有记录，或记录里的四个时刻从未被选过。
+ * 这是对一个无人保存过的值的措辞，而**不是**「未读到」——后者是对失败读取的断言。
  */
 export function unsetText(): string {
   return '未设置'
 }
 
 /**
- * The saved hours, or 「未读到」 when the settings row could not be read, or 「未设置」
- * when there are none — no row, or a row whose times were never chosen.
+ * 已保存的时段；设置记录读不到时为「未读到」，没有时段时为「未设置」——
+ * 没有记录，或记录里的时刻从未被选过。
  */
 export function hoursText(value: SettingsSummaryValue<UserSettings>): string {
   if (value.state === 'reading') return reading()
   if (value.state === 'unreadable') return unreadableText()
-  // Both facts read the same to the user, and neither is a time: 「未设置」 is what a
-  // summary says about a window that is not there. What the two states keep apart is
-  // whether a row exists (the editor acts on that); what they must never produce is a
-  // printed hour.
+  // 两种事实对用户读起来一样，且都不是时刻：「未设置」是摘要对不存在的窗口所说的话。
+  // 两种状态区分开的是那条记录是否存在（编辑器据此行动）；
+  // 它们绝不能产出的，是一个被印出来的时刻。
   if (value.state === 'unset' || value.state === 'unchosen') return unsetText()
   return hoursSummaryOf(value.value)
 }
 
 /**
- * Each anchor's own state: both are settings rows, and one word for the pair would be
- * false about whichever of them differs. 已设置 / 未设置 are §4.1's own two words.
+ * 每个锚点自己的状态：两者都是设置记录，一个词覆盖这一对，
+ * 就会对其中的另一个说错。
  */
 export function anchorsText(value: SummaryValue<StoredAnchors>): string {
   if (value.state === 'reading') return reading()
@@ -123,12 +105,10 @@ export function anchorsText(value: SummaryValue<StoredAnchors>): string {
 }
 
 /**
- * The four times out of a `/settings` answer, or null when the answer did not carry
- * them as times.
+ * `/settings` 应答里的四个时刻；应答没把它们作为时刻携带时为 null。
  *
- * Null is not 「未设置」: it covers both a row this screen cannot read as a schedule and
- * a row whose times are NULL (never chosen). The two are told apart by the caller, which
- * knows which case it is looking at — `timesUnchosen` below is the second one.
+ * null 不是「未设置」：它同时覆盖「本屏读不成的记录」与「时刻为 NULL（从未被选过）的记录」，
+ * 由调用方区分——下面的 `timesUnchosen` 是后者。
  */
 export function hoursOf(data: Record<string, unknown> | null | undefined): UserSettings | null {
   const keys = ['morningStart', 'morningEnd', 'eveningStart', 'eveningEnd'] as const
@@ -141,54 +121,44 @@ export function hoursOf(data: Record<string, unknown> | null | undefined): UserS
   }
 }
 
-/** The four times of a stored row, each an explicit `null`. */
+/** 已存记录的四个时刻，每个都显式为 `null`。 */
 const TIME_KEYS = ['morningStart', 'morningEnd', 'eveningStart', 'eveningEnd'] as const
 
 /**
- * Whether a stored row states, column by column, that none of its four times was chosen.
+ * 一条已存记录是否逐列陈述它的四个时刻都没被选过。
  *
- * Every key must be PRESENT and `null`: a body that omits the times is a row this screen
- * cannot read (the endpoint always sends all four), and one that mixes nulls with times
- * is the half-written window the write contract refuses to store — neither is 「未设置」,
- * which is a claim about the user's choices, so both go to `unreadable` instead.
+ * 每个键都必须**存在**且为 `null`：省略时刻的响应体是本屏读不成的记录，而 null 与时刻
+ * 混用是写入契约拒绝存储的半成品——两者都不是「未设置」（那是对用户选择的主张），
+ * 故都归为读不到。
  */
 function timesUnchosen(data: Record<string, unknown> | null | undefined): boolean {
   if (!data) return false
   return TIME_KEYS.every(key => key in data && data[key] === null)
 }
 
-/** The two facts a settings-domain row states, each in its own state. */
+/** 设置域的一行所陈述的两个事实，各处于自己的状态。 */
 export interface SettingsRead {
   hours: SettingsSummaryValue<UserSettings>
   anchors: SummaryValue<StoredAnchors>
 }
 
 /**
- * THE reading of a `GET /api/transit/settings` answer, for every surface that shows it.
+ * `GET /api/transit/settings` 应答的唯一读法，供每个展示它的界面使用。
  *
- * The answer carries the state of the read (`settingsState`) and the row when there is
- * one. Four outcomes are told apart here and nowhere else:
+ * 应答携带读取的状态（`settingsState`）以及记录（如果有）。四种结果只在此处区分：
  *
- *  - `unset` — the read answered and found no row. The four times are reported as
- *    「未设置」, never as the built-in window. The anchors of that same answer are a real
- *    「未设置」 each: an anchor is a column of the row, so a store with no row has stored
- *    no anchor — that is a fact about the row, not a guess about it.
- *  - `unchosen` — the row is there and its four times are `null`: nobody ever chose a
- *    window (since 009 that is what the columns hold, and the endpoint sends the nulls).
- *    Reported as `unchosen` for the hours and READ for the anchors, because the two are
- *    different columns of that one row: a row saved by setting an anchor alone is
- *    exactly this shape, and it has a real anchor.
- *  - `stored` — the row is read for what it is: the four times, and each anchor by its
- *    own null.
- *  - everything else — a refusal, a missing `settingsState`, a body that contradicts
- *    itself (`unset` carrying a row), a row whose times are half `null` and half times,
- *    or one that omits them — is UNREADABLE. 「未设置」 would be a claim about the stored
- *    row that nobody verified, and a value from a self-contradicting answer is worse:
- *    the pair must agree or the read is not read.
+ *  - `unset`——读取已作答且没有记录。四个时刻报为「未设置」，绝不用内置窗口。
+ *    同一应答里的锚点各自是真实的「未设置」：锚点是记录的一列，故没有记录的存储
+ *    没有存过锚点——那是关于记录的事实，不是猜测。
+ *  - `unchosen`——记录在，四个时刻为 `null`。时刻报 `unchosen`、锚点报已读到：
+ *    两者是同一记录的不同列，仅设置锚点而保存的记录正是这个形状。
+ *  - `stored`——记录照其原样读取：四个时刻，以及各锚点自己的 null。
+ *  - 其余一切——拒绝、缺少 `settingsState`、自相矛盾的响应体（`unset` 带记录）、
+ *    时刻半 null 半有值、或省略时刻——都是读不到。「未设置」会是对已存记录一个
+ *    无人核实过的主张，而自相矛盾应答里的值更糟：这一对必须一致，否则这次读取不算读到。
  *
- * One function, because the index row and the 通勤时段 page show the same row: two parsers
- * are two chances to disagree about what 「未设置」 means, and that disagreement is exactly
- * where a lie about the stored row would appear.
+ * 只此一个函数，因为索引行与通勤时段页展示的是同一条记录：两个解析器就是两次对
+ * 「未设置」含义产生分歧的机会，而分歧正是关于已存记录的谎言会出现的地方。
  */
 export function settingsReadOf(body: unknown): SettingsRead {
   const answer = body as { success?: unknown, settingsState?: unknown, data?: unknown } | null | undefined

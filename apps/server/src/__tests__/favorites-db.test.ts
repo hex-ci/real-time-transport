@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Database } from '../db/client.js'
 
-// No connection string -> the in-memory store, which mirrors the SQL semantics
-// so ordering and pinning can be asserted without PostgreSQL.
+// 没有连接串 → 走内存存储，它镜像 SQL 的语义，
+// 于是排序与置顶不用 PostgreSQL 也能断言。
 const db = new Database()
 const USER = 'default_user'
 
@@ -66,8 +66,8 @@ describe('favourites: the creation instant is the order with the position', () =
     const { a } = await seed()
     const row = (await db.getFavorites(USER)).find(f => f.id === a)
 
-    // The column exists in the table; the row mapping has to carry it, because
-    // it is the tiebreak a client needs to mirror `created_at ASC` locally.
+    // 这一列表里有，行映射就必须带上它：它是客户端在本地
+    // 镜像 `created_at ASC` 时要用的决胜键。
     expect(row!.createdAt).toBeTruthy()
     expect(Number.isNaN(Date.parse(row!.createdAt!))).toBe(false)
   })
@@ -76,7 +76,7 @@ describe('favourites: the creation instant is the order with the position', () =
     for (const f of await db.getFavorites(USER)) await db.removeFavorite(f.id!)
     await db.addFavorite({ lineId: '010-1-0', lineName: '1', displayOrder: 0 })
     await db.addFavorite({ lineId: '010-52-0', lineName: '52', displayOrder: 0 })
-    // Both rows claim position 0: the earlier one holds the earlier slot.
+    // 两行都声称位置 0：先建的那行占先。
     expect(await order()).toEqual(['010-1-0', '010-52-0'])
   })
 })
@@ -95,8 +95,8 @@ describe('favourites: pinning is scoped to one user', () => {
     const a = await seedUser(USER_A)
     const b = await seedUser(USER_B)
 
-    // The second pin's "clear the previous pin for THIS user" step must not
-    // reach across users: SQL scopes it with `WHERE user_id = $1`.
+    // 第二次置顶里「清掉本用户的上一个置顶」这一步不得跨用户：
+    // SQL 用 `WHERE user_id = $1` 圈定作用域。
     await db.setPinned(USER_A, a, true)
     await db.setPinned(USER_B, b, true)
 

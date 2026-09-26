@@ -4,11 +4,9 @@ import type { UserFavoriteLine } from '@real-time-transport/shared'
 import { reorder, useTransitStore } from '../stores/transit.store'
 
 /**
- * F9 拖动排序: one order of POSITIONS shared by every followed line, with the pin
- * laid over it as a state. A move stamps a contiguous run of positions over the
- * whole list — the pinned row included, never exempted — and leaves the pin
- * itself alone, which is what lets the settings screen stay a pure order editor
- * showing the stored order.
+ * F9 拖动排序：所有关注线路共享一套**位置**顺序，固定只是其上的一个状态。一次移动会在
+ * 整个列表上盖下一段连续位置——含被固定行，绝不豁免——而固定本身不动，这使设置页得以
+ * 保持纯粹的排序编辑器，显示存储的顺序。
  */
 
 function favorite(
@@ -32,9 +30,8 @@ function favorite(
 }
 
 /**
- * A PATCH answer echoing the row it was asked to move — the position it was
- * given, and everything else the row already carried, exactly as the endpoint
- * returns the stored row.
+ * 回显被移动行的 PATCH 应答——它被赋予的位置，以及该行原有的其余内容，
+ * 与端点返回存储行的方式一致。
  */
 function echoStored(known: UserFavoriteLine[] = []) {
   return vi.fn(async (url: string, init: { body: string }) => {
@@ -71,13 +68,12 @@ describe('F9 reorder stamps one contiguous run of positions', () => {
   })
 
   it('gives the pinned row a position like every other row', () => {
-    // The stored rows all carry position 0 today; the pinned one is not exempt
-    // from the run, because the list is positions and the pin is a state.
+    // 存储行今天都带位置 0；被固定行不豁免这段连续位置，因为列表是位置，而固定是状态。
     const out = reorder([favorite('fp', 0, true), favorite('fb', 0), favorite('fc', 0)], 2, 0)
 
     expect(out.map(f => f.id)).toEqual(['fc', 'fp', 'fb'])
     expect(positions(out)).toEqual([0, 1, 2])
-    // The pin rides along untouched, still exactly one row deep.
+    // 固定原样随行，仍只占一行深。
     expect(out.find(f => f.id === 'fp')!.isPinned).toBe(true)
     expect(out.filter(f => f.isPinned)).toHaveLength(1)
   })
@@ -102,7 +98,7 @@ describe('F9 reorder stamps one contiguous run of positions', () => {
       const out = reorder([favorite('fa', 0), favorite('fb', 5)], from, to)
 
       expect(out.map(f => f.id)).toEqual(['fa', 'fb'])
-      // A bad index must not silently renumber stored rows.
+      // 坏的索引不得静默重排已存储的行。
       expect(positions(out)).toEqual([0, 5])
     }
   })
@@ -152,7 +148,7 @@ describe('F9 a move is written one PATCH per row', () => {
 
     await store.moveFavorite('fb', 'fa')
 
-    // Only fa and fb swap; fc is already stored at its position.
+    // 只有 fa 与 fb 互换；fc 已在它的位置上。
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(store.favoriteOrder.map(f => f.id)).toEqual(['fb', 'fa', 'fc'])
   })
@@ -172,16 +168,14 @@ describe('F9 a move is written one PATCH per row', () => {
 
   it('keeps the home list pin-first while the position moves', async () => {
     const store = useTransitStore()
-    // The home order the server sends: the pinned row leads, its own position
-    // is last.
+    // 服务端下发的首页顺序：被固定行在前，它自己的位置在最后。
     store.favorites = [favorite('fp', 2, true), favorite('fb', 0), favorite('fc', 1)]
     vi.stubGlobal('fetch', echoStored(store.favorites))
 
     await store.moveFavorite('fb', 'fp')
 
-    // Position order: fb took fp's slot — the rows it crossed shifted up, the
-    // pin included, since a pin is a state over the order and not immunity from
-    // it.
+    // 按位置排序：fb 占了 fp 的槽位——它跨过的行上移，含固定行；
+    // 固定是对顺序的状态，不是对顺序的豁免。
     expect(store.favoriteOrder.map(f => f.id)).toEqual(['fc', 'fp', 'fb'])
     expect(positions(store.favoriteOrder)).toEqual([0, 1, 2])
     expect(store.favorites.map(f => f.id)).toEqual(['fp', 'fc', 'fb'])
@@ -197,8 +191,7 @@ describe('F9 a move is written one PATCH per row', () => {
     ]
     vi.stubGlobal('fetch', echoStored())
 
-    // The settings screen shows 027 only, so it reports 「a2 onto a1」; the row
-    // of the other city keeps its relative place, and the whole run is 0..n-1.
+    // 设置页只显示 027，因此报告「a2 → a1」；另一城市的行保持相对位置，整段是 0..n-1。
     await store.moveFavorite('a2', 'a1')
 
     expect(store.favoriteOrder.map(f => f.id)).toEqual(['a2', 'a1', 'b1'])
@@ -221,9 +214,8 @@ describe('F9 a move is written one PATCH per row', () => {
   it('adopts the stored order when a write fails, instead of claiming the rollback', async () => {
     const store = useTransitStore()
     store.favorites = [favorite('fa', 0), favorite('fb', 1), favorite('fc', 2)]
-    // The batch is not atomic server-side: 'fc' reached position 0 before 'fa'
-    // was rejected, so the stored order is now fc/fa/fb. Restoring the snapshot
-    // here would report an order the server does not hold.
+    // 服务端侧该批不是原子的：'fc' 在 'fa' 被拒前已到达位置 0，故存储顺序现为 fc/fa/fb。
+    // 此处恢复快照会报出服务端并不持有的顺序。
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { body: string }) => {
       if (!init) {
         return { json: async () => ({ success: true, data: [favorite('fc', 0), favorite('fa', 1), favorite('fb', 2)] }) }
@@ -253,9 +245,8 @@ describe('F9 a move is written one PATCH per row', () => {
     const store = useTransitStore()
     store.favorites = [favorite('fa', 0), favorite('fb', 1), favorite('fc', 2)]
 
-    // The first PATCH lands — the server now holds fc at position 0 — and the
-    // second fails. The batch is not atomic server-side, so the store must
-    // report what is STORED, not its own pre-move snapshot.
+    // 首个 PATCH 成功——服务端现在把 fc 放在位置 0——第二个失败。该批在服务端侧非原子，
+    // 故 store 必须报出**已存储**的内容，而非自己移动前的快照。
     const stored = [favorite('fc', 0), favorite('fa', 1), favorite('fb', 2)]
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (String(url) === '/api/transit/favorites') {
@@ -275,10 +266,9 @@ describe('F9 a move is written one PATCH per row', () => {
 })
 
 /**
- * F9: the stored order's second keyword is `created_at`, and the pin is not a
- * keyword in it at all. Rows that tie on `displayOrder` are the state the
- * store actually holds — a re-follow reissues one — so a tie must resolve by
- * creation instant rather than by whatever order the pin-first array arrived in.
+ * F9：存储顺序的第二个关键字是 `created_at`，固定在其中根本不是关键字。`displayOrder`
+ * 打平的行才是 store 真正持有的状态（重复关注会重发一个），故打平必须按创建时刻、而非
+ * 固定优先数组到达的顺序来解。
  */
 describe('F9 the settings order is pin-independent under ties', () => {
   beforeEach(() => {
@@ -291,9 +281,8 @@ describe('F9 the settings order is pin-independent under ties', () => {
 
   it('keeps a pinned row at its creation slot when every position ties', () => {
     const store = useTransitStore()
-    // Today's stored rows all carry position 0 and arrive pin-first. The pinned
-    // row was followed LAST, so its own slot is last: the pin is a home-list
-    // overlay and must not lift a row in a pure order editor.
+    // 今天存储行都带位置 0 且按固定优先到达。被固定行是**最后**关注的，故它自己的槽位在最后：
+    // 固定是首页列表的覆盖层，不得在纯排序编辑器里提起一行。
     store.favorites = [
       favorite('fp', 0, true, '027', '2024-01-03T00:00:00.000Z'),
       favorite('fb', 0, false, '027', '2024-01-01T00:00:00.000Z'),
@@ -301,13 +290,13 @@ describe('F9 the settings order is pin-independent under ties', () => {
     ]
 
     expect(store.favoriteOrder.map(f => f.id)).toEqual(['fb', 'fc', 'fp'])
-    // ...and the home list still leads with the pin: the two orderings differ.
+    // ……而首页列表仍以固定行打头：两种排序不同。
     expect(store.favorites.map(f => f.id)).toEqual(['fp', 'fb', 'fc'])
   })
 
   it('resolves a reissued position by creation instant, not by the pin', () => {
-    // Follow A(1) → follow B(2) → unfollow A → follow C reuses 2 → pin C.
-    // GET /favorites then hands back [C, B] although C is the newer row.
+    // 关注 A(1) → 关注 B(2) → 取关 A → 关注 C 复用 2 → 固定 C。
+    // GET /favorites 随后交出 [C, B]，尽管 C 是更新的行。
     const store = useTransitStore()
     store.favorites = [
       favorite('fc', 2, true, '027', '2024-01-03T00:00:00.000Z'),
@@ -329,7 +318,7 @@ describe('F9 the settings order is pin-independent under ties', () => {
 
   it('orders the home list pin-first, then by position and instant', async () => {
     const store = useTransitStore()
-    // Listed newest-first inside the tie, which is not the stored order.
+    // 在打平内部按最新在前排列，这不是存储顺序。
     store.favorites = [
       favorite('a', 1, false, '027', '2024-01-02T00:00:00.000Z'),
       favorite('b', 1, false, '027', '2024-01-01T00:00:00.000Z'),
@@ -340,8 +329,8 @@ describe('F9 the settings order is pin-independent under ties', () => {
 
     await store.togglePin('p')
 
-    // Mirrors `ORDER BY is_pinned DESC, display_order ASC, created_at ASC`: the
-    // pin leads despite the highest position, and the tie resolves b before a.
+    // 对应 `ORDER BY is_pinned DESC, display_order ASC, created_at ASC`：
+    // 固定行虽位置最大仍打头，打平解出 b 在 a 前。
     expect(ids(store)).toEqual(['p', 'b', 'a'])
   })
 })
@@ -364,8 +353,7 @@ describe('F9 following a line takes a fresh position', () => {
 
   it('does not reissue a position an existing row already holds', async () => {
     const store = useTransitStore()
-    // A(1) and B(2) were followed, then A was unfollowed: only position 2
-    // remains, so the row count (1) would reissue 2 and tie with fb.
+    // A(1) 与 B(2) 曾被关注，随后 A 被取关：只剩位置 2，故按行数（1）会重发 2 并与 fb 打平。
     store.favorites = [favorite('fb', 2)]
     const fetchMock = acceptAdded()
     vi.stubGlobal('fetch', fetchMock)

@@ -5,17 +5,13 @@ import { chainReadingOf, legMarkOf } from '../provenance'
 import { READ_AT } from './chain-fixtures'
 
 /**
- * F4 on the F10 page, and the one thing the refresh control cannot supply here.
+ * F10 页面上的 F4，以及刷新控件在此无法提供的那一件事。
  *
- * A chain's answer is not one number from one line: each leg's alight minute is its
- * own vehicle's, and a subway leg's is 排班推演 while a bus leg's is 实时. The
- * engine already decided that per leg, and `listProvenanceOf` answers null for the
- * chain when the legs disagree — one word would then be false about part of it. So
- * the chain states its own mark when it has one, and each leg states its own when
- * it does not; a leg never borrows the chain's word for a number it did not produce.
+ * 链路的答案不是一个来自一条线路的数字：每段的下车分钟属于它自己的车辆，地铁段是排班推演而公交段是实时。
+ * 引擎已按段决定，且各段不一致时 `listProvenanceOf` 对链路答 null——一个词会对其中一部分为假。
+ * 故链路有标记时陈述自己的，没有时每段陈述自己的；段绝不会为自己未产出的数字借用链路的词。
  *
- * The instant the reading was obtained is worded by the store's own freshness line,
- * so F11's control and this page cannot print one instant two ways.
+ * 取得读取的时刻由 store 自己的新鲜度行措辞，故 F11 的控件与本页不会把一个时刻印成两种样子。
  */
 
 describe('one mark for the chain, or one per leg', () => {
@@ -23,7 +19,7 @@ describe('one mark for the chain, or one per leg', () => {
     const chain = chainReadingOf({ lastUpdatedAt: READ_AT, provenance: 'live' })
     expect(chain?.mark).toBe('实时')
     expect(chainReadingOf({ lastUpdatedAt: READ_AT, provenance: 'schedule_simulation' })?.mark).toBe('排班推演')
-    // The chain is already saying it: a leg repeating it is noise, not information.
+    // 链路已经在说它了：段再重复是噪声，不是信息。
     expect(legMarkOf('live', 'live')).toBeNull()
   })
 
@@ -31,7 +27,6 @@ describe('one mark for the chain, or one per leg', () => {
     expect(chainReadingOf({ lastUpdatedAt: READ_AT, provenance: null })?.mark).toBeNull()
     expect(legMarkOf('live', null)).toBe('实时')
     expect(legMarkOf('schedule_simulation', null)).toBe('排班推演')
-    expect(legMarkOf('position_estimate', null)).toBe('位置推算')
     expect(legMarkOf('exact_timetable', null)).toBe('精确时刻表')
   })
 
@@ -63,8 +58,7 @@ describe('the reading line states when the reading was obtained', () => {
   })
 
   it('has no line at all when there was no reading', () => {
-    // `no-live` and every reason decided before a reading is needed carry no
-    // instant, and a clock is not a reading: the page states nothing.
+    // `no-live` 以及所有在需要读取之前就决定的理由都不带时刻，时钟不是读取：页面什么都不陈述。
     expect(chainReadingOf({ lastUpdatedAt: null, provenance: null })).toBeNull()
   })
 

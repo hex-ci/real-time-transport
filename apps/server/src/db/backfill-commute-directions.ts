@@ -1,19 +1,16 @@
 /**
- * One-off backfill: turn pre-existing board stops into explicit commute directions.
+ * 一次性回填：把既有的上车点转成显式的通勤方向。
  *
- * Before 005, the commute direction was inferred from the two board stops' order
- * in each direction's stop list. It is now an explicit user choice, so existing
- * rows that have both stops set would otherwise show "direction not set" until
- * the user re-picks.
+ * 方向现在是用户的显式选择，因此两个上车点都已设置的既有行否则会一直显示「方向未设置」，
+ * 直到用户重新选择。
  *
- * Reads BOTH directions from the local cached_transit_lines table — never from
- * upstream — so it costs no provider quota and is deterministic. Rows whose
- * direction cannot be derived (missing stops, or a stop served by only one
- * direction) are left NULL on purpose: the user picks, the script does not guess.
+ * 两个方向都从本地 cached_transit_lines 表读取，绝不走上游：不消耗 provider 配额且可重复
+ * 执行。方向推导不出来的行（缺上车点，或该站只被一个方向服务）故意留 NULL —— 由用户来选，
+ * 脚本不猜。
  *
- * Usage:
- *   pnpm --filter @real-time-transport/server exec tsx src/db/backfill-commute-directions.ts          # dry run
- *   pnpm --filter @real-time-transport/server exec tsx src/db/backfill-commute-directions.ts --apply  # write
+ * 用法：
+ *   pnpm --filter @real-time-transport/server exec tsx src/db/backfill-commute-directions.ts          # 试运行
+ *   pnpm --filter @real-time-transport/server exec tsx src/db/backfill-commute-directions.ts --apply  # 写入
  */
 import pg from 'pg'
 import { deriveCommuteDirections, resolveFavoriteLineId } from '@real-time-transport/shared'
@@ -40,7 +37,6 @@ interface FavRow {
   reverse_pinned_station_name: string | null
 }
 
-/** Load a direction's stop list from the local cache; null when not cached. */
 async function cachedDetail(lineId: string, direction: number): Promise<LineDetail | null> {
   const res = await pool.query(
     'SELECT detail_json FROM cached_transit_lines WHERE line_id = $1 AND direction = $2',
@@ -84,8 +80,8 @@ async function main(): Promise<void> {
       continue
     }
 
-    // Semantic direction d owns lineId resolveFavoriteLineId(fav, d) and its own
-    // stop numbering; key the details by that same semantic direction.
+    // 语义方向 d 拥有 lineId resolveFavoriteLineId(fav, d) 及它自己的站序编号；
+    // details 也以同一个语义方向为键。
     const details: { 0?: LineDetail, 1?: LineDetail } = {}
     for (const d of [0, 1] as const) {
       const lineId = resolveFavoriteLineId(fav, d)

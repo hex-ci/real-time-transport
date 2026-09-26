@@ -13,77 +13,56 @@ import {
 import type { ArrivalBasis } from './data-provenance.js'
 
 /**
- * F10's chain deduction — 我出门能不能赶上换乘点那班车, decided once, here.
+ * F10 的链路推演 —— 我出门能不能赶上换乘点那班车，只在这一处判定。
  *
- * A chain is RECORDED by the user (line + board station + alight station, leg by
- * leg) and never planned by this app: no route planning, no external planning
- * API, no invented connection. What this file does is walk the recorded chain
- * against live readings and answer one question — how much slack is there at the
- * tightest boarding — plus the case where the honest answer is 「不给结论」.
+ * 链由用户**记录**（线路 + 上车站 + 下车站，逐段），本应用从不规划它：
+ * 没有路线规划、没有外部规划 API、也不发明接驳。本文件做的是把记录的链拿去对实时读数，
+ * 回答一个问题：最紧的那次上车还剩多少余量；外加诚实答案是「不给结论」的情形。
  *
- * EVERY transfer point, and nothing past the last one. The product need is
- * 「在中间的某个换乘点，我能不能赶上这个换乘点的车」, so each ride leg's answer
- * stands on its own (which vehicle is boarded, how long the wait at that leg's
- * board station is, the margin for that boarding, and which vehicle the margin
- * measures) and the chain ENDS at its last alight station: there is no
- * destination, no walk past the end and no total arrival minute, because a chain
- * records an origin anchor and never a destination.
+ * 覆盖每一个换乘点，且止于最后一个：故每段乘车的答案各自成立
+ * （上哪辆车、在该段上车站等多久、那一次上车的余量、余量衡量的是哪辆车），
+ * 而链**终止**于最后一个下车站 —— 没有目的地、没有终点之后的步行、也没有总到达时刻，
+ * 因为链记录起点锚点而从不记录目的地。
  *
- * 余量带位为主，分钟数同时给 (PRD F10). Both come from ONE quantity, computed once:
- * `marginMinutes`. The band is a function of it and so is the number the row
- * prints, so a row cannot say 充裕 beside 「余量 1 分钟」. The values are read from
- * the rounded whole minutes the row displays (F1's own rule), not from raw
- * seconds: a verdict drawn from seconds that the numbers beside it cannot show is
- * the same disagreement in a different unit.
+ * 以余量带位为主、分钟数同时给出（PRD F10）。两者同出一个只算一次的量 `marginMinutes`：
+ * 带位是它的函数，行打印的数字也是，故一行不可能在「余量 1 分钟」旁边说 充裕。
+ * 取值都用行展示的整分钟（F1 自己的规则），而不是原始秒：
+ * 用旁边的数字显示不出的秒得出的结论，是同一种分歧换了个单位。
  *
- * Pure and synchronous: `now` is a parameter, nothing here reads a clock, a
- * socket, a database or a distance. Walking and cycling times are priced by the
- * path service and arrive as inputs; the user's own parameters (the wait
- * tolerance, the cycling extra) are configurable with named defaults, because the
- * zero-fabrication rule constrains UPSTREAM data, not the user's own settings.
+ * 纯函数且同步：`now` 是参数，此处不读时钟、socket、数据库或距离。
+ * 步行与骑行时长由路径服务计价并作为输入传入；用户自己的参数（等待容忍值、骑行附加）
+ * 有具名默认值，因为零编造约束的是**上游数据**，不是用户自己的设置。
  *
- * 段时长全部可溯源. A leg's alight minute is THE VEHICLE'S OWN ETA at its alight
- * station — the same vehicle that reaches the board station, found by the
- * provider's stable id (`LiveBusSchema.id`) — so a bus leg's drop-off time is a
- * live prediction rather than a station count times an average. A subway leg has
- * no observable vehicle at all today: its trains are generated from the timetable
- * at 135 s per station, which is why its minute is marked 排班推演 through F4's own
- * `vehicleProvenanceOf`/`arrivalProvenanceOf` and can never read as 实时 here.
+ * 段时长全部可溯源：某路段的到达分钟是**同一辆车**在其下车站的 ETA
+ * （按提供方稳定 id `LiveBusSchema.id` 找到），故公交的到达时刻是实时预测，而不是站数乘均值。
+ * 地铁今天没有任何可观测车辆：其列车按时刻表以 135 秒 / 站推演，
+ * 故经 F4 的 `vehicleProvenanceOf` / `arrivalProvenanceOf` 标记为 排班推演，在此永远读不成 实时。
  */
 
 /**
- * The connection leading into a ride leg — from the chain's origin anchor for the
- * first leg, and between two legs after that. The chain stores no mode (the
- * connection's duration is priced from the real station coordinates, and a stored
- * copy would drift into a second, contradictory fact), so it arrives as an input.
+ * 进入某乘车路段的接驳 —— 第一段来自链的起点锚点，其后是两段之间。
+ * 链不存模式（接驳时长由真实站坐标计价，存一份副本只会漂移成第二个矛盾的事实），故它作为输入传入。
  */
 export type ChainConnectionMode = 'walk' | 'cycle'
 
 /**
- * Why a leg's connection has no priced duration, as the caller that tried to
- * price it knows the cause.
+ * 某路段的接驳没有计价时长的原因，由尝试计价而知道原因的调用方给出。
+ * 引擎只见到一个事实 —— `connectionSeconds` 为 null —— 无法分辨为什么：
+ * 接驳在引擎之外计价，依据的是用户出发点的真实站坐标（第一段是链的已存锚点，
+ * 其后是上一段离开的车站），故只有调用方能知道命中了哪一个事实。
+ * 原因因此以代码传入，由引擎映射成页面读到的拒绝。
  *
- * The engine sees one fact — `connectionSeconds` is null — and cannot tell WHY:
- * a connection is priced outside it, from the real station coordinates of the
- * point the user sets off from (the chain's stored anchor for the first leg, and
- * the station the previous leg was left at after that), so the caller is the only
- * layer that ever knows which of these facts it hit. The cause therefore travels
- * in as a code and the engine maps it to the refusal the page reads.
+ * 这些是调用方的词而不是线上的词，每个原因逐一举名，使某个拒绝码背后的集合由机器陈述而非散文。
+ * 其中四个不给用户任何可做的事、共用同一个拒绝码；第五个是锚点，用户可以设置。
+ * 未解析的起点永远是那个锚点：自身下车站无法定位的路段会被拒绝，而拒绝会终止链，
+ * 故第一段之后的任何路段都不会由未解析的点装配而来。说不清原因的调用方就什么都不给
+ * （见 `ChainLegInput.connectionUnpricedReason`）。
  *
- * These are the caller's words, not the wire's, and each cause is named one by
- * one so that the set behind a refusal code is machine-stated rather than prose.
- * Four of them leave the user nothing to do and share one refusal code; the
- * fifth is the anchor, which the user can set. An unresolved origin is always
- * that anchor: a leg whose own alight station cannot be located is refused, and a
- * refusal ends the chain, so no leg after the first is ever assembled from an
- * unresolved point. A caller that cannot name the cause states none at all (see
- * {@link ChainLegInput.connectionUnpricedReason}).
- *
- * - `anchor-unset`       the chain's origin anchor was never saved, so there is no point to walk from at all
- * - `line-unavailable`   the leg's line detail could not be read, so its stored stations have no stop list to be located in
- * - `station-unlocated`  the leg's stored station is not in the stop list of the direction the leg runs in
- * - `station-without-coordinate` the direction's stop list carries the stored station but states no coordinate for it, so there is no point to walk to
- * - `route-unpriced`     both ends resolved and the path service priced no walking/cycling route between them
+ * - `anchor-unset`      链的起点锚点从未保存，根本没有可出发的点
+ * - `line-unavailable`  该路段的线路详情读不到，故其已存车站没有可定位的停靠列表
+ * - `station-unlocated` 该路段已存的车站不在该路段所行方向的停靠列表中
+ * - `station-without-coordinate` 该方向的停靠列表有该站但没给坐标，故没有可步行的目标点
+ * - `route-unpriced`    两端都解析成功而路径服务没计价出两者之间的步行 / 骑行路线
  */
 export type ChainConnectionUnpricedReason
   = | 'anchor-unset'
@@ -93,161 +72,111 @@ export type ChainConnectionUnpricedReason
     | 'route-unpriced'
 
 /**
- * Minutes a cycling connection costs beyond the riding itself: finding a bike and
- * parking it. A named default of the same class as F1's T — the user's own
- * parameter, not a reading — and PRD F10 asks for it to be configurable with a
- * default, so every entry point can override it (`cycleExtraMinutes`, or a leg's
- * own `transferExtraMinutes`). Nothing derives it from upstream data.
+ * 骑行接驳在骑行本身之外的花费：找车与停车。
+ * 与 F1 的 T 同类，是用户的参数而不是读数，且 PRD F10 要求它可配置并有默认值，
+ * 故每个入口都能覆盖它（`cycleExtraMinutes`，或某路段自己的 `transferExtraMinutes`）。
+ * 没有任何东西从上游数据推导它。
  */
 export const DEFAULT_CYCLE_EXTRA_MINUTES = 2
 
 /**
- * The largest margin that still counts as 紧 rather than 充裕.
- *
- * It is F1's platform tolerance itself, not a second number: T is 「站台等待容忍值
- * … 同时是安全边际」, so a chain that leaves MORE slack than the user tolerates
- * waiting has slack to spare, and one that leaves no more than that is 紧 —
- * 「就这几分钟」, the tolerance itself included. With the default tolerance of 3
- * minutes the 紧 band is therefore margins 1–3 minutes, NOT 1–2: verified against
- * live readings (a margin of 4 bands 充裕, a margin of 3 bands 紧, and the boundary
- * is inclusive because 3 IS the tolerance). The boundary is on the tight side,
- * exactly as F1's `hurry` is, so a one-leg chain and F1 cannot draw two verdicts
- * from the same walk and the same ETA.
+ * 仍算 紧 而非 充裕 的最大余量。
+ * 它就是 F1 的站台等待容忍值本身，不是第二个数字：容忍值同时是安全边际，
+ * 故余量多于用户愿意等待的链有富余，余量不超过它的即为 紧（含容忍值本身）。
+ * 默认容忍值 3 分钟时，紧 带为余量 1–3 分钟而**不是** 1–2，边界取闭区间因为 3 就是容忍值。
+ * 边界偏紧的一侧，与 F1 的 `hurry` 完全一致，故单段链与 F1 不会从同一次步行和同一个 ETA 得出两种结论。
  */
 export const CHAIN_TIGHT_MARGIN_MINUTES = DEFAULT_WAIT_TOLERANCE_MINUTES
 
 /**
- * The smallest margin this deduction can resolve, in whole displayed minutes.
+ * 本推演能分辨的最小余量，以整分展示。
+ * 1 是由必须覆盖的情形逼出来的，不是选定的分辨率：紧 带从 1 分钟到容忍值
+ * （`CHAIN_TIGHT_MARGIN_MINUTES`，默认 3），故 1 分钟必须归为 紧，
+ * 于是余量 0 成为**唯一**无法给出单一答案的余量（低于它车就是走了），
+ * 不可分辨带的宽度正好是一整分钟。
  *
- * 1 is forced by the cases this feature must cover, not chosen as a resolution.
- * The 紧 band runs from 1 minute up to the tolerance (`CHAIN_TIGHT_MARGIN_MINUTES`,
- * 3 by default), so a margin of 1 minute has to band as 紧 rather than as the
- * two-branch case — which leaves margin 0 as the ONLY margin that cannot be given
- * one answer (below it the vehicle has simply gone), and makes the width of the
- * unresolvable band exactly one whole minute. Narrowing it to 0 would print
- * 「就这几分钟」 beside a margin no reading can tell from −0.5 minutes; widening it
- * to 2 would swallow the 紧 case the plan requires.
- *
- * It is NOT the accuracy of the inputs, and it is not the resolution of a
- * displayed quantity either. A path-service duration carries no published
- * accuracy; a live reading may be up to `STALE_ARRIVAL_SECONDS` old when it is
- * judged; a subway minute is this app's own 135 s/station inference. None of that
- * is folded in here and none of it may be: that uncertainty is disclosed where it
- * is a fact about the data rather than about the row's arithmetic — the
- * provenance marks (`provenance`, per leg) say what KIND each minute is, and
- * `lastUpdatedAt` says how old the readings are. So a future reader must not
- * "fix" this constant by widening the band to cover them: the band states what
- * the row can distinguish, the marks state what the inputs are worth, and
- * merging the two would hide both.
+ * 它**不是**输入的精度，也不是被展示量的分辨率：路径服务时长没有公布的精度，
+ * 实时读数判定时可能已达 `STALE_ARRIVAL_SECONDS` 那么旧，地铁分钟是本应用自己的 135 秒 / 站推演。
+ * 这些都不折进此处，也不得折进来 —— 那些不确定性在它是关于数据而非关于行的算术的地方披露：
+ * 来源标记（每段的 `provenance`）说明每个分钟是**哪一种**，`lastUpdatedAt` 说明读数有多旧。
+ * 故后来者不得为了覆盖它们而「修正」本常量把带位加宽：带位陈述行能分辨什么，
+ * 标记陈述输入值多少，把两者合并会把两边都藏起来。
  */
 export const CHAIN_ERROR_MAGNITUDE_MINUTES = 1
 
 /**
- * Which side of the tolerance a chain's margin falls on, as the row states it.
+ * 链的余量落在容忍值的哪一侧，按行陈述的方式。
  *
- * - `comfortable`  充裕: more margin than the user tolerates waiting — 就是这班.
- * - `tight`        紧: inside the tolerance — the tolerance itself included, so
- *                  margins 1..3 分钟 with the default 3
- *                  (`CHAIN_TIGHT_MARGIN_MINUTES`) — 就这几分钟.
- * - `uncertain`    余量 below the resolution: two branches, no single answer.
- * - `insufficient` 不足: the vehicle the chain is timed against is gone — 实际是下一班.
+ * - `comfortable`  充裕：余量多于用户愿意等待的 —— 就是这班。
+ * - `tight`        紧：在容忍值之内，含容忍值本身，即默认 3 时余量 1..3 分钟 —— 就这几分钟。
+ * - `uncertain`    余量低于分辨率：两个分支，没有单一答案。
+ * - `insufficient` 不足：链所对的那辆车已经走了 —— 实际是下一班。
  */
 export type ChainMarginBand = 'comfortable' | 'tight' | 'uncertain' | 'insufficient'
 
 /**
- * Why no deduction was possible. A machine-readable code, never a sentence: the
- * web layer owns the zh-CN wording, and each of these is a DIFFERENT fact about
- * the data rather than a smaller version of one of the others.
+ * 为何无法推演。机器可读代码而非句子：中文措辞归 web 层，
+ * 且每一个都是关于数据的**不同**事实，而不是另一些的较小版本。
  *
- * 「没有可乘的车」 is deliberately FOUR codes, not one. Three of them are facts
- * about the service and one is a fact about this app's own reading, and the four
- * are decided where each is actually known: an empty board read and a board read
- * whose two halves share no vehicle are the SAME empty candidate list, and a
- * vehicle that left during the connection and one that left before the connection
- * began are the SAME empty boarding — so a single code would let the chain page
- * describe the wrong thing in three of the four cases.
+ * 「没有可乘的车」刻意是**四**个码而非一个：其中三个是关于服务的事实、一个是关于本应用自身读数的事实，
+ * 且四者分别在各事实真正被知道的地方判定 —— 空的看板读数与「两半读数没有共同车辆」是同一个空候选列表，
+ * 而「接驳期间走掉的车」与「接驳开始前就走掉的车」是同一个空上车集合，
+ * 故单一代码会让链页面在其中三种情形下描述错东西。
  *
- * `leg-recorded-backwards` is deliberately separate from `no-shared-vehicle`
- * because the two name different owners. An empty pair is normally either an
- * empty service or OUR two snapshots matching nothing; a leg that cannot be ridden
- * as recorded also makes the two reads disjoint, but the cause is the RECORD, which
- * the user can fix — and calling it 「两个读数没有对上的车」 would blame this app for
- * the user's own entry while quoting no fix. It is decided from the stored leg
- * itself, before any reading is looked at: nothing upstream can change it.
+ * `leg-recorded-backwards` 刻意与 `no-shared-vehicle` 分开，因为两者指向不同的责任人：
+ * 空配对通常是服务为空、或我们的两份快照对不上；而一段按记录无法乘坐的路段同样让两份读数不相交，
+ * 但原因是**记录**，用户可以修 —— 把它叫做「两个读数没有对上的车」是用用户自己的录入责备本应用，
+ * 且给不出任何修法。它由已存路段本身判定，在任何读数被查看之前：上游改变不了它。
  *
- * A SUBWAY leg stored the other way round is deliberately NOT this code. Two
- * directions of a bus are two lineIds, but two directions of a subway share one,
- * numbering the same station oppositely — so a lesser alight order there is a real
- * ride the other way, which the assembly reads in the opposite direction with both
- * orders translated into it. Only a bus stored backwards, and a leg whose two ends
- * are the SAME station on any line, are records this code names.
+ * 地铁路段记录反了刻意**不是**这个码：公交两个方向是两个 lineId，地铁两个方向共用一个、
+ * 对同一站反向编号 —— 故那里较小的下车站序是沿另一方向的真实乘车，
+ * 装配层按相反方向读取，并把两个站序都翻译进该编号。只有记录反了的公交路段，
+ * 以及任何线路上两端为**同一站**的路段，才是这个码所指的记录。
  *
- * - `no-legs`                      the chain carries no ride leg at all
- * - `station-unset`                a leg's board or alight station was never chosen
- * - `leg-recorded-backwards`       a leg's two ends are the same station, or a bus leg's alight station is not downstream of its board station
- * - `anchor-unset`                 the chain's origin anchor was never saved: the first leg has no origin to walk from at all
- * - `connection-unpriced`          a connection into a leg has no priced duration
- * - `no-live`                      a leg's line has no live reading
- * - `no-vehicle`                   the board read carried nothing: nothing is on its way to this board station
- * - `no-shared-vehicle`            both reads answered, but share no vehicle id — a fact about OUR reading, not the service
- * - `no-vehicle-after-connection`  vehicles were still coming when the user set off, but none was left once the connection was walked
- * - `no-vehicle-at-departure`      every vehicle had already reached this board station before the user could set off toward it
- * - `stale`                        a reading is older than F1's freshness limit
- * - `degraded`                     a fallback source answered for a leg
- * - `provenance-unknown`           a reading declares no source this build knows
- * - `inconsistent-live`            a vehicle's alight minute precedes its own board minute
+ * - `no-legs`                      链没有任何乘车路段
+ * - `station-unset`                某路段的上车或下车站从未选择
+ * - `leg-recorded-backwards`       某路段两端是同一站，或公交路段的到达站不在上车站的下游
+ * - `anchor-unset`                 链的起点锚点从未保存：第一段根本没有可出发的起点
+ * - `connection-unpriced`          进入某路段的接驳没有计价时长
+ * - `no-live`                      某路段的线路没有实时读数
+ * - `no-vehicle`                   看板读数什么都没带：没有车在开往这个上车站
+ * - `no-shared-vehicle`            两份读数都作答了，但没有共同车辆 id —— 这是关于**我们读数**的事实，不是关于服务的
+ * - `no-vehicle-after-connection`  用户出发时还有车要来，但接驳走完后一辆都不剩
+ * - `no-vehicle-at-departure`      用户来得及出发之前，每辆车都已到过这个上车站
+ * - `stale`                        某读数比 F1 的新鲜度上限更旧
+ * - `degraded`                     某路段由兜底源作答
+ * - `provenance-unknown`           某读数声明了本版本不认识的来源
+ * - `inconsistent-live`            某车辆的下车分钟早于它自己的上车分钟
  *
- * The exact cause set of the two connection codes, stated once so the page author
- * never has to guess which fact is behind one:
+ * 两个接驳码确切的原因集，陈述一次，使页面作者不必猜某个码背后是哪个事实：
  *
- *  - `anchor-unset` covers the chain's origin anchor and NOTHING else. It is the
- *    one cause of an unpriced connection the user can act on: a chain records an
- *    origin and never a destination, so an anchor that was never saved leaves no
- *    point to walk from at all, and the fix lives in 设置. The chain states it
- *    under the same word F1's own empty state uses for the same fact, and the
- *    page can render the same sentence with the same affordance. The converse
- *    holds too, and does so by precedence rather than by luck: the assembly asks
- *    for the anchor BEFORE it reads a leg's line or locates a station, so a chain
- *    whose anchor was never saved answers `anchor-unset` even when that leg's
- *    detail, its stop list or its route would also have failed. The user is told
- *    the cause they can repair rather than one they cannot.
- *  - `connection-unpriced` covers the four remaining causes, each of which leaves
- *    the user no action: the line's detail could not be read (`line-unavailable`)
- *    — an upstream read this app could not complete; a stored station is not in
- *    the direction's stop list (`station-unlocated`) — a record this build no
- *    longer reads that stop list with, and not something the page can repair. What
- *    keeps the stored pair in step on the way IN is the chain editor, where a
- *    station is chosen from the line's own stop list; the schema checks only the
- *    pair's own consistency (a name with its order, both or neither) and the leg's
- *    direction, and it never sees a stop list, so it cannot promise the pair is in
- *    one. Or the stop list does carry it there and states no coordinate for it
- *    (`station-without-coordinate`) — the record is intact and the position is
- *    what upstream never gave, so there is no point to walk to and no page can
- *    supply one. Or the path service priced no route between two ends that both
- *    resolved (`route-unpriced`). A caller that cannot name the cause at all
- *    states none and lands here too. Which cause fired is disclosed by a code,
- *    never by a quantity, and the page states one sentence for the code rather
- *    than pretending to know which of them fired.
+ *  - `anchor-unset` 只覆盖链的起点锚点，别无其他。它是接驳未计价中唯一用户可行动的原因：
+ *    链记录起点而从不记录目的地，故从未保存的锚点根本不留下可出发的点，修法在设置页。
+ *    链用 F1 自己的空状态对同一事实所用的同一个词陈述它，页面可以给出同样的句子与同样的入口。
+ *    反过来也成立，且靠的是**优先顺序**而不是运气：装配层在读取某路段的线路、
+ *    定位车站**之前**先问锚点，故锚点从未保存的链即使其详情、停靠表或路线也会失败时仍答 `anchor-unset`。
+ *    用户被告知的是他能修的原因，而不是他修不了的那个。
+ *  - `connection-unpriced` 覆盖其余四个原因，每一个都不给用户任何动作：
+ *    线路详情读不到（`line-unavailable`）—— 一次本应用无法完成的上游读取；
+ *    已存车站不在该方向的停靠列表里（`station-unlocated`）—— 一份记录，本版本不再用那个停靠列表来读它，
+ *    也不是页面能修的。让已存配对在**写入**时保持同步的是链编辑器（车站从线路自己的停靠列表里选），
+ *    而 schema 只校验配对自身的一致（站名带站序，二者同在或同缺）与路段方向，
+ *    它从来看不到停靠列表，故无法保证配对在列表里。
+ *    或停靠列表确实有该站却没给坐标（`station-without-coordinate`）—— 记录完好，位置是上游从未给出的，
+ *    故没有可步行的点，也没有任何页面能补上。或两端都解析成功而路径服务没计价出路线（`route-unpriced`）。
+ *    完全说不清原因的调用方也落在这里。命中的是哪个原因由代码披露、绝不由数量披露，
+ *    页面为该码写一句话，而不是假装知道是哪一个。
  *
- *    That ONE sentence must promise no retryability, because these four causes do
- *    NOT share a permanence. An unplaced stop (`station-without-coordinate`) is a
- *    gap in what upstream STATES and not a transient failure of this read: the stop
- *    list carries the stored station but states no coordinate for it, so nothing in
- *    the answer tells the page that asking again would find one — while nothing in
- *    it proves one never will, either, since a later refresh of the stop list could
- *    place the stop. An unpriced route (`route-unpriced`) is transient: both ends
- *    resolved and the path service simply priced no route between them at that
- *    moment, which the next read may price. 「稍后重试」 would be true of the last and
- *    unsupported by the first, on a row that cannot tell the page which one it is.
- *    So the sentence states only the fact the code carries — this connection has no
- *    priced duration — and promises neither a retry nor that there is nothing left
- *    to wait for, and it offers no action, because for these causes there is none
- *    the user can take.
+ *    那一句话不得承诺可重试，因为这四个原因**不**共享同一持久性：
+ *    未落点的站（`station-without-coordinate`）是上游**陈述**上的缺口，不是本次读取的暂时失败；
+ *    而没计价出的路线（`route-unpriced`）是暂时的，下次读取可能就计价得出。
+ *    「稍后重试」对后者为真、对前者没有依据，而这行无法告诉页面是哪一个。
+ *    故那句话只陈述该码携带的事实 —— 这段接驳没有计价时长 —— 既不承诺重试，
+ *    也不声称没有什么可等，且不给出动作，因为这些原因没有用户能做的事。
  *
- * `ChainConnectionUnpricedReason` is the caller's own vocabulary for those five
- * causes; the mapping from it to these codes is the engine's (see
- * `connectionRefusalCode`), so a cause can be stated precisely by the layer that
- * learned it without every precision becoming a wire code.
+ * `ChainConnectionUnpricedReason` 是调用方对这些原因的词汇；
+ * 它到这些码的映射属于引擎（见 `connectionRefusalCode`），
+ * 故知道原因的那一层可以精确陈述原因，而不必让每种精度都变成一个线上码。
  */
 export type ChainNoConclusionReason
   = | 'no-legs'
@@ -266,315 +195,259 @@ export type ChainNoConclusionReason
     | 'inconsistent-live'
 
 /**
- * One candidate vehicle, as the server assembled it from the live reading.
- *
- * Both minutes belong to the SAME vehicle, which is why the provider's id is
- * carried: a board ETA and an alight ETA that merely look alike would make the
- * ride duration meaningless. The provider's ids are stable across reads —
- * `LiveBusSchema.id` for a real bus, a generated train's own id for a subway line
- * — so one vehicle is followable from the station it is boarded at to the station
- * it is left at.
+ * 一辆候选车辆，由服务端从实时读数装配。
+ * 两个分钟属于**同一辆**车，故携带提供方的 id：仅看似相配的上车 ETA 与下车 ETA
+ * 会让乘车时长失去意义。提供方 id 跨读取稳定（真实公交用 `LiveBusSchema.id`，
+ * 地铁用生成列车自己的 id），故一辆车可以从上车站一路跟到下车站。
  */
 export interface ChainLegVehicle {
-  /** `LiveBusSchema.id`. */
+  /** 提供方稳定的车辆 id（即 `LiveBusSchema.id`）。 */
   vehicleId: string
-  /** Seconds until this vehicle reaches the leg's BOARD station. */
+  /** 本车抵达该段**上**车站的秒数。 */
   arrivalAtBoardSeconds: number
-  /** Seconds until the SAME vehicle reaches the leg's ALIGHT station. */
+  /** **同一辆**车抵达该段**下**车站的秒数。 */
   arrivalAtAlightSeconds: number
   /**
-   * How the alight minute came to exist (F4's `ArrivalBasis`). It qualifies the
-   * minute; it does not override the vehicle: a generated vehicle is 排班推演
-   * whichever basis produced its number.
+   * 到达分钟是怎么来的（F4 的 `ArrivalBasis`）。它限定该分钟，但不覆盖车辆：
+   * 生成的车无论哪个 basis 产生它的数，都是 排班推演。
    */
   basis: ArrivalBasis
 }
 
 /**
- * A leg's live reading: the line's own status plus the vehicles on their way.
- *
- * `dataSource` / `updatedAt` / `isDegraded` are the reading's, not the row's —
- * they belong to the response that produced every vehicle in it, which is why
- * freshness is judged here rather than per candidate.
+ * 某路段的实时读数：线路自己的状态，加上在途的车辆。
+ * `dataSource` / `updatedAt` / `isDegraded` 属于读数而非行 ——
+ * 它们属于产生其中每辆车的那个响应，故新鲜度在此判定而不是逐候选判定。
  */
 export interface ChainLegLive {
-  /** The source that answered, as the line's status declares it. */
+  /** 作答的来源，按线路状态的声明。 */
   dataSource: DataSourceType | null
-  /** When that reading was obtained, epoch ms. */
+  /** 该读数取得的瞬间（epoch 毫秒）。 */
   updatedAt: number
-  /** The aggregator's mark that a fallback source answered. */
+  /** 聚合器对「兜底源作答」的标记。 */
   isDegraded: boolean
-  /** Vehicles still to reach the board station. Any order; sorted before use. */
+  /** 仍在开往上车站的车辆。顺序任意，使用前排序。 */
   vehicles: readonly ChainLegVehicle[]
   /**
-   * Whether the leg's own line is running, as F3 derives it (`operatingStatusOf`).
+   * 该路段自己的线路是否在运营，按 F3 推导（`operatingStatusOf`）。
    *
-   * The F10 case of the rule that a service state must govern an empty answer:
-   * 「暂无来车」 before the first departure, after the last one and in the middle
-   * of a running day are three facts, and only the state tells them apart.
+   * 这是「服务状态必须支配空答案」这条规则的 F10 情形：首班前、末班后与运营日中途的
+   * 「暂无来车」是三件不同的事实，只有状态能分辨它们。
    *
-   * The DERIVATION is the station board's — one function, `operatingStatusOf`, so
-   * this path cannot invent a second status model — but the INPUT is not, and the
-   * two can therefore state different states for one line:
+   * 推导用的是站台看板那一个函数 `operatingStatusOf`，故本路径不会发明第二套状态模型；
+   * 但**输入**不是同一个，故两者可能对同一条线路给出不同状态：
    *
-   *  - this leg's state is the LINE's service hours, the `firstBusTime` /
-   *    `lastBusTime` its detail carries (`transit.service.ts`, `readChainLeg`);
-   *  - the board, where an official station timetable covers the platform, derives
-   *    its state from that TABLE's own first and last departure
-   *    (`getStationArrivals`, the `exact` branch), because that is the list it
-   *    shows.
+   *  - 本路段的状态来自**线路**的服务时刻，即其详情携带的首末班时间；
+   *  - 看板在官方站台时刻表覆盖该站台时，用那张表自己的首末班推导，因为那是它展示的列表。
    *
-   * For the one station this repo ships a published table for, the two
-   * values differ, so there is a real window in which the chain and the board
-   * disagree. That is stated rather than hidden: the chain reports the LINE's
-   * hours — a fact about the line — while a station's own table is a fact about the
-   * platform, which only the board reads. Deriving it costs no upstream call: it is
-   * a function of the leg's own detail and the clock.
+   * 故存在一段真实窗口，链与看板在其中不一致。这是如实说明而非隐藏：
+   * 链报的是**线路**的时刻（关于线路的事实），站台自己的表是关于站台的事实，只有看板读它。
+   * 推导不花上游调用：它是该路段自身详情与时钟的函数。
    */
   operatingStatus: OperatingStatus
   /**
-   * How many vehicles the BOARD read carried, before the two reads were matched
-   * by id.
+   * **看板**读数在两次读数按 id 匹配**之前**携带了多少辆车。
    *
-   * Exactly `vehicleArrivals(board)` for the board order — the rows still to
-   * reach that order, after upstream's already-passed filter. A row whose targeted
-   * reading published no arrival time for it IS counted: it is a real vehicle on
-   * its way, it is only its minute that is missing (this app no longer
-   * extrapolates one), and dropping it from this count would report an empty
-   * service for a platform that has a bus coming. It is NOT every bus the payload
-   * happened to carry and NOT the alight read's row count: the first mutation would
-   * count a vehicle that has already passed the board order (so the board read
-   * priced nothing while the payload still held it), and the second would count a
-   * vehicle the board read never carried — both flipping an empty SERVICE into
-   * 「两个读数没有对上的车」.
+   * 精确等于看板站序的 `vehicleArrivals(board)` —— 上游过滤掉已过站之后，仍要抵达该站序的行。
+   * 定向读数未发布到站时间的行**照样计入**：它是真实在途车辆，缺的只是分钟
+   * （本应用不再外推），把它从这个计数里丢掉会把一个有车要来的站台报成服务为空。
+   * 它**不是** payload 恰好携带的每一辆车，也**不是**下车读数的行数：
+   * 前者会把已过看板站序的车算进来（于是看板没计价而 payload 仍持有它），
+   * 后者会算进看板读数从未携带的车 —— 两者都会把空的**服务**翻成「两个读数没有对上的车」。
    *
-   * It is the ONE fact that separates 「没有可乘的车」 from 「两个读数没有对上的
-   * 车」: an empty `vehicles` with nothing on the way is a statement about the
-   * service, and the same empty `vehicles` beside vehicles that were on the way
-   * is a statement about this app's own reading. It is at least `vehicles.length`
-   * whenever the board read's rows are a subset of the alight read's, which holds
-   * for a leg whose ALIGHT stop is further along in the direction the leg is READ:
-   * the stored alight order downstream of the stored board order, or — for a subway
-   * leg recorded the other way round — the two translated orders the assembly reads
-   * in the opposite direction. The relation cannot hold for the cases
-   * `leg-recorded-backwards` refuses (a bus leg stored backwards, a station-to-
-   * itself leg), which is why those are decided first.
+   * 它是区分「没有可乘的车」与「两个读数没有对上的车」的**唯一**事实：
+   * 空的 `vehicles` 且没有车在途是关于服务的话，同样的空 `vehicles` 旁边却有在途车辆则是关于本应用读数的话。
+   * 当看板读数的行是下车读数行的子集时它至少为 `vehicles.length`，
+   * 这对**下**车站位于该路段所读方向更下游的路段成立：已存下车站序在上车站序的下游，
+   * 或 —— 对反向记录的地铁路段 —— 装配层按相反方向读取时翻译出的那两个站序。
+   * 这条关系对 `leg-recorded-backwards` 拒绝的情形不成立，故那些先判定。
    */
   boardVehiclesOnTheWay: number
 }
 
-/** One ride leg as the deduction needs it: the stored leg plus what was resolved for it. */
+/** 推演所需的一条乘车路段：已存的路段，加上为它解析出的东西。 */
 export interface ChainLegInput {
-  /** The stored leg: the line, and the board/alight stations (both nullable). */
+  /** 已存的路段：线路，以及上 / 下车站（两者皆可空）。 */
   leg: CommuteChainLeg
   /**
-   * Seconds of the connection leading INTO this leg, as the path service priced
-   * it. `null` when it could not be priced — then nothing is deduced, because the
-   * connection IS the comparison. (F10 stores no connection: it is derived from
-   * the real station coordinates.)
+   * 进入本路段的接驳秒数，由路径服务计价。无法计价时为 `null` —— 那时什么都不推演，
+   * 因为接驳**就是**比较项。（F10 不存接驳：它由真实站坐标推导。）
    */
   connectionSeconds: number | null
   /**
-   * Why the connection has no priced duration, as the caller that priced it knows
-   * the cause.
+   * 接驳为什么没有计价时长，由尝试计价的调用方给出原因。
    *
-   * Meaningful exactly where `connectionSeconds` is null: a leg with a priced
-   * connection has no missing fact to explain, so a reason stated beside one is
-   * ignored. ABSENT when the caller cannot name the cause, which is a state of
-   * its own rather than a reason — it is the only way to reach
-   * `connection-unpriced` with no cause behind it.
+   * 只在 `connectionSeconds` 为 null 时才有意义：已计价接驳的路段没有缺失的事实要解释，
+   * 故与它并列给出的原因会被忽略。调用方说不清原因时**缺省** ——
+   * 那是它自己的一个状态而不是一个原因，也是在不带任何原因的情况下进入
+   * `connection-unpriced` 的唯一途径。
    */
   connectionUnpricedReason?: ChainConnectionUnpricedReason
-  /** How that connection is travelled. Defaults to walking. */
+  /** 该接驳的出行方式。默认步行。 */
   connectionMode?: ChainConnectionMode
-  /** The leg's live reading, or `null` when the line was not read. */
+  /** 本路段的实时读数；线路未被读取时为 `null`。 */
   live: ChainLegLive | null
 }
 
-/** Everything the deduction needs. All of it is a fact the caller obtained — no field is optional for convenience. */
+/** 推演所需的全部输入。每项都是调用方取得的事实 —— 没有字段为了便利而可选。 */
 export interface CommuteChainDeductionInput {
-  /** The chain's ride legs, in order. */
+  /** 链的乘车路段，按顺序。 */
   legs: readonly ChainLegInput[]
-  /** Injected clock (epoch ms): freshness is judged against this, never against a clock read in here. */
+  /** 注入的时钟（epoch 毫秒）：新鲜度据此判定，绝不读此处的时钟。 */
   now: number
-  /** Overrides F1's tolerance for the 充裕/紧 boundary. */
+  /** 覆盖 F1 的容忍值，用于 充裕 / 紧 边界。 */
   tightMarginMinutes?: number
-  /** Overrides {@link DEFAULT_CYCLE_EXTRA_MINUTES} for legs that configured no extra of their own. */
+  /** 覆盖 `DEFAULT_CYCLE_EXTRA_MINUTES`，用于自身未配置附加时间的路段。 */
   cycleExtraMinutes?: number
 }
 
-/** One leg of the plan: the vehicle boarded and everything the row shows about it. */
+/** 方案中的一段：所上的车，以及行展示的关于它的一切。 */
 export interface ChainLegDeduction {
-  /** The stored leg's `seq`. */
+  /** 已存路段的 `seq`。 */
   seq: number
   lineId: string
   lineName: string
-  /** The vehicle this leg boards under the plan. */
+  /** 本段按方案所上的车。 */
   vehicleId: string
   /**
-   * The vehicle `marginMinutes` is measured against — THE vehicle that was next
-   * at this board station when the user set off (the reference), named so the
-   * margin cannot be printed beside the wrong bus.
+   * `marginMinutes` 所衡量的车辆 —— 用户出发时在该上车站**下一个**到的那辆车（参考车），
+   * 单独点名是为了让余量不可能印在错误的公交旁边。
    *
-   * It equals `vehicleId` exactly when the margin is zero or more: the reference
-   * has not gone, so it is also the one boarded. They differ in `insufficient`,
-   * where the reference has gone and the plan is the next vehicle — and that is
-   * precisely the row that would otherwise state 「余量 -2 分」 beside `vehicleId`.
+   * 余量为零或正时它恰等于 `vehicleId`：参考车还没走，故它也是被上的那辆。
+   * 两者在 `insufficient` 时不同 —— 参考车已走，方案是下一辆 ——
+   * 而那正是否则会把「余量 -2 分」印在 `vehicleId` 旁边的行。
    *
-   * The equivalence needs the ready moment (this leg's board station, once its
-   * connection is walked) to be no EARLIER than the set-off moment — a
-   * non-negative leg extra. A negative extra would put the user at the platform
-   * before they set off, make a vehicle that left before that moment look
-   * catchable, and measure the margin against a later vehicle than the one it
-   * names; the engine therefore clamps the effective extra at zero (see
-   * `extraMinutes`), so the equality is unconditional for every caller — not only
-   * for the ones whose stored `transferExtraMinutes` the schema guards.
+   * 该等价关系需要就绪时刻（走完接驳后到达本段上车站）不**早于**出发时刻，即路段附加时间非负。
+   * 附加时间为负会把用户放到他们出发之前的站台，让此前已走的车看起来赶得上，
+   * 并把余量衡量到比它点名的车更晚的一辆上；故引擎把有效附加时间钳到 0（见 `extraMinutes`），
+   * 使该等价对每个调用方都无条件成立 —— 而不只对 schema 守住了 `transferExtraMinutes` 的那些。
    */
   referenceVehicleId: string
-  /** F4's mark for this leg's alight minute. Never null once a chain is deduced. */
+  /** 本段到达分钟的 F4 标记。链一旦推演出来就绝不为 null。 */
   provenance: DataProvenance
   /**
-   * F3's operating state for this leg's line, derived from the SAME reading the
-   * leg's answer came from: 首班前 / 运营中 / 已过末班 / 未知. It travels with
-   * every leg so a page can state the service state beside a row that has little
-   * or nothing on the way, without a second read of the line.
+   * 本路段线路的 F3 运营状态，由该段答案所依据的**同一个**读数导出：
+   * 首班前 / 运营中 / 已过末班 / 未知。它随每段出行，
+   * 使页面可以在几乎或完全没有来车的行旁陈述服务状态，而无需再读一次线路。
    */
   operatingStatus: OperatingStatus
   /**
-   * Whole minutes of slack AT THE BOARD STATION: this vehicle's own arrival
-   * minute there, minus the minute the USER gets there. It is the platform wait,
-   * not 「from now」 — a first leg behind a 5-minute connection whose vehicle
-   * boards 12 minutes out states 7, and a later leg states what is left after
-   * the ride before it (its connection included). Never negative: the boarded
-   * vehicle is by construction the first one this user has NOT already missed
-   * (`marginMinutes` is where missing one is stated, signed).
+   * **在上车站**的整分余裕：本车在那里自己的到达分钟，减去**用户**到那里的分钟。
+   * 它是站台等待而不是「从现在起」—— 一个 5 分钟接驳后的首段、车在 12 分钟处上车，报 7；
+   * 更靠后的路段报的是它前一段乘车（含其接驳）之后剩下的。永不为负：
+   * 被上的车按构造就是这个用户尚未错过的第一辆（错过一辆由 `marginMinutes` 有符号陈述）。
    */
   waitMinutes: number
-  /** Whole minutes from now until it reaches the alight station. */
+  /** 从现在到它抵达下车站的整分时长。 */
   alightMinutes: number
-  /** Whole minutes the ride takes: this leg's alight minute minus its board minute. */
+  /** 乘车的整分时长：本段到达分钟减其上车分钟。 */
   rideMinutes: number
   /**
-   * Signed slack at this boarding, in whole minutes: the vehicle that was next
-   * when the user set off toward this station, minus the moment the user gets
-   * there. Negative means that vehicle is gone and the plan below it is the next
-   * one; zero is inside the error magnitude and is read as `uncertain`.
+   * 这次上车的带符号整分余量：用户出发去该站时下一个到的那辆车，减去用户到那里的时刻。
+   * 负值表示那辆车已走、其下方案是下一辆；0 在误差量级之内，读作 `uncertain`。
    */
   marginMinutes: number
 }
 
-/** One reading of an unresolved margin. */
+/** 不可分辨余量的一种读法。 */
 export interface ChainBranch {
-  /** The vehicle under this reading, or `null` when nothing follows. */
+  /** 该读法下的车辆；后面没有车时为 `null`。 */
   vehicleId: string | null
-  /** Whole minutes until that vehicle reaches the alight station, from now; `null` when it is not known. */
+  /** 从现在到该车抵达下车站的整分时长；未知时为 `null`。 */
   alightMinutes: number | null
 }
 
-/** The two readings of a margin too small to resolve — 赶得上就是 A 班，赶不上就是 B 班. */
+/** 小到无法分辨的余量的两种读法 —— 赶得上就是 A 班，赶不上就是 B 班。 */
 export interface ChainBranches {
-  /** The vehicle the chain is timed against is made. */
+  /** 链所对的那辆车赶上了。 */
   asPlanned: ChainBranch
-  /** It is not, and the next vehicle is the one actually taken. */
+  /** 没赶上，实际乘的是下一辆。 */
   nextVehicle: ChainBranch
 }
 
 /**
- * A deduced chain: the band, the margin it came from, and the plan behind it.
+ * 推演出的链：带位、它出自的余量，以及其后的方案。
  *
- * `marginMinutes` is the BINDING value — the smallest margin of the chain, the
- * one `band` is read from — and `legs` carries each leg's own margin beside it,
- * so the row can show which boarding is the tight one. `branches` is present
- * exactly when the margin is inside the error magnitude and is the only case
- * where the row states two outcomes instead of one.
+ * `marginMinutes` 是**决定性**的值 —— 链中最小的余量，`band` 由它读出 ——
+ * 而 `legs` 每段各自携带自己的余量，使行能指出哪次上车是紧的。
+ * `branches` 恰在余量落在误差量级内时出现，也是行给出两种结果而非一种的唯一情形。
  */
 export interface ChainDeduction {
   status: 'deduced'
   band: ChainMarginBand
-  /** The tightest margin of the chain, in whole minutes, signed. */
+  /** 链中最紧的余量，整分且带符号。 */
   marginMinutes: number
-  /** The `seq` of the leg that margin belongs to. */
+  /** 该余量所属路段的 `seq`。 */
   bindingSeq: number
   legs: readonly ChainLegDeduction[]
   /**
-   * One mark for the whole chain, and `null` when its legs do not agree: one
-   * word would then be false about part of the chain, so each leg's own mark is
-   * what the row states.
+   * 整条链的一个标记；各段不一致时为 `null`，
+   * 因为那时一个词会对链的一部分说谎，行改为陈述各段自己的标记。
    */
   provenance: DataProvenance | null
-  /** The oldest reading this deduction used, epoch ms. */
+  /** 本推演所用的最旧读数的瞬间（epoch 毫秒）。 */
   lastUpdatedAt: number
-  /** Present only when `band` is `uncertain`. */
+  /** 仅当 `band` 为 `uncertain` 时出现。 */
   branches?: ChainBranches
 }
 
 /**
- * Which recorded leg a refusal is about: the sequence the chain stores it under,
- * the line's stored id and its stored name.
+ * 一次拒绝是关于哪一条已记录的路段：链存它的序号、线路的已存 id 与已存名。
  *
- * These travel together because they are one identity — 「哪一段、哪条线」 — and
- * each alone is useless to a page: a bare `seq` names no line, and a name could be
- * repeated on a chain. `lineId` is here so a refusal row can offer the SAME line
- * affordance a deduced row does (`ChainLegDeduction.lineId`): opening the line the
- * refusal is about needs its id, and without it the page would have to fetch the
- * chain again just to learn what its own refusal already named.
+ * 三者同行，因为它们是一个身份 ——「哪一段、哪条线」——
+ * 单独任何一个对页面都无用：裸 `seq` 说不出线路，而名字在同一条链上可能重复。
+ * `lineId` 在此是为了拒绝行能提供与已推演行相同的线路入口
+ * （`ChainLegDeduction.lineId`）：打开被拒绝的那条线路需要它的 id，
+ * 否则页面得为了知道它自己的拒绝已经点出的东西而重取一次链。
  *
- * None of the three is a fact about a READING; all are facts of the RECORD, which
- * is why they can be stated for a refusal whose leg was never read.
+ * 三者都不是关于**读数**的事实，都是关于**记录**的事实，故能为一段从未被读取的路段陈述。
  */
 export interface ChainNoConclusionLeg {
-  /** The stored leg's `seq`, 0-based, exactly as the chain holds it. */
+  /** 已存路段的 `seq`（0 基），与链持有的完全一致。 */
   seq: number
-  /** The leg's stored `lineId` — the line the refusal is about. */
+  /** 该路段已存的 `lineId` —— 拒绝所针对的线路。 */
   lineId: string
-  /** The leg's stored line name — what the row calls the line that refused. */
+  /** 该路段已存的线路名 —— 行用来称呼那条拒绝的线路。 */
   lineName: string
 }
 
 /**
- * No deduction is possible, and which fact prevented it.
+ * 无法推演，以及是哪个事实阻止了它。
  *
- * A refusal is a code plus WHICH leg produced it, never a quantity about the
- * answer. The rule that nothing may sit beside a refusal is about numbers that
- * could be mistaken for an answer — a margin, a minute, a vehicle — and
- * `leg` is not one of those: it names the transfer point that refused (「第三段换
- * 乘点」) and the line there, which a two-leg chain cannot otherwise state at all.
- * The distinction is kept deliberately: `leg` carries no station, no minute and
- * no count, and a reader must not "complete" it into one.
+ * 一次拒绝是一个码加上**哪一段**产生了它，绝不是关于答案的数量。
+ * 「拒绝旁边不放任何东西」这条规则针对的是会被误认成答案的数字 —— 余量、分钟、车辆 ——
+ * 而 `leg` 不是其中之一：它点出拒绝的那个换乘点（「第三段换乘点」）与其线路，
+ * 两段链否则根本陈述不了它。该区分是刻意保留的：
+ * `leg` 不带车站、不带分钟、不带计数，读者不得把它「补全」成那样。
  *
- * `updatedAt` and `operatingStatus` are the refusing leg's own reading — its
- * obtained-at and its F3 service state — and are absent when that leg was never
- * read (`no-live`, and every reason decided before a reading is needed). They
- * describe the data rather than the answer: F11's 最后更新时间 can sit beside the
- * refusal, and 首班前 / 已过末班 can govern an empty one, without a second read.
+ * `updatedAt` 与 `operatingStatus` 是拒绝路段的自身读数 —— 它的取得时刻与 F3 服务状态 ——
+ * 该路段从未被读取时缺省（`no-live`，以及每个在需要读数之前就判定出的原因）。
+ * 它们描述数据而非答案：F11 的最后更新时间可以并列在拒绝旁，
+ * 首班前 / 已过末班 也可以支配一个空答案，而无需第二次读取。
  */
 export interface ChainNoConclusion {
   status: 'no-conclusion'
   reason: ChainNoConclusionReason
-  /** The leg this refusal is about. Absent only for `no-legs`, which names no leg. */
+  /** 拒绝所针对的路段。仅 `no-legs` 缺省，它不点任何路段。 */
   leg?: ChainNoConclusionLeg
-  /** When the refusing leg's reading was obtained, epoch ms. Absent when it was not read. */
+  /** 拒绝路段读数取得的瞬间（epoch 毫秒）；该段未被读取时缺省。 */
   updatedAt?: number
-  /** The refusing leg's line service state. Absent when it was not read. */
+  /** 拒绝路段的线路服务状态；该段未被读取时缺省。 */
   operatingStatus?: OperatingStatus
 }
 
 export type CommuteChainDeduction = ChainDeduction | ChainNoConclusion
 
 /**
- * One recorded chain, with its own deduction — the shape the chain page reads.
+ * 一条已记录的链及其自己的推演 —— 链页面读到的形状。
  *
- * `deduction` is the engine's own {@link CommuteChainDeduction}, sent through
- * unchanged: the band, the minute and every 「不给结论」 reason are codes, and the
- * web layer owns every word the user reads. Nothing is added to it here, because
- * anything the server had to explain would be a second opinion about the same
- * readings.
+ * `deduction` 是引擎自己的 `CommuteChainDeduction`，原样穿出：
+ * 带位、分钟与每条「不给结论」的原因都是码，用户读到的每个字归 web 层。
+ * 此处不加任何东西，因为服务端必须解释的任何东西都是对同一批读数的第二种意见。
  *
- * The chain's leg rows are deliberately NOT echoed beside it: each leg's answer
- * is in `deduction.legs`, and carrying the stored stations again would invite a
- * page to render a recorded platform and a live minute as if they came from one
- * place. The identifying fields are here because an answer has to say WHICH
- * recorded chain it belongs to.
+ * 链的路段行刻意**不**并列回显：每段的答案在 `deduction.legs` 里，
+ * 再携带一次已存车站会诱使页面把一个记录下来的站台与一个实时分钟渲染成来自同一处。
+ * 标识字段在此，因为一个答案必须说明它属于哪条已记录的链。
  */
 export interface CommuteChainDeductionView {
   chainId: string
@@ -585,17 +458,13 @@ export interface CommuteChainDeductionView {
 }
 
 /**
- * The answer for one commute purpose: every chain serving it, each walked against
- * the same readings.
+ * 某个通勤用途的答案：服务它的每条链，各自对同一批读数推演。
  *
- * One response rather than one per chain. The page shows the several chains of
- * the purpose the user is in, and N requests could be served from N poll windows
- * — the page would then compare 余量 computed from readings of different ages,
- * which is the 跳变 the PRD rules out. It also keeps the whole purpose on one set
- * of 18 s cache entries.
+ * 一次响应而非每条链一次：页面展示用户所处用途的多条链，N 个请求可能由 N 个轮询窗口服务 ——
+ * 页面随后就会比较由不同新旧度读数算出的余量，而那是 PRD 排除的跳变。
+ * 它也把整个用途保持在同几份 18 秒缓存上。
  *
- * `chains: []` is a real answer — this user has recorded none for this purpose —
- * and not an error.
+ * `chains: []` 是真实答案 —— 该用户没有为此用途记录任何链 —— 不是错误。
  */
 export interface CommuteChainDeductions {
   purpose: CommuteChainPurpose
@@ -603,28 +472,25 @@ export interface CommuteChainDeductions {
 }
 
 /**
- * The band a margin falls in.
- *
- * Exported because the mapping IS the row's contract: the band and the minutes
- * printed beside it must be two views of one number, and a caller (or a test)
- * holding the number can check that without re-deriving the thresholds.
+ * 余量落入的带位。
+ * 导出是因为该映射**就是**行的契约：带位与印在它旁边的分钟必须是同一个数字的两种视图，
+ * 持有该数字的调用方（或测试）据此校验，而不必重新推导阈值。
  */
 export function chainMarginBandOf(
   marginMinutes: number,
   tightMarginMinutes: number = CHAIN_TIGHT_MARGIN_MINUTES,
 ): ChainMarginBand {
-  // Below the resolution of the quantity itself: the sign is not knowable.
+  // 低于该量自身的分辨率：符号无从得知。
   if (Math.abs(marginMinutes) < CHAIN_ERROR_MAGNITUDE_MINUTES) return 'uncertain'
-  // The vehicle the chain is timed against has already gone.
+  // 链所对的那辆车已经走了。
   if (marginMinutes < 0) return 'insufficient'
-  // Inside the tolerance, on F1's own boundary: leave now or lose it.
+  // 在容忍值之内，F1 自己的边界：现在就走，否则赶不上。
   if (marginMinutes <= tightMarginMinutes) return 'tight'
   return 'comfortable'
 }
 
 /**
- * Walk the recorded chain against the live readings, or say why it cannot be
- * walked. Synchronous and without I/O; see the file header for the rules.
+ * 把已记录的链拿去对实时读数推演，或说明为何推演不了。同步且无 I/O；规则见文件头。
  */
 export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteChainDeduction {
   if (input.legs.length === 0) return noConclusion('no-legs')
@@ -633,58 +499,42 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
   const cycleExtraMinutes = input.cycleExtraMinutes ?? DEFAULT_CYCLE_EXTRA_MINUTES
 
   const plans: LegPlan[] = []
-  /** The instant the user is free to start this leg's connection: now, then each alight moment. */
+  /** 用户可以开始本段接驳的瞬间：先是现在，其后是各下车时刻。 */
   let atSeconds = 0
 
   for (const [index, item] of input.legs.entries()) {
     const leg = item.leg
-    /** WHICH leg a refusal here is about: the stored seq and the line's own id and name. */
+    /** 此处拒绝关于哪一段：已存 seq，以及线路自己的 id 与名。 */
     const who: ChainNoConclusionLeg = { seq: leg.seq ?? index, lineId: leg.lineId, lineName: leg.lineName }
-    // An unset station is a legitimate state of a recorded chain, not an error to
-    // paper over: nothing about this leg can be located in a line's stop list.
+    // 未设置的站是已记录链的合法状态，不是要糊过去的错误：
+    // 本路段没有任何东西能在某条线路的停靠列表里定位。
     if (
       leg.boardStationName === null || leg.boardStationOrder === null
       || leg.alightStationName === null || leg.alightStationOrder === null
     ) {
       return noConclusion('station-unset', who)
     }
-    // Without the connection there is nothing to compare a departure against.
-    // WHY it is missing is not knowable in here — the engine never prices a
-    // connection — so the caller that tried states the cause and this maps it to
-    // the code the page reads (see `ChainConnectionUnpricedReason`).
+    // 没有接驳就没有可与出发比较的东西。它为什么缺失在此无从得知 —— 引擎从不计价接驳 ——
+    // 故由尝试过的那一位陈述原因，这里把它映射成页面读到的码（见 `ChainConnectionUnpricedReason`）。
     if (item.connectionSeconds === null) {
       return noConclusion(connectionRefusalCode(item.connectionUnpricedReason), who)
     }
-    // A leg must run in ONE direction of its line, and only the lineId says which
-    // way is downstream. On a bus the two ways are two distinct lineIds, so a stored
-    // `lineId` names one of them and an alight order below the board order is the
-    // user's own entry the wrong way round. It must be decided HERE, ahead of the
-    // empty-pair check below: upstream drops a vehicle once it is past the requested
-    // order, so such a leg's two targeted reads share no id, and reporting that as
-    // 「两个读数没有对上的车」 would blame this app's reading for the user's entry
-    // while quoting no fix (see `ChainNoConclusionReason`).
-    //
-    // On a subway the ONE lineId carries both ways while numbering the same station
-    // oppositely, so `alight < board` is a real ride the other way. The assembly
-    // resolves that direction from these very orders, reads the opposite direction's
-    // stop list and live data with both orders translated into its numbering, and
-    // the reading handed here is already the leg's own — there is nothing to refuse.
-    // (The subway test is the project's own convention rather than a second
-    // predicate: the `subway_` id prefix is what routes a read to the subway engine
-    // — `subway-router.ts`, `universal-subway.ts`, `transit.service.ts` — so both
-    // layers ask the same question of the same field.)
-    //
-    // Boarding and alighting at ONE station is not a ride on any line, whatever the
-    // mode: equality is refused for a bus and a subway alike.
-    //
-    // It sits AFTER the connection check on purpose: a PRICED connection means both
-    // stored stations located in a stop list, so the two orders compare real
-    // platforms on this line. A leg whose connection could not be priced is
-    // therefore answered for by the code its cause maps to (see
-    // `connectionRefusalCode`) — for a stored pair that did not locate, the generic
-    // `connection-unpriced` — which is that leg's honest diagnosis, and flipping
-    // its two ends would not be the fix. The schema rejects a bad record on write;
-    // this is the same rule at the read end, for a row that is already stored.
+    // 路段必须沿线路的**一个**方向运行，只有 lineId 说明哪个方向是下游。
+    // 公交两个方向是两条不同的 lineId，故已存的 `lineId` 已指明其一，下车站序低于上车站序就是用户录入反了。
+    // 必须在下面空配对检查**之前**判定：上游在车辆越过请求站序后会丢掉它，
+    // 故这种路段的两份定向读数没有共同 id，把它报成「两个读数没有对上的车」
+    // 是用用户自己的录入责备本应用的读数，且给不出修法（见 `ChainNoConclusionReason`）。
+    // 地铁上一条 lineId 承载两个方向并对同一站反向编号，故 alight < board 是沿另一方向的真实乘车：
+    // 装配层按这两个站序解析出该方向，读取反方向的停靠表与实时数据并把两个站序翻译进它的编号，
+    // 交到这里的读数已经是本路段自己的 —— 没有什么可拒绝的。
+    // （地铁判定用的是项目自身约定而非第二个谓词：`subway_` id 前缀正是把读取路由到地铁引擎
+    // 的那个约定，故两层对同一字段问同一个问题。）
+    // 任何线路上在同一站上下车都不是一次乘车：公交与地铁都拒绝相等。
+    // 它刻意排在接驳检查**之后**：已计价的接驳意味着两个已存车站都在停靠列表里定位到，
+    // 故两个站序比较的是这条线上真实的站台。接驳无法计价的路段因此由其原因映射成的码作答
+    // （见 `connectionRefusalCode`）—— 对没能定位的已存配对就是通用的 `connection-unpriced` ——
+    // 那才是该路段诚实的诊断，把两端对调不是修法。
+    // schema 在写入时拒绝坏记录；这里是同一条规则在读取端，针对一行已经存下来的数据。
     const runsDownstream = leg.alightStationOrder > leg.boardStationOrder
     const reverseSubway = leg.alightStationOrder < leg.boardStationOrder
       && leg.lineId.startsWith('subway_')
@@ -695,49 +545,34 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
     const live = item.live
     if (live === null) return noConclusion('no-live', who)
 
-    // F1's freshness rule, reused rather than restated: a reading past its limit
-    // or served by a fallback source supports no conclusion.
+    // F1 的新鲜度规则，复用而不重述：超过上限或由兜底源作答的读数不支持结论。
     const trust = arrivalTrust({ isDegraded: live.isDegraded, updatedAt: live.updatedAt, now: input.now })
     if (trust !== 'ok') return noConclusion(trust, who, live)
 
-    // F4 decides the KIND of vehicle, from the source that answered. An unknown
-    // source yields no mark, and a leg with no mark cannot be concluded on.
+    // F4 从作答的来源判定车辆的**种类**。未知来源不产生标记，而没有标记的路段无法给出结论。
     const vehicle = vehicleProvenanceOf(live.dataSource)
     if (vehicle === null) return noConclusion('provenance-unknown', who, live)
 
     const candidates = [...live.vehicles].sort(byBoardArrival)
-    // Nothing paired — and TWO different facts produce this one empty list. The
-    // board read carried nothing (nothing is on the way to this station), or it
-    // carried vehicles and the two targeted reads share none of their ids — a
-    // fact about our OWN reading, not about the service. It also covers the case
-    // where the vehicles are there but nobody published a time for them: they were
-    // counted, they could not be priced, and 「暂时无法确认可乘的班车」 is the
-    // truthful answer (「暂时没有开往这一站的车」 would not be).
-    // `boardVehiclesOnTheWay` is the board read's own carried count, so the two
-    // are told apart rather than collapsed into 「没有可乘的车」.
+    // 没有任何配对 —— 而这一个空列表由两个不同的事实产生：看板读数什么都没带
+    // （没有车在开往这个站），或它带了车而两份定向读数没有共同 id
+    // （这是关于**我们读数**的事实，不是关于服务的）。它也覆盖车在但没人发布它们的时间这一情形：
+    // 它们被计入了、无法计价，而「暂时无法确认可乘的班车」才是诚实的答案
+    // （「暂时没有开往这一站的车」不是）。`boardVehiclesOnTheWay` 是看板读数自己的携带计数，
+    // 故两者被区分开而不是塌成「没有可乘的车」。
     if (candidates.length === 0) {
       return noConclusion(live.boardVehiclesOnTheWay === 0 ? 'no-vehicle' : 'no-shared-vehicle', who, live)
     }
 
-    // A leg's OWN extra applies to its connection whatever the mode: the stored
-    // field is that leg's `transfer_extra_minutes` — minutes added to the
-    // connection leading INTO the leg — and neither the field nor the chain
-    // names a mode, so the engine cannot know a configured extra was meant for
-    // cycling. Applying it to a walking connection too is the intended reading,
-    // and it only ever tightens the margin: the user's own number is honoured
-    // rather than dropped because the mode that motivated it is not stored. The
-    // DEFAULT extra is the mode-specific one — added for a cycling connection
-    // and nothing else, because 找车与停车 is a cost of cycling and of no other
-    // mode.
-    //
-    // CLAMPED at zero, because it is a cost and can only move the ready moment
-    // LATER. A negative one would put the user at the platform before they set
-    // off, let a vehicle that left before that moment look catchable, and then
-    // measure `marginMinutes` against a vehicle later than the one it names
-    // `referenceVehicleId` — breaking the tie `ChainLegDeduction` states. The
-    // stored field is guarded by the schema (`min(0)`), but `cycleExtraMinutes`
-    // and a direct caller are not, and the invariant must not depend on a
-    // caller's schema.
+    // 路段自己的附加时间适用于它的接驳，无论何种方式：已存字段是该路段的 `transfer_extra_minutes` ——
+    // 加在**进入**该路段的接驳上的分钟 —— 而该字段与链都不命名方式，
+    // 故引擎无法知道配置的附加时间是为骑行准备的。把它也应用到步行接驳是刻意的读法，
+    // 且它只会收紧余量：用户自己的数字被尊重，而不是因为它所针对的方式没有存储就被丢掉。
+    // 默认附加时间则是按方式区分的 —— 只为骑行接驳加上，别无他者，因为找车与停车是骑行的成本。
+    // 钳到零，因为它是成本、只会把就绪时刻推**晚**。负值会把用户放到他们出发之前的站台上，
+    // 让此前已走的车看起来赶得上，并把 `marginMinutes` 衡量到一个比它点名的 `referenceVehicleId`
+    // 更晚的车上 —— 破坏 `ChainLegDeduction` 陈述的那种等价。已存字段由 schema（`min(0)`）守住，
+    // 但 `cycleExtraMinutes` 与直接调用方没有，故该不变量不得依赖某个调用方的 schema。
     const configuredExtraMinutes = leg.transferExtraMinutes
       ?? ((item.connectionMode ?? 'walk') === 'cycle' ? cycleExtraMinutes : 0)
     const extraMinutes = Math.max(0, configuredExtraMinutes)
@@ -745,37 +580,30 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
     const atMinutes = minutesUntil(atSeconds)
     const readyMinutes = minutesUntil(readySeconds)
 
-    // The vehicle that is next at this board station when the user sets off —
-    // F10's actual question (「我出门能不能赶上换乘点那班车」) is about this one, not
-    // about whichever bus happens to be catchable after a slow walk.
+    // 用户出发时这个上车站下一个到的那辆车 —— F10 真正的问题（「我出门能不能赶上换乘点那班车」）
+    // 针对的是它，而不是慢走后恰好赶得上的某一班。
     const referenceIndex = candidates.findIndex(v => minutesUntil(v.arrivalAtBoardSeconds) >= atMinutes)
-    // No vehicle still to come by the moment the user sets off: every one of them
-    // had already reached this station. Only a leg the user does not start out
-    // from can be here (leg 0 sets off at minute 0, so a future vehicle always
-    // exists there) — the fact is 「都走了」, not a negative margin.
+    // 到用户出发那一刻已经没有车要来了：每一辆都已到过此站。只有用户并非从站出发的路段会是这种情形
+    // （第 0 段在 0 分钟出发，故那里总有未来的车）—— 这是「都走了」的事实，不是负余量。
     if (referenceIndex < 0) return noConclusion('no-vehicle-at-departure', who, live)
 
-    // The vehicle actually boarded: the first one that has not already gone by
-    // the time the user gets there, decided on the minutes the row displays.
+    // 实际乘上的车：到用户抵达时尚未走掉的第一辆，按行展示的分钟判定。
     const boardedIndex = candidates.findIndex(v => minutesUntil(v.arrivalAtBoardSeconds) >= readyMinutes)
-    // The reference existed (asserted just above), so this can only mean it — and
-    // everything behind it — reached the station before the connection was walked:
-    // 「连走过去的那趟都赶不上」, a different fact from 'no-vehicle-at-departure'.
+    // 参考车存在（上面刚断言过），故这只可能意味着它 —— 以及它后面的一切 —— 都在接驳走完前到过该站：
+    // 「连走过去的那趟都赶不上」，与 'no-vehicle-at-departure' 是不同的事实。
     if (boardedIndex < 0) return noConclusion('no-vehicle-after-connection', who, live)
 
     const reference = candidates[referenceIndex]!
     const boarded = candidates[boardedIndex]!
-    // A drop-off minute that is not downstream of the boarding minute means the
-    // two numbers do not describe one journey; no leg can be priced from them.
+    // 下车分钟不在上车分钟的下游，意味着这两个数并不描述同一趟行程；无法从它们为任何路段定价。
     if (boarded.arrivalAtAlightSeconds < boarded.arrivalAtBoardSeconds) {
       return noConclusion('inconsistent-live', who, live)
     }
 
     const provenance = arrivalProvenanceOf({ vehicle, basis: boarded.basis })
-    // Type narrowing only, and it cannot fire: `vehicle` is non-null here (an
-    // unknown source returned above), and `arrivalProvenanceOf` answers null only
-    // for a null vehicle. `provenance-unknown` cannot arise at this point, whatever
-    // a reader might expect — it is the code for the source check above it.
+    // 仅为类型收窄，且不可能触发：此处 `vehicle` 非空（未知来源已在上文返回），
+    // 而 `arrivalProvenanceOf` 只在 vehicle 为 null 时答 null。
+    // 故 `provenance-unknown` 在此不可能出现 —— 它是上面那个来源检查的码。
     if (provenance === null) return noConclusion('provenance-unknown', who, live)
 
     const boardMinutes = minutesUntil(boarded.arrivalAtBoardSeconds)
@@ -787,8 +615,7 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
       lineName: leg.lineName,
       boarded,
       reference,
-      // Only meaningful while the plan IS the reference: that is the one case
-      // where the next vehicle is the second reading of an unresolved margin.
+      // 只有当方案**就是**参考车时才有意义：那是「下一辆车是不可分辨余量的第二种读法」的唯一情形。
       following: boardedIndex === referenceIndex ? (candidates[referenceIndex + 1] ?? null) : null,
       provenance,
       waitMinutes: boardMinutes - readyMinutes,
@@ -803,9 +630,8 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
     atSeconds = boarded.arrivalAtAlightSeconds
   }
 
-  // The chain's margin is its tightest boarding, not its first: a chain is only
-  // as good as the connection it is most likely to miss. Ties keep the earlier
-  // leg, so the same inputs always name the same boarding.
+  // 链的余量是最紧的那次上车，而不是第一次：一条链的好坏取决于它最可能错过的那个接驳。
+  // 并列时保留更早的路段，故同样的输入总是指出同一次上车。
   let binding = plans[0]!
   for (const plan of plans) {
     if (plan.marginMinutes < binding.marginMinutes) binding = plan
@@ -838,14 +664,14 @@ export function deduceCommuteChain(input: CommuteChainDeductionInput): CommuteCh
   }
 }
 
-/** A leg once it has been walked: what was boarded, and the numbers the row shows about it. */
+/** 已推演过的一段：上了什么车，以及行展示的关于它的数字。 */
 interface LegPlan {
   seq: number
   lineId: string
   lineName: string
-  /** The vehicle boarded under the plan. */
+  /** 按方案所上的车。 */
   boarded: ChainLegVehicle
-  /** The vehicle that was next at the board station when the user set off — what `marginMinutes` measures. */
+  /** 用户出发时上车站下一个到的那辆车 —— `marginMinutes` 所衡量的。 */
   reference: ChainLegVehicle
   following: ChainLegVehicle | null
   provenance: DataProvenance
@@ -859,10 +685,9 @@ interface LegPlan {
 }
 
 /**
- * The two readings of an unresolved margin. The second one names the vehicle that
- * would actually be taken when the first is missed, and states nothing when the
- * reading carries no vehicle after it — a branch with an invented 「下一班」 in it
- * would be exactly the false certainty this case exists to avoid.
+ * 不可分辨余量的两种读法。第二种点名错过第一种时实际会乘的车，
+ * 并在该读数之后没有车时什么都不说 —— 其中若有一个编造的「下一班」，
+ * 正是本情形存在所要避免的虚假确定性。
  */
 function branchesOf(plan: LegPlan): ChainBranches {
   const following = plan.following
@@ -874,7 +699,7 @@ function branchesOf(plan: LegPlan): ChainBranches {
   }
 }
 
-/** The vehicle's own alight minute, or `null` when the two readings contradict each other. */
+/** 该车自己的到达分钟；两种读法互相矛盾时为 `null`。 */
 function alightMinutesOf(vehicle: ChainLegVehicle): number | null {
   return vehicle.arrivalAtAlightSeconds < vehicle.arrivalAtBoardSeconds
     ? null
@@ -882,25 +707,18 @@ function alightMinutesOf(vehicle: ChainLegVehicle): number | null {
 }
 
 /**
- * The refusal code each cause of an unpriced connection travels under — one entry
- * per cause the caller can name.
+ * 接驳未计价时各原因所走的拒绝码 —— 调用方能命名的每个原因一条。
  *
- * A TOTAL `Record` over `ChainConnectionUnpricedReason` rather than a chain of
- * comparisons, and that totality IS the contract: a cause added to that vocabulary
- * and left without an entry here is a COMPILE error, not prose that quietly stops
- * being true. The cause set behind a code is therefore read off this table — the
- * suite derives it with `Object.keys` — and never counted by hand, where a count
- * written down beside the union can only ever be a second copy of it that nothing
- * checks.
+ * 是 `ChainConnectionUnpricedReason` 上的**全量** `Record` 而非一串比较，而这份全量**就是**契约：
+ * 往该词汇里加了原因却没在此加条目是**编译**错误，而不是悄悄不再成立的散文。
+ * 某个码背后的原因集因此从这张表读出（测试用 `Object.keys` 推导它），绝不手数 ——
+ * 手写在 union 旁边的计数只能是一份没人校验的副本。
  *
- * The chain's own origin anchor is the ONE cause the user can act on, so it is the
- * only cause that travels under its own code — the same word F1's empty state uses
- * for the same fact. Every other cause — four today: every key here except
- * `anchor-unset` — and a caller that names none, is the generic
- * `connection-unpriced`: which of them fired changes no word the page can honestly
- * write and no action it can offer, and their exact cause set is stated on
- * `ChainNoConclusionReason`, together with the permanence constraint that governs
- * the one sentence a page writes for that code.
+ * 链自身的起点锚点是用户唯一可行动的原因，故只有它走自己的码 ——
+ * 与 F1 的空状态对同一事实所用的同一个词。其余每个原因
+ * （今天四个：此处除 `anchor-unset` 之外的每个键），以及说不清原因的调用方，
+ * 都是通用的 `connection-unpriced`：命中哪一个不改变页面能诚实写下的字，也不改变它能给出的动作；
+ * 它们确切的原因集陈述在 `ChainNoConclusionReason` 上，连同支配该码那句话的持久性约束。
  */
 export const CONNECTION_REFUSAL_CODES: Record<ChainConnectionUnpricedReason, ChainNoConclusionReason> = {
   'anchor-unset': 'anchor-unset',
@@ -911,38 +729,33 @@ export const CONNECTION_REFUSAL_CODES: Record<ChainConnectionUnpricedReason, Cha
 }
 
 /**
- * The refusing code for a connection that has no priced duration.
- *
- * A caller that names no cause states none at all and reaches
- * `connection-unpriced`, the only way into that code that carries no cause of its
- * own. Every named cause is resolved by `CONNECTION_REFUSAL_CODES` above.
+ * 接驳没有计价时长时的拒绝码。
+ * 说不清原因的调用方就什么都不给，落到 `connection-unpriced` ——
+ * 那是进入该码唯一不自带原因的途径。每个具名原因都由上面的 `CONNECTION_REFUSAL_CODES` 解析。
  */
 function connectionRefusalCode(reason?: ChainConnectionUnpricedReason): ChainNoConclusionReason {
   return reason === undefined ? 'connection-unpriced' : CONNECTION_REFUSAL_CODES[reason]
 }
 
 /**
- * Whole minutes until a moment `seconds` from now — F1's own arrival rule
- * (`arrivalMinutes`), applied to EVERY moment in the deduction: a vehicle reaching
- * a board station, the user reaching a board station, a vehicle reaching an alight
- * station. One rule for all of them is what keeps a margin, the band read from it
- * and the numbers printed beside it from disagreeing in the same row.
+ * 距 `seconds` 秒之后的某个时刻还有多少整分 —— F1 自己的到车规则（`arrivalMinutes`），
+ * 应用于推演中的**每一个**时刻：车抵达上车站、用户抵达上车站、车抵达下车站。
+ * 对它们用同一条规则，才使余量、由它读出的带位与印在旁边的数字不会在同一行里互相矛盾。
  */
 function minutesUntil(seconds: number): number {
   return arrivalMinutes(seconds)
 }
 
-/** Board-station arrival first, then the vehicle id, so ties do not depend on the order the payload happened to use. */
+/** 先按上车站到达时间、再按车辆 id 排序，使并列不取决于 payload 恰好使用的顺序。 */
 function byBoardArrival(a: ChainLegVehicle, b: ChainLegVehicle): number {
   return a.arrivalAtBoardSeconds - b.arrivalAtBoardSeconds || a.vehicleId.localeCompare(b.vehicleId)
 }
 
 /**
- * A refusal, with WHICH leg it is about and — when that leg was read — the
- * reading's own obtained-at and F3 service state.
+ * 一次拒绝，带上它关于哪一段，以及 —— 该段被读过时 —— 该读数自己的取得时刻与 F3 服务状态。
  *
- * `reading` is the leg's whole live reading, so the two facts travel as one and
- * cannot be filled in from anywhere else: they are that reading's, not the row's.
+ * `reading` 是该路段完整的实时读数，故这两个事实作为一个整体出行，不可能从别处填进来：
+ * 它们属于那个读数，不属于行。
  */
 function noConclusion(
   reason: ChainNoConclusionReason,

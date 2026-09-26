@@ -7,31 +7,18 @@ import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../views/line-d
 import { provenanceLabelOf } from '../provenance-copy'
 
 /**
- * G3: the mark qualifies a NUMBER — the at-platform state is a fact with none.
+ * 标记限定一个数字，而「正在本站」这类状态本身没有数字。
  *
- * The overview card rendered the leading row's mark beside 「正在进站」, while the
- * line-detail panel deliberately renders none for the same state: 「车辆正在本站」
- * is an observation of where a vehicle is, and the panel's own branch says so
- * ("a mark qualifies a number, and this claim states none"). The panel is the
- * right surface — the card is the one that must change — and the reason is the
- * mark's contract (`provenance-copy.ts`): 实时 / 位置推算 / 排班推演 / 精确时刻表
- * each answer 「这个数从哪来」, which is a question about a minute.
+ * 总览卡片的 at-platform 行曾把标记放在「正在进站」旁，线路面板对同一状态刻意不渲染。
+ * 标记的契约（`provenance-copy.ts`）里，实时 / 排班推演 / 精确时刻表 都在回答
+ * 「这个数从哪来」，问的是分钟。
  *
- * The card's at-platform row carries `provenance: 'live'` (the server prices it
- * with `basis: 'at_platform'`, and a real vehicle observed at the platform is
- * 实时), so the word was not missing: it was attached to the one statement on the
- * card that states no number. Removing it there must not take it off the minutes
- * it exists for, which is why both halves are pinned: the card's at-platform
- * branch renders no mark, and the feed's single word still reaches the numbered
- * rows below it.
+ * 卡片该行带 `provenance: 'live'`，去掉标记不能连带去掉它所属的分钟：卡片的 at-platform
+ * 分支不渲染标记，而 feed 的同一个词仍落到下面的带数字行。
  *
- * The same rule is applied to the panel's own arrivals list, where a MIXED feed
- * (one live row, one computed row) can still put a row's mark beside a
- * 「正在进站」 entry — the state the card is being aligned to, one element away.
+ * 同一规则也适用于面板自己的到站列表：混合 feed 可能把某行的标记放在「正在进站」旁。
  *
- * These components are browser-only artefacts here (no jsdom, no
- * @vue/test-utils), so the rule is asserted as logic and the wiring against the
- * SFC source, the way this view's provenance rules already are.
+ * 这些组件只跑在浏览器（无 jsdom、无 @vue/test-utils），故逻辑按断言、接线按 SFC 源码。
  */
 
 const card = readFileSync(
@@ -50,7 +37,7 @@ function templateOf(sfc: string): string {
   return start >= 0 && end > start ? sfc.slice(start, end) : ''
 }
 
-/** The card's at-platform branch: from its `v-if` to the next `v-else-if`. */
+/** 卡片的 at-platform 分支：从它的 `v-if` 到下一个 `v-else-if`。 */
 function cardAtPlatformBranch(): string {
   const template = templateOf(card)
   const start = template.indexOf('nextOf(primaryArrivals)?.isAtStation')
@@ -60,7 +47,7 @@ function cardAtPlatformBranch(): string {
   return template.slice(start, end)
 }
 
-/** The card's numbered branch: the minutes the mark belongs to. */
+/** 卡片的带数字分支：标记所属的分钟。 */
 function cardNumberedBranch(): string {
   const template = templateOf(card)
   const start = template.indexOf('minutesOf(primaryArrivals) !== null')
@@ -70,13 +57,12 @@ function cardNumberedBranch(): string {
   return template.slice(start, end)
 }
 
-/** A feed whose leading row is a vehicle AT the platform, followed by one on the way. */
 const AT_PLATFORM_THEN_MINUTE = [
   { time: '正在进站', etaSeconds: 0, stopsAway: 0, isAtStation: true, busId: 'v1', provenance: 'live' },
   { time: '14:07', etaSeconds: 420, stopsAway: 2, busId: 'v2', provenance: 'live' },
 ].map(row => ArrivalRowSchema.parse(row))
 
-/** A feed of two minutes: the once-only rule for a list whose rows all agree. */
+/** 两条分钟的 feed：用于「只出现一次」规则。 */
 const TWO_MINUTES = [
   { time: '14:05', etaSeconds: 300, busId: 'v1', provenance: 'live' },
   { time: '14:07', etaSeconds: 420, busId: 'v2', provenance: 'live' },
@@ -85,7 +71,6 @@ const TWO_MINUTES = [
 describe('G3: the card states no mark beside the at-platform state', () => {
   it('renders no mark in the branch that states 「正在进站」', () => {
     const branch = cardAtPlatformBranch()
-    // The branch under test is the one that states the fact, and it states no minute.
     expect(branch).toContain('正在进站')
     expect(branch, 'a mark is rendered beside a statement that carries no number')
       .not.toContain('primaryMark')
@@ -97,7 +82,7 @@ describe('G3: the card states no mark beside the at-platform state', () => {
 
   it('words no mark itself, so the removal is not a re-wording', () => {
     const template = templateOf(card)
-    for (const word of ['实时', '位置推算', '排班推演', '精确时刻表']) {
+    for (const word of ['实时', '排班推演', '精确时刻表']) {
       expect(template, `the card template states ${word} itself`).not.toContain(word)
     }
   })
@@ -105,19 +90,15 @@ describe('G3: the card states no mark beside the at-platform state', () => {
 
 describe('G3: the feed\'s one word reaches a row that states a number', () => {
   it('does not let the word ride on an at-platform leading row', () => {
-    // The list still agrees on one kind — but its leading row is an
-    // OBSERVATION, not a minute, so the word cannot be carried there: the card
-    // renders no mark in that branch, and a word parked on it would be dropped
-    // from the screen entirely.
+    // 列表整体仍属同一类，但首行是一次观测而非分钟，词不能落在那里：
+    // 卡片在该分支不渲染标记，落在那里会被整个丢掉。
     expect(cardListProvenanceOf(AT_PLATFORM_THEN_MINUTE)).toBe('live')
     expect(provenanceLabelOf(cardRowProvenanceOf(AT_PLATFORM_THEN_MINUTE, 1))).toBe('实时')
-    // The row it now rides on is a minute, which is the whole point.
     expect(AT_PLATFORM_THEN_MINUTE[1]!.isAtStation).toBeUndefined()
   })
 
   it('keeps the once-only rule for a feed whose leading row IS a minute', () => {
-    // The convention the fix must not break: one word, stated once, on the
-    // leading minute rather than repeated down the 后续 sub-list.
+    // 不得破坏的约定：一个词只说一次，落在首个分钟行，而非在后续子列表里重复。
     expect(cardRowProvenanceOf(TWO_MINUTES, 0)).toBe('live')
     expect(cardRowProvenanceOf(TWO_MINUTES, 1)).toBeNull()
   })
@@ -125,10 +106,10 @@ describe('G3: the feed\'s one word reaches a row that states a number', () => {
   it('still reports each row\'s own kind when the feed mixes kinds', () => {
     const mixed = [
       { time: '正在进站', etaSeconds: 0, isAtStation: true, busId: 'v1', provenance: 'live' },
-      { time: '14:07', etaSeconds: 420, busId: 'v2', provenance: 'position_estimate' },
+      { time: '14:07', etaSeconds: 420, busId: 'v2', provenance: 'schedule_simulation' },
     ].map(row => ArrivalRowSchema.parse(row))
     expect(cardListProvenanceOf(mixed)).toBeNull()
-    expect(provenanceLabelOf(cardRowProvenanceOf(mixed, 1))).toBe('位置推算')
+    expect(provenanceLabelOf(cardRowProvenanceOf(mixed, 1))).toBe('排班推演')
   })
 })
 
@@ -138,18 +119,16 @@ describe('G3: the panel\'s list applies the same rule to its own rows', () => {
     const markSpan = /<span[^>]*v-if="[^"]*rowMarkOf\(i\)[^"]*"[^>]*>/.exec(template)
     expect(markSpan, 'the panel list no longer renders per-row marks').not.toBeNull()
     expect(markSpan![0], 'the per-row mark is not guarded by isAtStation').toContain('v-if="!a.isAtStation && rowMarkOf(i)"')
-    // The list-level mark is a statement about the list, not about one entry,
-    // and stays where it is.
+    // 列表级标记是对列表的陈述，不针对单条，位置不动。
     expect(template).toContain('{{ listMark }}')
   })
 
   it('leaves a numbered row\'s mark alone', () => {
-    // A mixed feed: the numbered row still states its own kind.
     const mixed = [
       { time: '正在进站', etaSeconds: 0, isAtStation: true, busId: 'v1', provenance: 'live' },
-      { time: '14:07', etaSeconds: 420, busId: 'v2', provenance: 'position_estimate' },
+      { time: '14:07', etaSeconds: 420, busId: 'v2', provenance: 'schedule_simulation' },
     ].map(row => ArrivalRowSchema.parse(row))
     expect(arrivalListProvenanceOf(mixed)).toBeNull()
-    expect(provenanceLabelOf(arrivalRowProvenanceOf(mixed, 1))).toBe('位置推算')
+    expect(provenanceLabelOf(arrivalRowProvenanceOf(mixed, 1))).toBe('排班推演')
   })
 })

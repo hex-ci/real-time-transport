@@ -4,31 +4,23 @@ import { describe, expect, it } from 'vitest'
 import { congestionChipClass, congestionClass, congestionLabel } from '../congestion'
 
 /**
- * F12 on the platform board: the crowding chip is coloured by the verdict it
- * states, never by whether an arrival minute happens to exist.
+ * 站台屏上的 F12：拥挤度芯片由其陈述的**判决**着色，绝不由某个到站分钟是否存在决定。
  *
- * A row can carry a genuine verdict with no minute at once — upstream reports the
- * crowding while no travel time can be computed — so a colour that keys off the
- * minute greys the chip exactly when the verdict IS known, and the colour then
- * argues with the word printed on it. The two directions that must hold: a known
- * level keeps its verdict colour with no minute present, and an unknown level
- * stays neutral however the minute reads, because colour must not report a
- * verdict upstream never gave (「未知」 is not 「not crowded」).
+ * 一行可以同时携带真实判决与无分钟——上游在无法算出行程时间时报拥挤度——故按分钟取色的做法会在
+ * 判决**已知**时恰好把芯片置灰，颜色随即与它上面印的词争吵。两个必须成立的方向：已知等级在无分钟
+ * 时保留其判决色，未知等级无论如何都保持中性，因为颜色不得报出上游从未给出的判决（「未知」不是「不拥挤」）。
  */
 
-/** The levels upstream has been observed to report: 拥挤度_1 and 拥挤度_3. */
+/** 上游被观察到会上报的等级：拥挤度_1 与 拥挤度_3。 */
 const VERDICTS = ['low', 'high'] as const
 
-/** The neutral grey the unknown level renders as. */
+/** 未知等级渲染的中性灰。 */
 const NEUTRAL = congestionClass('unknown')
 
 /**
- * The badge words are the upstream's OWN wording, transcribed from the live
- * samples in `realtime-transit-apps/references/chelaile-api.md`: 「不拥挤」 is the
- * title served for 拥挤度_1 and 「拥挤」 the one served for 拥挤度_3. No degree may
- * be synthesised for a level nobody sampled — 「畅通」 / 「适中」 / 「较拥挤」 were
- * exactly that — and 「未知」 must stay its own word, because rendering an
- * unobserved level as 「不拥挤」 decides for the user (F12, same rule as F4).
+ * 徽标文字是上游**自己**的措辞，转录自实时采样：拥挤度_1 给的标题是「不拥挤」，拥挤度_3 给的是「拥挤」。
+ * 不得为没人采样过的等级合成程度词——「畅通」「适中」「较拥挤」正是如此——且「未知」必须保持自己的词，
+ * 因为把未观测的等级渲染成「不拥挤」就是在替用户决定（F12，同 F4 规则）。
  */
 describe('the badge words come from the observed upstream vocabulary', () => {
   it('labels each observed level with the wording the upstream itself served', () => {
@@ -41,7 +33,7 @@ describe('the badge words come from the observed upstream vocabulary', () => {
       expect(congestionLabel(level)).toBe('未知')
       expect(congestionChipClass(level)).toBe(NEUTRAL)
     }
-    // 「不拥挤」 is a verdict and 「未知」 is not: the two words must never collapse.
+    // 「不拥挤」是判决而「未知」不是：两个词绝不能合并。
     expect(congestionLabel('unknown')).not.toBe(congestionLabel('low'))
   })
 })
@@ -50,10 +42,10 @@ describe('the crowding chip\'s colour follows the verdict, not the minute', () =
   it('gives a known verdict its own colour, with no minute in play', () => {
     for (const level of VERDICTS) {
       const chip = congestionChipClass(level)
-      // Can differ: the neutral class is what an unknown level renders as, so a
-      // verdict reading as it would be the minute-gated grey this rule forbids.
+      // 可以不同：中性类正是未知等级渲染的样子，
+      // 故判决读起来像它就意味着本规则禁止的按分钟置灰。
       expect(chip).not.toBe(NEUTRAL)
-      // Can differ: a verdict must not borrow a neighbouring one's colour.
+      // 可以不同：一个判决不得借用邻近判决的颜色。
       for (const other of VERDICTS) {
         if (other === level) continue
         expect(chip, `${level} renders as ${other}`).not.toBe(congestionClass(other))
@@ -66,8 +58,7 @@ describe('the crowding chip\'s colour follows the verdict, not the minute', () =
     for (const congestion of ['unknown', '', 'some_future_level']) {
       expect(congestionChipClass(congestion)).toBe(NEUTRAL)
     }
-    // The F12 rule at its sharpest: the neutral chip borrows no verdict colour,
-    // so an unknown can never render as a crowded — or a clear — reading.
+    // F12 规则最锐利处：中性芯片不借用任何判决色，故未知绝不会渲染成拥挤——或畅通——的读数。
     expect(congestionLabel('unknown')).toBe('未知')
     for (const level of VERDICTS) {
       expect(NEUTRAL).not.toBe(congestionClass(level))
@@ -81,13 +72,12 @@ describe('the board binds the chip through that decision, not through a ternary'
     'utf8',
   )
 
-  /** Every static `:class` binding in the SFC, whitespace collapsed. */
+  /** SFC 里每个静态 `:class` 绑定，空白已折叠。 */
   const classBindings = [...board.matchAll(/:class="([^"]+)"/g)]
     .map(m => (m[1] ?? '').replace(/\s+/g, ' '))
 
   it('derives the chip\'s class from the row\'s crowding level', () => {
-    // The property, not the expression: however the binding is written, the chip's
-    // colour is computed from this row's crowding level.
+    // 看属性而非表达式：无论绑定怎么写，芯片的颜色都由本行的拥挤等级算出。
     expect(classBindings.length).toBeGreaterThan(0)
     expect(
       classBindings.some(b => b.includes('item.congestion') && b.includes('congestionChipClass')),
@@ -96,8 +86,7 @@ describe('the board binds the chip through that decision, not through a ternary'
   })
 
   it('never lets the arrival minute decide a class', () => {
-    // Any shape of a ternary over the minute would put the colour back under its
-    // control; checking every binding catches it in either direction.
+    // 对分钟做三元处理的任何写法都会把颜色重新置于其控制下；检查每个绑定可在两个方向都抓住它。
     for (const binding of classBindings) {
       expect(binding, 'a :class binding reads the arrival minute').not.toContain('etaMinutes')
     }

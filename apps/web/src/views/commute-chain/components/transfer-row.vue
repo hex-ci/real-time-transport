@@ -3,26 +3,17 @@ import BandChip from './band-chip.vue'
 import type { BranchView, TransferRowView } from '../types'
 
 /**
- * One transfer: which vehicle is taken, how long the wait at this platform is, and
- * the margin — together with what that margin is measured against.
+ * 一段换乘：上哪一班、在此站台等多久、余量是多少，连同余量所对照之物。
  *
- * The row is about ONE vehicle, the one being boarded, and it says so. When the
- * margin's own reference has already gone (`referenceGone`), no margin is printed
- * at all: a negative minute beside the bus the user is walking to would read as
- * that bus's own margin, which is the one misreading this feature exists to
- * prevent. What the row does print then is the next vehicle's, and `basisText`
- * says so — `basisText` is stated in both cases, because a margin with no
- * reference is a number about no bus.
- *
- * The two branch readings are printed only on the leg the chain's unresolvable
- * margin belongs to (the card passes them to that row alone), where they replace
- * the single verdict the margin cannot give.
+ * 这一行关于一班车，即正要上的那一班。余量所对照的车已走时（`referenceGone`）
+ * 不印任何余量：印在用户正走向的车旁的负分钟会被读成那班车自己的余量。
+ * 此时该行所印的数字属于下一班，`basisText` 两种情形都陈述——没有参照的余量是没有车的数字。
  */
 defineProps<{
   row: TransferRowView
-  /** F4's mark for this leg — null when the chain is already stating the one word. */
+  /** F4 在这一段的标记；链路已在陈述那个词时为 null。 */
   markText: string | null
-  /** The two readings of an unresolvable margin, or null for every other leg. */
+  /** 余量不可解析时的两个读数；其余各段为 null。 */
   branches: BranchView[] | null
 }>()
 </script>

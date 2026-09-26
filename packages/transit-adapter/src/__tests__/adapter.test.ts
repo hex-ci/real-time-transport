@@ -11,7 +11,6 @@ import {
 import type { ITransitProvider } from '../types.js'
 import type { LineDetail } from '@real-time-transport/shared'
 
-/** A provider that always fails, used to verify aggregator degradation (no mocks in prod path). */
 class FailingProvider implements ITransitProvider {
   readonly name = 'chelaile' as const
   async searchLines(): Promise<never> {
@@ -33,7 +32,6 @@ class FailingProvider implements ITransitProvider {
 
 describe('Transit Adapter Package', () => {
   it('converts coordinates between WGS-84 and GCJ-02 with reasonable precision', () => {
-    // Beijing Tiananmen coordinate
     const wgsLng = 116.3974
     const wgsLat = 39.9093
 
@@ -47,10 +45,9 @@ describe('Transit Adapter Package', () => {
   })
 
   it('runs UniversalSubwayEngine with graceful degradation without Amap key', async () => {
-    const amap = new AmapGisService('') // Explicit empty key (no env fallback)
+    const amap = new AmapGisService('') // 显式空 key（不回落环境变量）
     const subway = new UniversalSubwayEngine(amap)
 
-    // Should return null details gracefully (no Amap key configured)
     const detail = await subway.getLineDetail('subway_027_88', 0)
     expect(detail).toBeNull()
 
@@ -74,13 +71,12 @@ describe('Transit Adapter Package', () => {
     const chelaile = new ChelaileProvider()
     const router = new SubwayRouterProvider(subwayEngine, chelaile)
 
-    // Subway line id starts with subway_ => routed to subway engine
     const subwayDetail = await router.getLineDetail('subway_027_88', 0)
-    expect(subwayDetail).toBeNull() // No Amap key, graceful null
+    expect(subwayDetail).toBeNull()
 
-    // Bus line id => routed to Chelaile. The upstream call is real (no mock):
-    // it may return a detail (network available) or null (offline/throttled).
-    // Both are contract-valid; the only invalid outcome is throwing.
+    // 公交 lineId 走车来了。上游调用是真实的（无 mock）：可能返回详情
+    // （有网）也可能为 null（离线/被限流），两者都合契约，唯一不合契约的
+    // 结果是抛异常。
     const busDetail = await router.getLineDetail('001073243721', 0)
     expect(busDetail === null || typeof busDetail?.lineId === 'string').toBe(true)
   })
@@ -99,14 +95,14 @@ describe('Transit Adapter Package', () => {
     const subwayEngine = new UniversalSubwayEngine(amap)
     const router = new SubwayRouterProvider(subwayEngine, new ChelaileProvider())
 
-    // "372" is a bus keyword -> subway router must NOT match it (regression: old bug matched via includes('7'))
+    // "372" 是公交关键字，地铁路由器绝不能匹配它（不能用 includes 匹配数字）
     const results = await router.searchLines('372', '027')
     expect(results).toEqual([])
   })
 
   it('aggregator degrades gracefully when a provider throws and caches successful results', async () => {
-    // No key => UniversalSubwayEngine returns null, FailingProvider throws:
-    // the aggregator must skip both and return null without throwing.
+    // 没有 key 时 UniversalSubwayEngine 返回 null、FailingProvider 抛异常：
+    // 聚合层必须跳过两者并返回 null，且自己不抛。
     const failing = new FailingProvider()
     const amap = new AmapGisService('')
     const aggregator = new TransitAggregator([failing, new UniversalSubwayEngine(amap)])
@@ -122,13 +118,13 @@ describe('Transit Adapter Package', () => {
   })
 
   it('aggregator caches identical detail instances on repeated calls', async () => {
-    // Chelaile without network still exercises the cache path when it succeeds;
-    // in offline CI this may be null on both calls, which is also contract-valid.
+    // 车来了在无网络时若成功仍会走缓存路径；离线 CI 里两次调用可能都是
+    // null，那同样合契约。
     const aggregator = new TransitAggregator([new ChelaileProvider()])
     const d1 = await aggregator.getLineDetail('nonexistent_line_xyz', 0)
     const d2 = await aggregator.getLineDetail('nonexistent_line_xyz', 0)
     if (d1) {
-      expect(d2).toBe(d1) // same cached instance
+      expect(d2).toBe(d1)
     }
     else {
       expect(d2).toBeNull()
@@ -136,16 +132,16 @@ describe('Transit Adapter Package', () => {
   })
 
   it('subway live uses the injected detail resolver without needing Amap (no 404 on throttle)', async () => {
-    // Regression: /lines/:id/live used to re-resolve static geometry from Amap
-    // on every poll, so one QPS throttle 404'd a perfectly valid line.
+    // live 路径不得每次轮询都从高德重新解析静态几何：一次 QPS 限流
+    // 就会把一条完全有效的线路变成 404。
     const cachedDetail: LineDetail = {
       lineId: 'subway_027_88',
       lineName: '地铁88号线',
       direction: 0,
       directionName: '开往 辛站',
-      // Service window must cover the engine's whole normalized day range.
-      // It maps 00:00–03:59 to +24h, so currentSecOfDay spans [14400, 100799];
-      // 01:00–30:00 covers that with margin, keeping this test time-independent.
+      // 服务窗口必须覆盖引擎归一化后的整个日范围：它把 00:00–03:59
+      // 映射到 +24h，所以 currentSecOfDay 跨 [14400, 100799]，
+      // 01:00–30:00 留有余量地覆盖它，并使本测试与时间无关。
       firstBusTime: '01:00',
       lastBusTime: '30:00',
       cityCode: '027',
@@ -164,14 +160,13 @@ describe('Transit Adapter Package', () => {
       stationDistances: [0, 2000, 6000, 12000, 18000, 24000, 32000, 40000],
     }
 
-    // No Amap key at all: proves the live path works purely off the resolver.
+    // 完全没有高德 key：证明 live 路径纯靠 resolver 工作。
     const engine = new UniversalSubwayEngine(new AmapGisService(''), undefined, async () => cachedDetail)
     const live = await engine.getLiveStatus('subway_027_88', 0, '027')
 
     expect(live).not.toBeNull()
     expect(live?.dataSource).toBe('subway_schedule')
     expect(live?.buses.length).toBeGreaterThan(0)
-    // Trains carry real continuous positions derived from the cached geometry
     expect(live?.buses.every(b => typeof b.distanceFromStart === 'number')).toBe(true)
   })
 

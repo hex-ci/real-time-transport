@@ -12,17 +12,17 @@ import {
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { CardGrid, EmptyState } from './components'
-import { commuteLegStateOf } from './commute-leg'
+import { commuteLegStateOf, commuteStopOf } from './commute-leg'
 import { nearbyLocationStateOf } from './nearby-notice'
 import type { NearbyLocationState } from './nearby-notice'
-import type { ArrivalsFeed, CardRow, MiniCardConfig, OverviewMode } from './types'
+import type { ArrivalsFeed, ArrivalsRead, CardRow, MiniCardConfig, OverviewMode } from './types'
 import type { LineDetail, RefreshLiveTarget, UserFavoriteLine } from '@real-time-transport/shared'
 import { REFRESH_MAX_LINES } from '@real-time-transport/shared'
 import {
   effectiveCommuteDirection,
   favoriteDirections,
   favoriteIsBidirectional,
-  resolveBoardStop,
+  resolveBoardStopRef,
   resolveFavoriteLineId,
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
@@ -51,19 +51,17 @@ function updateTime(): void {
 useIntervalFn(updateTime, 1000)
 useIntervalFn(refreshAllArrivals, 10000)
 
-/** Which view the home tab shows. "nearby" is GPS-driven, the other two ride the derived directions. */
+/** 首页标签显示哪个视图。「nearby」由 GPS 驱动，另外两个走推导出的方向。 */
 
-/** Subsequent arrivals shown after the next bus on a commute card. */
+/** 通勤卡片上跟在下一班车之后的后续到站条数。 */
 const SUBSEQUENT_ARRIVALS_COUNT = 2
 
 /**
- * A manual mode pick, remembered only for the commute slot it was made in.
+ * 一次手动模式选择，只记在它被做出来的那个通勤时段里。
  *
- * The default is fully automatic: while no override applies, the mode follows
- * the configured commute hours, so the user never has to choose a direction.
- * A manual pick wins within its own slot (so a deliberate choice is respected)
- * and expires once the slot changes — leaving for work at 08:00 does not pin
- * the evening view forever.
+ * 默认是完全自动的：没有覆盖时，模式跟随配置的通勤时段，用户不必自己选方向。手动选择在它自己
+ * 的时段内胜出（于是刻意做出的选择被尊重），一旦时段变了就失效 —— 早上 08:00 出门上班不会永远
+ * 把晚高峰视图钉住。
  */
 const MODE_STORAGE_KEY = 'rt-transit-overview-mode'
 
@@ -80,7 +78,7 @@ function readOverride(): { mode: OverviewMode, slot: string } | null {
     }
   }
   catch {
-    // Legacy/foreign value: treat as no override rather than guessing
+    // 旧格式或外来值：当作没有覆盖，而不是去猜。
   }
   return null
 }
@@ -88,15 +86,14 @@ function readOverride(): { mode: OverviewMode, slot: string } | null {
 const modeOverride = shallowRef(readOverride())
 
 /**
- * The commute slot the profile currently reports; a manual pick is scoped to it.
+ * 档案当前报告的通勤时段；一次手动选择的作用域就是它。
  *
- * `auto` is the honest slot for BOTH cases the profile can be in when it is not inside a
- * stored window: outside one, and with no window stored at all. `windowState` is what tells
- * the two apart for the LABELS below — the slot itself must not lie about it.
+ * `auto` 是档案不在任何已存窗口内时两种情形共同的诚实时段：在窗口之外，以及根本没有存过窗口。
+ * 后者与前者的区别由 `windowState` 在下面的标签里承载 —— 时段本身不能说谎。
  */
 const currentSlot = computed(() => commuteProfile.value?.mode ?? 'auto')
 
-/** Automatic choice: the configured commute hours decide, otherwise the nearby view. */
+/** 自动选择：配置的通勤时段决定，否则进附近视图。 */
 const autoMode = computed<OverviewMode>(() => {
   const mode = commuteProfile.value?.mode
   if (mode === 'work') return 'morning'
@@ -105,15 +102,12 @@ const autoMode = computed<OverviewMode>(() => {
 })
 
 /**
- * Whether the profile read a window the user actually stored.
+ * 档案读到的窗口是否是用户真的存过的。
  *
- * A user who never saved commute hours is 「未设置」, not 「非通勤」: 非通勤 says the clock is
- * outside two configured windows, and there are none to be outside of. That is TWO facts
- * about the store — `unset` (no row) and `unchosen` (a row exists and its four times were
- * never chosen, since 009 nulls) — and both mean there is no window to be inside. The
- * distinction travels on the payload (`windowState`) because the facts are otherwise
- * byte-identical here — this screen used to print 非通勤 for a window nobody had
- * configured, and it would do so again for a row nobody had chosen hours on.
+ * 从未保存过通勤时间的用户是「未设置」，不是「非通勤」：后者说本机时钟在两个已配置窗口之外，
+ * 而这里根本没有窗口可在外。这是关于 store 的两个事实 —— `unset`（没有行）与 `unchosen`（有行
+ * 但四个时间从未选过）—— 两者都意味着没有窗口可在内。这个区分随 payload 传递（`windowState`），
+ * 因为在这里两个事实字节级相同。
  */
 const commuteWindowUnset = computed(() => {
   const state = commuteProfile.value?.windowState
@@ -125,7 +119,7 @@ const isManual = computed(() => modeOverride.value?.slot === currentSlot.value)
 const currentMode = computed<OverviewMode>(() =>
   isManual.value && modeOverride.value ? modeOverride.value.mode : autoMode.value)
 
-/** Human label for what the automatic rule resolved to, shown on the auto button. */
+/** 自动规则解析出的东西的人话标签，显示在自动按钮上。 */
 const autoModeLabel = computed(() => (
   commuteWindowUnset.value
     ? '未设置通勤时段'
@@ -137,18 +131,17 @@ function setMode(mode: OverviewMode): void {
   localStorage.setItem(MODE_STORAGE_KEY, JSON.stringify(modeOverride.value))
 }
 
-/** Drop the manual pick and hand control back to the commute hours. */
+/** 丢掉手动选择，把控制权交回通勤时段。 */
 function useAutoMode(): void {
   modeOverride.value = null
   localStorage.removeItem(MODE_STORAGE_KEY)
 }
 
 /**
- * Per-line manual direction pick for the nearby view, keyed by favourite id.
+ * 附近视图里逐线路的手动方向选择，按关注行 id 记。
  *
- * Scoped to a commute slot exactly like the mode override: a pick made while
- * standing on one kerb in the morning should not silently decide the evening
- * view, which is a different trip in the opposite direction.
+ * 与模式覆盖一样限定在通勤时段内：早上站在一侧路缘做出的选择，不应该无声地决定晚高峰视图 ——
+ * 那是反方向的另一段行程。
  */
 const DIRECTION_STORAGE_KEY = 'rt-transit-nearby-direction'
 
@@ -167,14 +160,14 @@ function readDirectionOverrides(): Record<string, { direction: 0 | 1, slot: stri
     return out
   }
   catch {
-    // Legacy/foreign value: treat as no override rather than guessing.
+    // 旧格式或外来值：当作没有覆盖，而不是去猜。
     return {}
   }
 }
 
 const directionOverrides = shallowRef(readDirectionOverrides())
 
-/** Promote a direction on one card; the pick applies until the commute slot changes. */
+/** 在卡片上把一个方向提上来；这个选择在通勤时段改变前一直有效。 */
 function setPrimaryDirection(favoriteId: string, direction: 0 | 1): void {
   directionOverrides.value = {
     ...directionOverrides.value,
@@ -183,30 +176,28 @@ function setPrimaryDirection(favoriteId: string, direction: 0 | 1): void {
   localStorage.setItem(DIRECTION_STORAGE_KEY, JSON.stringify(directionOverrides.value))
 }
 
-/** Card asked to lead with the other direction. */
+/** 卡片要求改用另一个方向领起。 */
 function onSwitchDirection(card: MiniCardConfig, direction: 0 | 1): void {
   if (!card.favoriteId) return
   setPrimaryDirection(card.favoriteId, direction)
 }
 
-/** Reason the last pin write failed, shown above the grid. */
+/** 上一次置顶写入失败的原因，显示在网格上方。 */
 const pinError = shallowRef<string | null>(null)
 
 /**
- * Favourite whose pin write is still in flight.
+ * 置顶写入仍在途的那个关注。
  *
- * The card moves on the tap (the store writes optimistically), so without this
- * a second tap reads the already-flipped state and sends the reverse request.
+ * 点按瞬间卡片已经动过了（store 乐观写入），所以没有这个的话，第二次点按会读到已经翻转的状态
+ * 并发出反向请求。
  */
 const pinningFavoriteId = shallowRef<string | null>(null)
 
 /**
- * Pin or un-pin one followed line — the overview's own action, the only place
- * this state exists: the entry point, the marker and the cancel all live on the
- * home cards.
+ * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
+ * 都在首页卡片上。
  *
- * A failed write has already been rolled back by the store, so the reason is
- * surfaced here rather than leaving the card silently where it was.
+ * 写入失败已经由 store 回滚，所以原因在这里浮出来，而不是让卡片无声地停在原处。
  */
 async function onTogglePin(card: MiniCardConfig): Promise<void> {
   const favoriteId = card.favoriteId
@@ -224,16 +215,15 @@ async function onTogglePin(card: MiniCardConfig): Promise<void> {
   }
 }
 
-/** Cached line details keyed by lineId_direction (for stop counts + target order). */
+/** 缓存的线路详情，键为 lineId_direction（用于站数与本行目标顺序）。 */
 const detailCache = shallowRef<Record<string, LineDetail>>({})
 
 /**
- * Which of the three states the followed-lines read is in.
+ * 关注线路那次读取处在三种状态中的哪一种。
  *
- * The cards below are built from `favorites`, and a read that FAILED leaves that array
- * empty — so the length alone cannot tell the empty state's cause from a list nobody read.
- * The store reports the answer (`fetchFavorites()`), and this page states it: 「还没有关注
- * 线路」 is only true once the read actually answered.
+ * 下面的卡片由 `favorites` 构建，而一次「失败」的读取留下的是空数组 —— 所以光看长度分不出空
+ * 状态是因为读失败，还是没人读过这个列表。store 报告那个答案（`fetchFavorites()`），这个页面
+ * 陈述它：只有读取真的答了，「还没有关注线路」才是真的。
  */
 const favouritesRead = shallowRef<ReadState>('reading')
 
@@ -241,22 +231,21 @@ const cityFavorites = computed(() =>
   favorites.value.filter(f => f.cityCode === cityStore.currentCode),
 )
 
-/** At least one favourite supports switching -> show the global toggle. */
+/** 至少有一个关注支持切换 -> 显示全局开关。 */
 const canSwitchAny = computed(() => cityFavorites.value.some(f => favoriteIsBidirectional(f)))
 
 /**
- * The direction a favourite's purpose rides, as the user chose it.
+ * 一个关注的某一段通勤乘坐的方向，按用户选择的方式。
  *
- * Null when never chosen — the card then shows an explicit "set your direction"
- * state. Deliberately no fallback to `preferredDirection`: that field anchors
- * which upstream lineId is direction 0, so pretending it is the commute
- * direction would display a route the user never picked.
+ * 从未选过时为 null —— 卡片那时显示一个显式的「设置方向」状态。刻意不回退到
+ * `preferredDirection`：那个字段锚定的是哪条线路 id 是方向 0，把它当成通勤方向会显示一条
+ * 用户从未选过的线路。
  */
 function directionFor(f: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
   return effectiveCommuteDirection(f, purpose)
 }
 
-/** Details of both directions of a favourite, keyed by its own direction numbers. */
+/** 一个关注两个方向的详情，按它自己的方向号索引。 */
 function detailsOf(f: UserFavoriteLine): { 0: LineDetail | undefined, 1: LineDetail | undefined } {
   const primary = (f.preferredDirection === 1 ? 1 : 0) as 0 | 1
   const other = (1 - primary) as 0 | 1
@@ -267,12 +256,10 @@ function detailsOf(f: UserFavoriteLine): { 0: LineDetail | undefined, 1: LineDet
 }
 
 /**
- * The platform the user is standing at, resolved per direction.
+ * 用户站着的那个站台，按方向分别解析。
  *
- * Both directions call at the same named stop from opposite sides of the road,
- * so the shared name anchors the card while each direction contributes its own
- * order. A direction with no such stop reports a null order and simply gets no
- * row — never the other direction's timings.
+ * 两个方向从马路对侧停靠同一个同名站，所以共用的站名锚定卡片，而每个方向贡献它自己的站序。
+ * 一个方向没有这个站时报出 null 站序并且干脆没有行 —— 绝不是另一个方向的时刻。
  */
 const nearbyByFavorite = computed<Record<string, ReturnType<typeof resolveNearbyStop>>>(() => {
   const coords = locationStore.userCoords
@@ -285,12 +272,11 @@ const nearbyByFavorite = computed<Record<string, ReturnType<typeof resolveNearby
 })
 
 /**
- * Whether the app has a position, in the state the location store reports.
+ * 应用是否有位置，按位置 store 报告的状态。
  *
- * Derived from the store's OWN reads — the fix, the request in flight, and the
- * request that failed — rather than from a second guess in the template. A nearby
- * card's empty state has two causes (no fix at all, or a fix nothing resolves
- * from) and the cards receive this so they can word each as what it is.
+ * 由 store「自己」的那几项读取推出 —— 定位、在途的请求、失败的请求 —— 而不是模板里的第二次
+ * 猜测。附近卡片的空状态有两种成因（根本没有定位，或定位来了但解析不出任何站），卡片收到这个
+ * 状态，好把每种说成它本来的样子。
  */
 const nearbyLocation = computed<NearbyLocationState>(() => nearbyLocationStateOf({
   hasFix: locationStore.userCoords !== null,
@@ -300,17 +286,15 @@ const nearbyLocation = computed<NearbyLocationState>(() => nearbyLocationStateOf
 }))
 
 /**
- * Which direction leads on a nearby card.
+ * 附近卡片上哪个方向领起。
  *
- * Order of preference:
- *   1. a manual pick for this line, while it is still in season;
- *   2. the commute leg the current slot belongs to — leaving for work leads with
- *      the morning board-stop direction, heading home with the evening one;
- *   3. direction 0.
+ * 优先顺序：
+ *   1. 这条线路的手动选择，且在有效期内；
+ *   2. 当前时段所属的那一段通勤 —— 出门上班用早上的上车点方向，回家用晚上的；
+ *   3. 方向 0。
  *
- * Deliberately never arrival time. The two directions call at opposite kerbs, so
- * a bus that happens to be closer across the road must not take over the
- * headline — that would make the big ETA mean a different trip every refresh.
+ * 刻意绝不用到站时间。两个方向停靠对侧路缘，所以马路对面恰好更近的一班车不能接管头条 ——
+ * 那会让那个大号的预计到站每次刷新都指另一段行程。
  */
 function nearbyPrimaryDirection(
   f: UserFavoriteLine,
@@ -326,8 +310,7 @@ function nearbyPrimaryDirection(
     return override.direction
   }
 
-  // The user's stated direction for this slot wins when that platform exists
-  // here; outside the commute slots they have expressed no preference.
+  // 用户为这个时段声明的方向，在那个站台存在时胜出；在通勤时段之外他们没有表达过偏好。
   const purpose = currentMode.value === 'morning'
     ? 'morning'
     : currentMode.value === 'evening' ? 'evening' : null
@@ -340,11 +323,10 @@ function nearbyPrimaryDirection(
 }
 
 /**
- * One card per followed ROUTE.
+ * 每条关注的「线路」一张卡片。
  *
- * Commute modes read the direction the user chose for that slot and yield a
- * single row. Nearby mode anchors on the located platform and yields one row
- * per direction that actually calls there.
+ * 通勤模式读用户为该时段选的方向，给出一行。附近模式锚定定位到的站台，为每个真的停靠那里的
+ * 方向给出一行。
  */
 const cardsData = computed<MiniCardConfig[]>(() => {
   const mode = currentMode.value
@@ -362,7 +344,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         const detail = both[direction]
         if (!detail || !located) continue
         const order = located.perDirection[direction]?.order ?? null
-        if (order === null) continue // this direction has no platform here
+        if (order === null) continue // 这个方向在这里没有站台
         rows.push({
           lineId: resolveFavoriteLineId(f, direction) ?? detail.lineId,
           direction,
@@ -390,16 +372,14 @@ const cardsData = computed<MiniCardConfig[]>(() => {
 
     const purpose = mode
     const direction = directionFor(f, purpose)
-    // The stop the user stored for this leg, whether or not the chosen direction
-    // calls there — the card's `stopName` is only the one it can report on.
-    const boardStop = resolveBoardStop(f, purpose) ?? null
-    // No direction chosen yet: render the card with its honest empty state
-    // rather than defaulting to direction 0, which would show a route the user
-    // never said they ride.
+    // 用户为这一段存下的那个站，以它本来的身份：站名「与」站序（`resolveBoardStopRef`）。所选
+    // 方向是否停靠那里 —— 以及它是两个同名站中的「哪一个」 —— 都从这一对读出，绝不只看站名。
+    const boardStop = resolveBoardStopRef(f, purpose)
+    // 还没选方向：让卡片带着它诚实的空状态渲染，而不是退回到方向 0 —— 那会显示一条用户从没
+    // 说过他乘坐的线路。
     if (direction === null) {
-      // Nothing is configured for this leg, so there is no row to read a target
-      // from. The route itself is still viewable, so point at the favourite's
-      // own primary lineId — the anchor `preferredDirection` describes.
+      // 这一段什么都没配置，所以没有行可以读出目标。线路本身仍看得见，所以指向关注行自己的主
+      // 线路 id —— `preferredDirection` 所描述的那个锚点。
       cards.push({
         lineName: f.lineName,
         directionName: '',
@@ -409,7 +389,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         isSubway,
         isPinned: f.isPinned,
         rows: [],
-        legState: commuteLegStateOf({ direction: null, stopName: boardStop, stops: undefined }),
+        legState: commuteLegStateOf({ direction: null, stop: boardStop, stops: undefined }),
         primaryDirection: null,
         detailLineId: f.lineId,
         detailDirection: (f.preferredDirection === 1 ? 1 : 0) as 0 | 1,
@@ -419,7 +399,10 @@ const cardsData = computed<MiniCardConfig[]>(() => {
     }
 
     const detail = both[direction]
-    const stop = boardStop ? detail?.stops.find(s => s.name === boardStop) : undefined
+    // 这张卡片所关于的那个实体站，或存储的站在这个方向里定位不到时为 null（站名有歧义，或存的
+    // 站序列表里已经没有）。这里用 `find(name)` 会取第一个同名站，于是卡片的步行时间、到站分钟
+    // 与出发结论都是为一个用户没有选的站台算出来的。
+    const stop = commuteStopOf(f, purpose, detail?.stops)
     cards.push({
       lineName: f.lineName,
       directionName: detail?.directionName ?? '',
@@ -436,11 +419,10 @@ const cardsData = computed<MiniCardConfig[]>(() => {
             directionName: detail.directionName,
           }]
         : [],
-      legState: commuteLegStateOf({ direction, stopName: boardStop, stops: detail?.stops }),
-      // A commute card carries one row, so the lead is that row regardless.
+      legState: commuteLegStateOf({ direction, stop: boardStop, stops: detail?.stops }),
+      // 通勤卡片只有一行，所以领起的就是那一行，无论如何。
       primaryDirection: null,
-      // Direction is chosen here, but the stop may be unset: fall back to the
-      // direction's own lineId so the card stays tappable either way.
+      // 方向在这里是选了的，但上车点可能未设：回退到该方向自己的 lineId，使卡片两种情况都点得动。
       detailLineId: resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId,
       detailDirection: direction,
       favoriteId: f.id ?? null,
@@ -450,12 +432,11 @@ const cardsData = computed<MiniCardConfig[]>(() => {
 })
 
 /**
- * Load static line details for ALL favorites of the current city (both
- * directions), cached client-side. Must iterate cityFavorites — not cardsData —
- * otherwise the cache would never be primed and cards would never appear.
+ * 为当前城市的所有关注（两个方向）加载静态线路详情，客户端缓存。必须遍历 cityFavorites 而不是
+ * cardsData，否则缓存永远不会被填充，卡片也永远不会出现。
  *
- * Each direction resolves to its OWN upstream lineId: bus routes carry a
- * distinct id per direction (reverseLineId), subway reuses one id for both.
+ * 每个方向解析到它「自己」的线路 id：公交线路每个方向一个 id（reverseLineId），地铁两个方向
+ * 共用一个。
  */
 async function ensureDetails(): Promise<void> {
   const nextCache = { ...detailCache.value }
@@ -463,9 +444,8 @@ async function ensureDetails(): Promise<void> {
   const tasks: Array<Promise<void>> = []
 
   for (const f of cityFavorites.value) {
-    // Each direction the route actually has, with the lineId serving it. A
-    // single-direction route yields one entry, so nothing fetches a phantom
-    // reverse leg that upstream does not have.
+    // 线路实际拥有的每个方向，以及服务它的 lineId。单方向线路只产出一个条目，于是不会去取一条
+    // 数据源根本没有的反向段。
     for (const { direction: dir, lineId } of favoriteDirections(f)) {
       const key = `${lineId}_${dir}`
       if (nextCache[key]) continue
@@ -483,7 +463,7 @@ async function ensureDetails(): Promise<void> {
           }
         }
         catch {
-          // Leave uncached: card shows honest loading/unavailable state
+          // 保持未缓存：卡片会显示诚实的加载中 / 不可用状态。
         }
       })())
     }
@@ -494,35 +474,30 @@ async function ensureDetails(): Promise<void> {
   }
 }
 
-/** Arrival feed per card key: lineId_direction -> station arrivals response. */
+/** 每张卡片键上的到站 feed：lineId_direction -> 那一行的到站数据，带着它读取的状态。 */
 type StationArrivalsFeed = ArrivalsFeed
-const arrivalsMap = shallowRef<Record<string, StationArrivalsFeed | null>>({})
+const arrivalsMap = shallowRef<Record<string, ArrivalsRead>>({})
 
 function arrivalsKey(lineId: string, direction: number): string {
   return `${lineId}_${direction}`
 }
 
 /**
- * Fetch real ETAs for every row of every card via the station-arrivals
- * endpoint (the server filters passed buses and honours the upstream -1
- * sentinel).
+ * 通过站点到站端点，为每张卡片的每一行取真实预计到站（服务端过滤已过的车，并遵守 -1 哨兵）。
  *
- * Each row carries its OWN order for the displayed stop, so a direction that
- * numbers the stop differently still queries its own timetable — borrowing the
- * other direction's order would silently return a different station's data,
- * because the server matches by order first.
+ * 每一行携带它「自己」对显示站的站序，所以把该站编号编得不同的方向仍查询它自己的时刻表 ——
+ * 借用另一个方向的站序会无声地返回另一个站的数据，因为服务端先按站序匹配。
  */
 async function refreshAllArrivals(): Promise<void> {
-  const nextMap: Record<string, StationArrivalsFeed | null> = {}
+  const nextMap: Record<string, ArrivalsRead> = {}
 
   const tasks = cardsData.value.flatMap(async (card) => {
     if (!card.stopName) return
     for (const row of card.rows) {
       const key = arrivalsKey(row.lineId, row.direction)
-      if (row.stopOrder === null) {
-        nextMap[key] = null
-        continue
-      }
+      // 没有站台就没有要问的东西：这一行不会有请求，因此也没有读取可报（`cardsData` 同样只生成
+      // 有站序的行 —— 两处都以「有站台」为前提）。
+      if (row.stopOrder === null) continue
       try {
         const qs = new URLSearchParams({
           direction: String(row.direction),
@@ -534,10 +509,14 @@ async function refreshAllArrivals(): Promise<void> {
           `/api/transit/lines/${encodeURIComponent(row.lineId)}/stations/${encodeURIComponent(card.stopName)}/arrivals?${qs.toString()}`,
         )
         const json = await res.json()
-        nextMap[key] = json.success ? (json.data as StationArrivalsFeed) : null
+        // 答了才是读数，没有 data 的应答与异常一样是「没答上来」；两种都记下来，让卡片各自说自己的
+        // 那句话。先前这里把失败写成 null，卡片就无法把它与「读了、确实没有车」分开。
+        nextMap[key] = json.success && json.data
+          ? { state: 'read', value: json.data as StationArrivalsFeed }
+          : { state: 'unreadable' }
       }
       catch {
-        nextMap[key] = null
+        nextMap[key] = { state: 'unreadable' }
       }
     }
   })
@@ -554,13 +533,11 @@ function goToDetail(lineId: string, direction: number): void {
 }
 
 /**
- * F11's entry on this screen: every line the cards are reading, in the order the
- * cards are shown, with the repeated one dropped — a line read twice is one
- * reading, and asking for it twice would spend two upstream reads in one press.
+ * F11 在本屏的入口：卡片正在读的每一条线路，按卡片显示的顺序，去掉重复的那条 —— 一条线路读两次
+ * 就是一次读数，要两次会在一次按压里花掉两次读取。
  *
- * The endpoint reads what it is asked for and nothing else, so the screen that
- * shows the cards is the one that names them; a line with no row on screen (no
- * board stop, no platform here) is not named, because nothing is reading it.
+ * 端点只读它被点名的东西，所以显示卡片的界面就是点名它们的那个；屏幕上没有行的线路（没有上车
+ * 点、这里没有站台）不被点名，因为没有东西在读它。
  */
 const refreshTargets = computed<RefreshLiveTarget[]>(() => {
   const seen = new Set<string>()
@@ -581,17 +558,14 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => {
 })
 
 /**
- * The lines one press may actually name. The endpoint bounds the count, so the
- * screen's leading rows go and the rest wait for the next press — `covered`
- * against `wanted` is reported on the control, because a refresh of part of the
- * screen must not read as a refresh of all of it.
+ * 一次按压实际可以点名的线路。端点限定了条数，所以本屏最前面的几行会去，其余等下一次按压 ——
+ * `covered` 对 `wanted` 会在控件上报告，因为「刷新了屏幕的一部分」不能被读成「刷新了全部」。
  */
 const refreshNamed = computed(() => refreshTargets.value.slice(0, REFRESH_MAX_LINES))
 
 /**
- * The state line under the button — its coarse state, which is what a live region
- * announces, and the seconds beside it, which are not announced at all. Null when
- * there is nothing to report.
+ * 按钮下面那一行状态 —— 它的粗粒度状态（live region 播报的就是它），以及旁边的秒数（完全不
+ * 播报）。没有东西可报时为 null。
  */
 const refreshStatus = computed(() => refreshStatusTextOf({
   inFlight: refreshInFlight.value,
@@ -599,20 +573,18 @@ const refreshStatus = computed(() => refreshStatusTextOf({
   waitSeconds: refreshWaitSecondsLeft.value,
   wanted: refreshTargets.value.length,
   covered: refreshNamed.value.length,
-  // The targets are the arrival rows of the followed lines, so the list's own
-  // tri-state is this screen's to state: an unreadable list leaves the same empty
-  // array behind as an answered empty one, and the control must not claim a list
-  // nobody read holds no line to re-read. While the read is still open the same
-  // applies — this screen has not yet learned what it is showing.
+  // 这些目标是关注线路的到站行，所以列表自己的三态由本屏陈述：一份读不到的列表与一份答了但为
+  // 空的列表留下的是同一个空数组，而控件不能声称一份没人读过的列表里没有可重读的线路。读取还
+  // 没回来时同理 —— 本屏还不知道自己在显示什么。
   targetsRead: favouritesRead.value === 'read',
 }))
 
-/** The reading the last refresh obtained, as the freshness line reports it. */
+/** 上一次刷新取到的读数，按新鲜度那一行报告的方式。 */
 const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
 
 /**
- * Tone of the state line. The words carry the state; the tone only backs them up,
- * so nothing here is the only signal of anything.
+ * 状态那一行的色调。话本身携带状态；色调只是给它们撑腰，所以这里没有任何东西是任何信息的
+ * 唯一信号。
  */
 const refreshStatusClass = computed(() => {
   if (refreshOutcome.value === 'throttled') return 'text-amber-400'
@@ -624,28 +596,22 @@ const refreshStatusClass = computed(() => {
 })
 
 /**
- * Ids the button points at, so the state is read out together with the control
- * instead of being a separate thing to find.
+ * 按钮指向的 id，使状态与控件一起被读出，而不是另一个要去找的东西。
  */
 const refreshDescribedBy = computed(() => refreshStatus.value
   ? 'refresh-freshness refresh-status'
   : 'refresh-freshness')
 
 /**
- * True for the whole of a press: the request that spends the window, and the card
- * re-read that shows what it obtained. A press landing between the two would ask
- * the server a second time inside the window the first one just spent, and be
- * refused for it.
+ * 一次按压的全程都为真：花掉窗口的那个请求，以及显示它取到了什么的卡片重读。落在两者之间的
+ * 一次按压会在第一个刚花掉的窗口里再问服务端一次，并因此被拒。
  */
 const refreshing = shallowRef(false)
 
 /**
- * Pressed: ask for a re-read through the shared request, then re-read the cards so
- * they show what that request obtained.
+ * 按下：通过共享请求要一次重读，然后重读卡片，使它们显示那个请求取到的东西。
  *
- * Only a refresh that obtained a reading re-reads them: a refusal or a failure
- * carried nothing, and re-reading then would only re-ask for the values already
- * on screen.
+ * 只有取到读数的刷新才重读它们：一次拒绝或失败什么都没带，那时重读只会再问一遍屏幕上已有的值。
  */
 async function onRefresh(): Promise<void> {
   refreshing.value = true
@@ -659,11 +625,10 @@ async function onRefresh(): Promise<void> {
 }
 
 /**
- * Reload everything for the active city: favourites, then static detail, then arrivals.
+ * 为当前城市重新加载一切：关注线路、静态详情、到站数据。
  *
- * The first read's ANSWER is recorded as well as its result: everything below is derived
- * from the list it returns, so a failed read has to be stated rather than left to look like
- * a city with nothing followed.
+ * 第一次读取的「答案」也被记下来：下面的一切都由它返回的列表推出，所以一次失败的读取必须被
+ * 陈述，而不是看起来像一个什么都没关注的城市。
  */
 async function reloadForCurrentCity(): Promise<void> {
   favouritesRead.value = (await transitStore.fetchFavorites()) ? 'read' : 'unreadable'
@@ -671,7 +636,7 @@ async function reloadForCurrentCity(): Promise<void> {
   await refreshAllArrivals()
 }
 
-// City changed -> drop caches and reload for the new city
+// 城市变了 -> 丢掉缓存并为新城市重新加载
 watch(
   () => cityStore.currentCode,
   () => {
@@ -681,7 +646,7 @@ watch(
   },
 )
 
-// Mode switched -> refresh arrivals for the newly displayed direction(s)
+// 模式变了 -> 为新显示的方向刷新到站数据
 watch(
   () => currentMode.value,
   () => {
@@ -689,7 +654,7 @@ watch(
   },
 )
 
-// A GPS fix landing in nearby mode fills the nearest-stop anchors
+// 附近模式下到来的定位会填充最近站锚点
 watch(
   () => locationStore.userCoords,
   (coords) => {
@@ -697,7 +662,7 @@ watch(
   },
 )
 
-// Favorites changed (added/removed in settings) -> prime details for new lines
+// 关注变了（在设置里增删）-> 为新线路预取详情
 watch(
   () => cityFavorites.value.map(f => `${f.lineId}_${f.cityCode}`).join('|'),
   async () => {
@@ -717,10 +682,10 @@ onMounted(() => {
 
 <template>
   <div class="space-y-2.5 sm:space-y-5 pb-12">
-    <!-- Smart Context Hero Banner -->
+    <!-- 智能场景横幅 -->
     <div class="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5 md:p-6">
       <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
-        <!-- Left Column: Mode badge, Time, Title -->
+        <!-- 左列：模式角标、时间、标题 -->
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
@@ -733,25 +698,21 @@ onMounted(() => {
           <h2 class="mt-1.5 text-xl font-bold tracking-tight text-white sm:mt-2 md:text-2xl">
             {{ commuteProfile?.description || `${cityStore.currentCityName}通勤实时态势监控` }}
           </h2>
-          <!-- States what the card does and stops. The line this replaced named a
-               data source, described how the number is computed, and borrowed a
-               display-wall register the product does not have — while claiming a
-               kind of data F4 forbids claiming for a subway line, whose trains are
-               generated from the timetable. -->
+          <!-- 说出卡片做什么，然后停下。被它替换掉的那句话点名了一个数据源、描述了数字怎么算出来，
+             还借用了产品并没有的大屏语域 —— 同时宣称了一种 F4 禁止为地铁线路宣称的数据。 -->
           <p class="mt-1 hidden text-xs text-slate-400 md:block lg:text-base">
             点击卡片查看该线路的在途车辆与到站时刻
           </p>
         </div>
 
-        <!-- Right Column: mode switcher (auto/morning/evening/nearby) + locate.
-             Full width on mobile (switcher and locate stack), inline from md up. -->
+        <!-- 右列：模式切换（自动/上班/下班/附近）+ 定位。手机上占满整行（切换器与定位竖排），
+             md 起改为行内。 -->
         <div class="flex w-full shrink-0 flex-col gap-1.5 md:w-auto md:flex-row md:items-center md:gap-2">
           <div
             v-if="canSwitchAny"
             class="flex h-10 w-full items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 p-1 shadow-sm md:w-auto"
           >
-            <!-- Auto: hands control back to the configured commute hours. Active
-                 whenever the user has not pinned a mode for the current slot. -->
+            <!-- 自动：把控制权交回配置的通勤时段。用户没有为当前时段钉住模式时它处于选中态。 -->
             <button
               class="flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium whitespace-nowrap transition md:flex-none md:px-2.5"
               :class="!isManual ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
@@ -797,27 +758,22 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- F11: the home screen's one refresh entry. Both screens ask through the
-         same request, so the window a press spends is shared rather than one per
-         screen. The state line is this control's other job: a refusal with the
-         wait left on the window, a failure, or the connection being gone is
-         reported here, where the user is looking. -->
+    <!-- F11：首页唯一的刷新入口。两块界面通过同一个请求发问，所以一次按压花掉的窗口是共享的，
+         而不是每屏一个。状态那一行是这个控件的另一项职责：带剩余等待的拒绝、一次失败、或连接
+         断了，都在这里报告 —— 就在用户看着的地方。 -->
     <section
       aria-label="数据刷新"
       class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:rounded-3xl sm:p-4"
     >
       <div class="min-w-0">
-        <!-- The reading's own instant, and the kind of value it is. A reading
-             that was never obtained reports no time at all. -->
+        <!-- 读数自己的时刻，以及它是哪一类值。从未取到的读数根本不报时间。 -->
         <p id="refresh-freshness" class="text-xs text-slate-400 lg:text-base">
           {{ refreshFreshness.text }}
         </p>
-        <!-- The state line. Only the coarse state sits inside the live region: the
-             seconds are rendered beside it, because a countdown in a live region
-             queues one announcement per second of the wait. The region is rendered
-             before it has anything to say — one created together with its first
-             word is not announced at all by some screen readers. The two spans sit
-             against each other, so the line reads as it did from one element. -->
+        <!-- 状态那一行。只有粗粒度状态坐在 live region 里：秒数渲染在它旁边，因为 live region 里的
+             倒计时会为等待的每一秒排一条播报。这个 region 在还没有话可说时就已经渲染 —— 与它
+             第一句话一起创建的 region，某些读屏软件根本不播报。两个 span 紧挨着，所以这一行读
+             起来仍像一个元素说出来的。 -->
         <p
           id="refresh-status"
           class="text-xs lg:text-base"
@@ -841,9 +797,8 @@ onMounted(() => {
       </button>
     </section>
 
-    <!-- A pin write that failed: the store already rolled the card back, so the
-         reason is the only thing left to say. role="alert" announces it as a
-         status message (SC 4.1.3) instead of leaving it to be noticed. -->
+    <!-- 一次失败的置顶写入：store 已经把卡片回滚了，所以原因就是唯一剩下要说的话。
+         role="alert" 把它作为状态消息播报，而不是让它等着被注意到。 -->
     <p
       v-if="pinError"
       role="alert"
@@ -853,8 +808,8 @@ onMounted(() => {
       <span>{{ pinError }}</span>
     </p>
 
-    <!-- Cards Grid: fluid responsive grid from 1 col on mobile to 4 cols on ultrawide.
-         Gap follows the page rhythm (space-y) so card-to-card matches nav-to-hero. -->
+    <!-- 卡片网格：流式响应网格，手机 1 列到超宽 4 列。间距跟随页面节奏（space-y），使卡片之间
+         与导航到主区之间一致。 -->
     <CardGrid
       v-if="cardsData.length > 0"
       :cards="cardsData"
@@ -866,9 +821,8 @@ onMounted(() => {
       @toggle-pin="onTogglePin"
     />
 
-    <!-- Empty state. WHICH empty it is comes from the read's own state: an unreadable list
-         is stated as unreadable and offers a retry, and only an ANSWERED empty list is
-         worded as 「还没有关注线路」. -->
+    <!-- 空状态。「哪一种空」来自读取自己的状态：读不到的列表被陈述为读不到并给出重试，只有答了
+         且为空的列表才被措辞成「还没有关注线路」。 -->
     <EmptyState
       v-else
       :city-name="cityStore.currentCityName"

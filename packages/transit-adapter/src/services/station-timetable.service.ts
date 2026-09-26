@@ -9,8 +9,8 @@ import {
 import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
 
 /**
- * Normalize a station name so that "甲站站" (amap) matches "甲站" (official
- * timetable key). Strips a trailing 站 and any parenthetical suffix, then trims.
+ * 规范化站名，使 "甲站站"（高德）与 "甲站"（官方时刻表键）能对上：
+ * 去掉结尾的「站」与任意括号后缀，再 trim。
  */
 export function normalizeStationName(name: string): string {
   return String(name || '')
@@ -20,12 +20,9 @@ export function normalizeStationName(name: string): string {
 }
 
 /**
- * Registry of precise, officially-published station timetables.
+ * 官方发布的站点精确时刻表注册表。
  *
- * Indexed by `lineId::stationName` for O(1) lookup. When a query hits a station
- * we hold an exact timetable for, callers get minute-accurate departures instead
- * of the whole-line headway simulation. Extendable: drop a new generated data
- * file into STATION_TIMETABLES to cover more stations/cities.
+ * 可扩展：把新的生成数据文件放进 STATION_TIMETABLES 即可覆盖更多站点/城市。
  */
 export class StationTimetableService {
   private readonly index = new Map<string, StationTimetable>()
@@ -40,12 +37,10 @@ export class StationTimetableService {
     return `${lineId}::${normalizeStationName(stationName)}`
   }
 
-  /** Whether we hold an exact timetable for this line+station. */
   has(lineId: string, stationName: string): boolean {
     return this.index.has(this.key(lineId, stationName))
   }
 
-  /** All station names we hold exact timetables for on a given line. */
   stationsForLine(lineId: string): string[] {
     const out: string[] = []
     for (const t of this.index.values()) {
@@ -55,9 +50,8 @@ export class StationTimetableService {
   }
 
   /**
-   * Query exact upcoming departures at a station.
-   * Returns null when no precise timetable is registered (caller should fall
-   * back to the simulated engine).
+   * 查询某站接下来的精确发车；未登记精确时刻表时返回 null
+   * （调用方应回落到推演引擎）。
    */
   query(
     lineId: string,
@@ -71,11 +65,8 @@ export class StationTimetableService {
     return queryStationArrivals(t, direction, nowSecOfDay, opts)
   }
 
-  /**
-   * All departures of the current "operating day" at a station, in seconds.
-   * After-midnight tail entries are shifted +24h so the timeline is continuous
-   * for a 00:00~28:00 operating day.
-   */
+  /** 某站当前「运营日」的全部发车，按秒。跨 0 点的尾班统一 +24h，
+   *  使 00:00~28:00 的运营日时间轴连续。 */
   allDeparturesToday(
     lineId: string,
     stationName: string,

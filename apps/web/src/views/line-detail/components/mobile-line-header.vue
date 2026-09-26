@@ -16,7 +16,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <!-- Mobile Compact Single-Line Header: ~44px height, leaves 80%+ of screen for canvas (screens < md) -->
+  <!-- 移动端单行头部：约 44px 高，把 80%+ 的屏幕留给画布（md 以下） -->
   <div class="flex md:hidden shrink-0 items-center justify-between gap-1.5 rounded-xl border border-slate-800 bg-slate-900/90 px-2 py-1.5 shadow-md">
     <div class="flex min-w-0 items-center gap-1.5">
       <RouterLink
@@ -27,7 +27,7 @@ const emit = defineEmits<{
         <ArrowLeft class="h-3.5 w-3.5" />
       </RouterLink>
 
-      <!-- Clickable Line Badge: triggers full line details sheet -->
+      <!-- 可点的线路徽标：打开完整线路详情面板。 -->
       <button
         class="flex h-8 shrink-0 items-center justify-center rounded-lg border px-2 font-mono text-xs font-bold whitespace-nowrap active:scale-95"
         :class="accent.lineName"
@@ -37,7 +37,7 @@ const emit = defineEmits<{
         {{ detail.lineName }}
       </button>
 
-      <!-- Direction with quick toggle -->
+      <!-- 方向与快速切换。 -->
       <div class="flex min-w-0 items-center gap-1">
         <span class="min-w-0 truncate text-xs font-bold text-white">
           {{ detail.directionName }}
@@ -54,7 +54,7 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <!-- Right: Live bus count chip + info trigger -->
+    <!-- 右侧：在途车辆数芯片与详情入口。 -->
     <button
       class="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 px-2 text-xs font-mono active:scale-95"
       title="在途车辆与线路详情"

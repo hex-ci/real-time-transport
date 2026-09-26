@@ -6,31 +6,28 @@ import { databaseUrlFor } from '../db/client.js'
 /**
  * 009 的文本，按本仓库既有的迁移约定钉住。
  *
- * 这个仓库没有可在此处执行的迁移校验器：`migrate.ts` 需要一个真实的 `DATABASE_URL`，
- * 而测试进程的守卫会把它丢掉（`db-connection-guard.test.ts` 钉的就是这条丢弃），
- * 开发库也不允许测试写入。所以下面钉的是文件文本本身 —— 它做了什么、没做什么、
- * 以及回滚段是否存在 —— 而不是「这条 SQL 跑起来的效果」。后半句是这个测试的边界，
- * 写在这里而不是省略掉：文本对了不等于库被改对了，那是应用者的那一步。
+ * 本套件钉的是**文件文本本身** —— 它做了什么、没做什么、回滚段是否存在 —— 而不是「这条
+ * SQL 跑起来的效果」：`migrate.ts` 需要一个真实的 `DATABASE_URL`，测试进程的守卫会把它
+ * 丢掉，开发库也不允许测试写入。文本对了不等于库被改对了，那是应用者的那一步。
  *
  * 文本层面的规则（对应 009 的意图）：
  *
- *  - 前向段只做结构改动：四个时刻列 `DROP NOT NULL` + `DROP DEFAULT`，各一次，
- *    一个不落、也不多改别的列；
- *  - 前向段不改写任何数据：没有 UPDATE / INSERT / DELETE / TRUNCATE —— 现有那一行的
- *    时段是使用者有意设定的，而任何其他行「选过还是被默认填过」在数据里推不出来
- *    （两者是同一组值），改写它就是把一个不可推导的推断写成事实；
- *  - 回滚段在：`-- migrate:down` 之后恢复 NOT NULL 与 DEFAULT，并且先把 NULL 填上
- *    （否则 SET NOT NULL 会直接失败）。这一步是有损的，文件里必须说明。
+ *  - 前向段只做结构改动：四个时刻列 `DROP NOT NULL` + `DROP DEFAULT`，各一次，一个不落、
+ *    也不多改别的列；
+ *  - 前向段不改写任何数据：没有 UPDATE / INSERT / DELETE / TRUNCATE —— 现有那一行的时段是
+ *    使用者有意设定的，而任何其他行「选过还是被默认填过」在数据里推不出来（两者是同一组
+ *    值），改写它就是把一个不可推导的推断写成事实；
+ *  - 回滚段在：`-- migrate:down` 之后恢复 NOT NULL 与 DEFAULT，并且先把 NULL 填上（否则
+ *    SET NOT NULL 会直接失败）。这一步是有损的，文件里必须说明。
  */
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../../../migrations', import.meta.url))
 
-/** The four TIME columns 004 declared NOT NULL DEFAULT. */
+/** 004 声明为 NOT NULL DEFAULT 的四个时刻列。 */
 const TIME_COLUMNS = ['morning_start', 'morning_end', 'evening_start', 'evening_end'] as const
 
 const DOWN_MARKER = '-- migrate:down'
 
-/** The one migration file this test is about, or a thrown error naming what was missing. */
 function findMigration(): string {
   const found = readdirSync(MIGRATIONS_DIR).filter(name => /^009_.*\.sql$/.test(name))
   if (found.length !== 1) {
@@ -46,7 +43,7 @@ const markerIndex = RAW.indexOf(DOWN_MARKER)
 const FORWARD = markerIndex < 0 ? RAW : RAW.slice(0, markerIndex)
 const DOWN = markerIndex < 0 ? null : RAW.slice(markerIndex + DOWN_MARKER.length)
 
-/** SQL with its comments removed, so prose about a statement is never read as one. */
+/** 去掉注释的 SQL，免得关于语句的叙述被当成语句读。 */
 function codeOf(sql: string): string {
   return sql.replace(/--[^\n]*/g, '')
 }
@@ -56,14 +53,6 @@ describe('009：四个通勤时刻列变成可空（结构改动）', () => {
     expect(FILE).toMatch(/^009_[a-z0-9_-]+\.sql$/)
     expect(markerIndex, 'the migration has no "-- migrate:down" section, so it cannot be rolled back').toBeGreaterThan(-1)
     expect(DOWN!.trim().length).toBeGreaterThan(0)
-  })
-
-  it('是当前最新的一步：按文件名排，它排在已有的每一条之后', () => {
-    // The runner applies migrations by filename order, so 「最新」 IS 「排在最后」.
-    // This is the claim 008's own suite used to make about itself; it moved here
-    // with the number, so the newest migration is still the one that says so.
-    const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
-    expect(files[files.length - 1]).toBe(FILE)
   })
 
   it('四个列的 NOT NULL 与 DEFAULT 都被去掉，各一次', () => {

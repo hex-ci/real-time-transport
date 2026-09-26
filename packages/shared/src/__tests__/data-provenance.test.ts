@@ -1,20 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import type { DataSourceType } from '../index.js'
+import type { DataProvenance, DataSourceType } from '../index.js'
 import {
   ArrivalRowSchema,
+  DataProvenanceSchema,
   arrivalProvenanceOf,
   listProvenanceOf,
   vehicleProvenanceOf,
 } from '../index.js'
 
 /**
- * F4: what KIND of number the user is looking at.
- *
- * The whole point of these tests is the boundary the feature exists to hold:
- * 「没有来源」 and 「实时」 are different facts. A value this app computed is not a
- * live reading, a value whose producer said nothing gets no mark, and no input
- * to these functions can round an unknown up to 实时.
+ * F4：用户正在看的是**哪一种**数。
+ * 本组测试钉住的正是该功能存在的边界：「没有来源」与「实时」是不同的事实 ——
+ * 产出方没声明的值不标记，没有任何输入能把未知抬成 实时，生成列车的报时也绝不读作 实时。
+ * 词汇表只保留**有产出路径**的那几档：本应用自算的那一档没有生产者，已整个删除。
  */
+
+/**
+ * 词汇表本身，两层各钉一次。
+ * 类型层：`Record<DataProvenance, true>` 少一个键就是编译错误，故成员被加回来时
+ * `pnpm typecheck` 先红；运行时断言只是把同一事实说第二遍。
+ */
+const VOCABULARY: Record<DataProvenance, true> = {
+  live: true,
+  schedule_simulation: true,
+  exact_timetable: true,
+}
+
+describe('the vocabulary keeps only the kinds something produces', () => {
+  it('is exactly the three marks the product can produce', () => {
+    expect(DataProvenanceSchema.options).toEqual(['live', 'schedule_simulation', 'exact_timetable'])
+    expect(Object.keys(VOCABULARY)).toEqual([...DataProvenanceSchema.options])
+  })
+
+  it('no longer carries the kind with no producer', () => {
+    expect(DataProvenanceSchema.options).not.toContain('position_estimate')
+    expect(DataProvenanceSchema.safeParse('position_estimate').success).toBe(false)
+  })
+})
 
 describe('vehicle provenance comes from the source the payload declared', () => {
   it('reads a real vehicle feed as 实时 and the timetable engine as 排班推演', () => {
@@ -29,8 +51,7 @@ describe('vehicle provenance comes from the source the payload declared', () => 
   })
 
   it('leaves a source this build does not know unclassified', () => {
-    // A third data source must never be rounded to the flattering answer: the
-    // fallthrough returns "no statement", not 实时.
+    // 第三种数据源绝不能被抬成讨喜的答案：默认分支返回「没有声明」而非 实时。
     expect(vehicleProvenanceOf('some_future_source' as DataSourceType)).toBeNull()
     expect(vehicleProvenanceOf('' as DataSourceType)).toBeNull()
   })
@@ -42,26 +63,18 @@ describe('an arrival minute is classified by how it was produced', () => {
   })
 
   it('keeps a vehicle seen at this platform as 实时', () => {
-    // The position is observed, not modelled — the one case a live vehicle's row
-    // states something the data source's own payload did not carry.
+    // 位置是观测到的而非模型算的：这是实时车辆唯一会陈述 payload 本身没有的东西的情形。
     expect(arrivalProvenanceOf({ vehicle: 'live', basis: 'at_platform' })).toBe('live')
   })
 
-  it('calls a minute this app computed from a live position 位置推算', () => {
-    expect(arrivalProvenanceOf({ vehicle: 'live', basis: 'our_estimate' })).toBe('position_estimate')
-  })
-
-  it('never lets this app\'s own arithmetic read as 实时', () => {
-    for (const vehicle of ['live', 'schedule_simulation'] as const) {
-      expect(arrivalProvenanceOf({ vehicle, basis: 'our_estimate' }))
-        .not.toBe('live')
-    }
+  it('calls a minute this app computed 实时 as well, its own kind having been dropped', () => {
+    // 词汇表不再有「本应用自算」那一档（没有产出路径），故真实车辆的每个非缺席分钟都是 实时；
+    // 此钉钉的是签名不再为该 basis 分叉。
+    expect(arrivalProvenanceOf({ vehicle: 'live', basis: 'our_estimate' })).toBe('live')
   })
 
   it('marks a simulated vehicle 排班推演 however the minute beside it was produced', () => {
-    // The engine puts a travelTimeSec on each of its trains, so a row can reach
-    // the "upstream sent the minute" branch while the train itself is generated.
-    // The vehicle decides.
+    // 车辆说了算：引擎会给每趟列车带上 travelTimeSec，故生成的车也能走到「上游给了分钟」的分支。
     for (const basis of ['upstream', 'at_platform', 'our_estimate'] as const) {
       expect(arrivalProvenanceOf({ vehicle: 'schedule_simulation', basis }))
         .toBe('schedule_simulation')
@@ -83,9 +96,8 @@ describe('a list states one provenance only when its rows agree', () => {
   })
 
   it('refuses to answer for a list that mixes sources', () => {
-    // One word would then be false about half the rows, and the caller renders a
-    // per-row mark instead.
-    expect(listProvenanceOf([{ provenance: 'live' }, { provenance: 'position_estimate' }])).toBeNull()
+    // 那样一个词会对一半的行说谎；调用方改为逐行标记。
+    expect(listProvenanceOf([{ provenance: 'live' }, { provenance: 'schedule_simulation' }])).toBeNull()
     expect(listProvenanceOf([{ provenance: 'exact_timetable' }, { provenance: 'live' }])).toBeNull()
   })
 
@@ -95,8 +107,7 @@ describe('a list states one provenance only when its rows agree', () => {
   })
 
   it('ignores unclassified rows when deciding', () => {
-    // An unclassified row is not a second opinion; it must not silence a list
-    // whose classified rows all agree.
+    // 未分类的行不是第二种意见：它不得让本就一致的行失去结论。
     expect(listProvenanceOf([{ provenance: 'live' }, {}])).toBe('live')
   })
 })
@@ -107,11 +118,10 @@ describe('the arrival row contract carries the value\'s own provenance', () => {
       time: '09:12',
       etaSeconds: 512,
       stopsAway: 4,
-      provenance: 'position_estimate',
+      provenance: 'schedule_simulation',
     })
-    // Asserted on the parsed output: `safeParse(...).success` alone would pass
-    // before this field existed, because Zod strips unknown keys.
-    expect(parsed.provenance).toBe('position_estimate')
+    // 断言解析后的输出：只断言 `safeParse(...).success` 会因为 Zod 丢弃未知键而在该字段存在前也通过。
+    expect(parsed.provenance).toBe('schedule_simulation')
   })
 
   it('accepts an exact-timetable row and a row that states nothing', () => {
@@ -130,6 +140,12 @@ describe('the arrival row contract carries the value\'s own provenance', () => {
       time: '09:12',
       etaSeconds: 512,
       provenance: 'realtime-ish',
+    }).success).toBe(false)
+    // 被删掉的成员不再是合法值：解析必须失败，而不是被接受或被悄悄丢弃。
+    expect(ArrivalRowSchema.safeParse({
+      time: '09:12',
+      etaSeconds: 512,
+      provenance: 'position_estimate',
     }).success).toBe(false)
   })
 })

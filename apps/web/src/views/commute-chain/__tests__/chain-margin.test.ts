@@ -5,22 +5,18 @@ import { MARGIN_BAND_COPY, chainConclusionOf, transferRowOf } from '../margin'
 import { conclusion, leg } from './chain-fixtures'
 
 /**
- * F10's core, per transfer: 「能不能赶上换乘点那班车」.
+ * F10 的核心，按换乘计：「能不能赶上换乘点那班车」。
  *
- * Three things are load-bearing here and none of them is a rendering detail:
+ * 三点承重，且都不是渲染细节：
  *
- *  1. the band and the minute are two views of ONE number, so a row cannot say
- *     充裕 beside a margin of 2;
- *  2. the margin is always stated WITH what it was measured against — the vehicle
- *     that was next at this platform when the user set off — because a margin
- *     with no reference is a number about no bus;
- *  3. when that reference has already gone the row prints NO margin, and says the
- *     numbers it does print belong to the NEXT vehicle. Printing 「余量 -2 分」
- *     beside the bus the user is about to board is the one failure this feature
- *     exists to avoid: it reads as that bus's own margin.
+ *  1. 档位与分钟是同一个数字的两个视角，故一行不能在余量为 2 时还说「充裕」；
+ *  2. 余量总是**连同**它所对照之物一起陈述——用户出发时在此站台下一班的车——因为没有参照的
+ *     余量是一个关于无车的数字；
+ *  3. 该参照已走时，该行不印余量，并声明它所印的数字属于**下一班**车。在用户即将上的车旁印
+ *     「余量 -2 分」正是本特性要避免的失败：它会被读成那班车自己的余量。
  */
 
-/** Everything one row prints, as the user reads it — the surface these rules are about. */
+/** 一行所印的全部，如用户读到——这些规则所关于的表面。 */
 function printedOf(row: ReturnType<typeof transferRowOf>): string {
   return [
     row.positionText,
@@ -37,7 +33,7 @@ function printedOf(row: ReturnType<typeof transferRowOf>): string {
 }
 
 describe('the band and the minute are two views of one number', () => {
-  /** The bands as the PRD names them, written out here so a relabelled band fails. */
+  /** PRD 命名的档位，写在此处，使改名的档位会失败。 */
   const LABELS: Record<ChainMarginBand, string> = {
     comfortable: '充裕',
     tight: '紧',
@@ -63,13 +59,11 @@ describe('the band and the minute are two views of one number', () => {
 })
 
 /**
- * F-F: the band's WORDS must cover the band the engine has.
+ * F-F：档位的**措辞**必须覆盖引擎实际划分的档位。
  *
- * `chainMarginBandOf` bands 紧 up to the tolerance with that boundary INCLUDED, so
- * the band is margins 1–3 minutes (verified against live readings: a margin of 4
- * bands 充裕, a margin of 3 bands 紧). The copy read 「就这一两分钟」, which is false
- * about the very case the boundary exists for — a row printing 「余量 3 分」 beside a
- * sentence claiming two. The engine is not the thing to fix here: the sentence is.
+ * `chainMarginBandOf` 把「紧」划到容忍度为止且**包含**该边界，故该档是 1–3 分钟。文案曾写
+ * 「就这一两分钟」，与它存在所针对的情形不符——一行印「余量 3 分」而句子里说两分钟。
+ * 此处要改的不是引擎，是那句话。
  */
 describe('the 紧 wording covers the band the engine actually bands', () => {
   it('is 紧 at the tolerance itself, and 充裕 one minute beyond it', () => {
@@ -101,8 +95,7 @@ describe('a margin is always stated with what it was measured against', () => {
     expect(row.marginText).toBe('余量 4 分')
     expect(row.waitText).toBe('站台等待 4 分')
     expect(row.vehicleText).toBe('乘这一班')
-    // What the number measures, in the row's own words: the bus that was next at
-    // this platform when the user set off — which here is the one being boarded.
+    // 该数字所测为何，用该行自己的话：用户出发时此站台下一班的车——此处即正要上的那班。
     expect(row.basisText).toContain('出门时最近的一班')
     expect(row.basisText).toContain('就是这一班')
   })
@@ -121,7 +114,7 @@ describe('a margin is always stated with what it was measured against', () => {
 })
 
 describe('a missed vehicle is never printed as this bus\'s margin', () => {
-  /** The case the engine calls `insufficient`: the reference has gone, the plan is the next bus. */
+  /** 引擎称为 `insufficient` 的情形：参照已走，计划是下一班。 */
   const missed = leg({
     marginMinutes: -2,
     waitMinutes: 6,
@@ -134,8 +127,7 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
     expect(row.referenceGone).toBe(true)
     expect(row.marginMinutes).toBeNull()
     expect(row.marginText).toBeNull()
-    // Not anywhere else either: no negative minute may reach the screen beside the
-    // vehicle the user is about to board.
+    // 别处也不行：不得有负分钟到达用户即将上车的车辆旁。
     expect(printedOf(row)).not.toMatch(/-\d/)
     expect(printedOf(row)).not.toContain('余量 -')
   })
@@ -145,7 +137,7 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
     expect(row.vehicleText).toBe('改乘下一班')
     expect(row.basisText).toContain('出门时最近的一班已经走了')
     expect(row.basisText).toContain('下一班')
-    // …and it is still that next vehicle's numbers the row carries.
+    // ……而该行携带的仍是那下一班车的数字。
     expect(row.waitText).toBe('站台等待 6 分')
   })
 
@@ -156,9 +148,8 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
   })
 
   it('withholds the number when the two signals contradict each other', () => {
-    // A payload whose id pair says "another vehicle" while the margin says zero is
-    // not a margin this page can attribute to a bus. Both signals are read, and
-    // the safe side of a contradiction is to print no number rather than a wrong one.
+    // 载荷的 id 对说「别的车」而余量说零，这不是本页能归给某班车的余量。两个信号都被读取，
+    // 矛盾的稳妥一侧是不印数字而非印错的数字。
     const contradicted = transferRowOf(leg({
       marginMinutes: 0,
       vehicleId: 'provider-vehicle-next',
@@ -169,11 +160,9 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
   })
 
   it('makes the row coherent when the payload contradicts itself: the band agrees with the withheld number', () => {
-    // The ids say "another vehicle" while the margin says zero or better. Both
-    // signals are read, so the number is withheld — and the band, the verdict and
-    // the vehicle all describe the bus being boarded, so none of them may be read
-    // from a number the row just refused to print. 「充裕」 beside 「改乘下一班」 is
-    // the contradiction this rule exists to make impossible.
+    // id 说「别的车」而余量为零或更好。两个信号都被读取，故不印该数字——且档位、判决与车辆
+    // 都描述正在上的那班车，故它们都不得取自该行刚拒绝印的数字。在「改乘下一班」旁写「充裕」
+    // 正是本规则要使之不可能的矛盾。
     const contradicted = transferRowOf(leg({
       marginMinutes: 0,
       waitMinutes: 6,
@@ -206,8 +195,7 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
   })
 
   it('withholds the number from a negative margin even when the ids agree', () => {
-    // The engine states the two are equivalent; a payload that broke that would
-    // otherwise print a negative margin beside the boarded vehicle.
+    // 引擎陈述两者等价；破坏该关系的载荷否则会在已上车车辆旁印出负余量。
     const broken = transferRowOf(leg({ marginMinutes: -3 }))
     expect(broken.marginMinutes).toBeNull()
     expect(printedOf(broken)).not.toMatch(/-\d/)
@@ -216,9 +204,8 @@ describe('a missed vehicle is never printed as this bus\'s margin', () => {
 
 describe('the vehicle is named the way this app names vehicles', () => {
   it('never prints the reading\'s own vehicle id', () => {
-    // `LiveBusSchema.id` is the provider's internal handle, and a generated train's
-    // is the model's own name (`train_<lineId>_d<direction>_dep<i>`). No screen in
-    // this app prints one, and this page must not start.
+    // `LiveBusSchema.id` 是提供方的内部句柄，生成列车的则是模型自己的名字
+    // （`train_<lineId>_d<direction>_dep<i>`）。本应用没有屏幕印它，本页也绝不能开始印。
     const row = transferRowOf(leg({
       vehicleId: 'train_subway_027_88_d0_dep3',
       referenceVehicleId: 'train_subway_027_88_d0_dep8',
@@ -260,11 +247,9 @@ describe('the chain states its tightest margin, and which transfer it belongs to
   })
 
   it('withholds the chain margin whenever the chain\'s own band says the reference has gone', () => {
-    // The chain's band is the engine's own, read from the binding margin — so a
-    // payload whose band says 不足 while its margin is not negative contradicts
-    // itself, and 不足 beside 「余量 4 分」 is exactly the pair this page may not
-    // print. (Unreachable through the engine, which derives the band from the same
-    // number; this is the page not printing a contradiction it was handed.)
+    // 链路的档位是引擎自己的，从约束余量读出——故载荷说「不足」而其余量非负即自相矛盾，
+    // 而「不足」与「余量 4 分」并列正是本页不得印的一对。（经由引擎不可达，它从同一个数字推出档位；
+    // 这里是页面不印别人递给它的矛盾。）
     const view = chainConclusionOf(conclusion(
       [leg({ seq: 0, marginMinutes: 4 })],
       { band: 'insufficient', marginMinutes: 4 },
@@ -277,15 +262,14 @@ describe('the chain states its tightest margin, and which transfer it belongs to
   })
 
   it('never adds the legs up into a total', () => {
-    // The chain ends at its last leg's alight station: there is no destination and
-    // no total arrival minute, and none may be computed here.
+    // 链路止于其最后一段的下车站：没有目的地、没有总到站分钟，此处也不得计算。
     const view = chainConclusionOf(conclusion([
       leg({ seq: 0, alightMinutes: 12, rideMinutes: 8 }),
       leg({ seq: 1, alightMinutes: 20, rideMinutes: 10, marginMinutes: 2 }),
     ]))
     expect(view.legs.map(item => item.alightText)).toEqual(['12 分钟后到下车站', '20 分钟后到下车站'])
     const printed = view.legs.map(printedOf).join(' ')
-    // 12 + 20 = 32 is the number a tail total would print, and it must appear nowhere.
+    // 12 + 20 = 32 是尾部合计会印的数字，它必须不出现于任何地方。
     expect(printed).not.toContain('32')
   })
 })
@@ -333,8 +317,7 @@ describe('a margin too small to resolve gets two readings, and invents neither',
 
   it('states no branch when the margin is resolvable', () => {
     const chain = conclusion([leg({ marginMinutes: 4 })], {
-      // A payload that carried branches beside a resolvable margin: the band is the
-      // single answer and the two readings would contradict it, so they are not stated.
+      // 载荷在可解析余量旁携带分支：档位是唯一答案，两个读数会与之矛盾，故不陈述。
       branches: {
         asPlanned: { vehicleId: 'provider-vehicle-1', alightMinutes: 14 },
         nextVehicle: { vehicleId: 'provider-vehicle-2', alightMinutes: 26 },

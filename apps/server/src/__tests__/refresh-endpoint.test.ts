@@ -8,46 +8,37 @@ import { TransitService } from '../services/transit.service.js'
 import { buildApp } from '../app.js'
 
 /**
- * F11's server half: `POST /api/transit/refresh`.
+ * F11 的服务端部分：`POST /api/transit/refresh`。
  *
- * The refresh exists for the one thing the push loop cannot give: a definite
- * reading, now, with the instant it was obtained attached to it. Two hazards
- * shape this file.
+ * 刷新只为一件事存在：现在就要一个确定的读数，并附上取得它的时刻。两个危险塑造了这个文件。
  *
- *  1. It is the only entry that can bypass the shared live cache, so it is the
- *     one place a user can spend upstream quota on demand. Hence a cooldown
- *     keyed by (user, data class) — shared by every screen, because two screens
- *     refreshing once each must not equal a bypass — and a refusal that spends
- *     no upstream call of its own.
- *  2. A refresh that cannot reach the upstream must say so. Reporting a fresh
- *     `lastUpdatedAt` for a reading nobody obtained is the failure mode this
- *     project treats as worse than an error.
+ * 1. 它是唯一能绕过共享实时缓存的入口，因此也是用户能按需花掉上游配额的地方。于是有了按
+ *    （用户, 数据类别）的冷却 —— 所有屏幕共享它，两块屏幕各刷一次不等于绕过 —— 以及一次
+ *    不花任何上游调用的拒绝。
+ * 2. 够不到上游的刷新必须说出来。为一个谁都没取得的读数报一个新鲜的 `lastUpdatedAt`，
+ *    是本项目视为比报错更糟的失败模式。
  *
- * The 18 s cadence is the live cache's TTL: every screen reads through it, so it
- * is what bounds how new a reading can be. A refresh pressed inside that window
- * cannot produce a reading the cache would not have produced anyway, which is
- * why the window below refuses at 17 999 ms and opens at 18 000 ms.
+ * 18 秒的节奏就是实时缓存的 TTL：每块屏幕都经它读，所以它限定了读数能有多新 —— 窗口内的
+ * 刷新按不出缓存本来就会给出的读数，所以 17 999 ms 拒绝、18 000 ms 放行。
  *
- * 101 / 202 / 甲路 / 乙路 are placeholders: no real route, station or upstream id
- * appears in this file.
+ * 101 / 202 / 甲路 / 乙路 是占位：本文件不出现真实线路、站点或上游 id。
  */
 
 const LINE_ID = '101'
 const OTHER_LINE_ID = '202'
 const STATION_NAME = '乙路'
 
-/** The frozen clock every deadline below is measured from, as local time. */
+/** 下面每个时限都以它为起点计量的冻结时钟，本地时间。 */
 const T0 = '2026-09-24T08:30:00'
 const T0_MS = new Date(T0).getTime()
 
 /**
- * The cadence the design names: the live cache's TTL. Written as the design
- * value, and asserted against the cache's own exported constant below, so
- * retuning one side without the other cannot pass this file.
+ * 设计点名的节奏：实时缓存的 TTL。这里写成设计值，并在下面与缓存自己导出的常量比对，
+ * 所以只调一边而另一边不动，过不了这个文件。
  */
 const LIVE_CADENCE_MS = 18_000
 
-/** Freeze the wall clock. Only `Date` is faked: the app's timers stay real. */
+/** 冻结墙上时钟。只伪造 `Date`：应用自己的定时器保持真实。 */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(localIso))
@@ -59,9 +50,7 @@ afterEach(() => {
 })
 
 /**
- * A real-time read as the wire carries it: two stations and one vehicle, and no
- * trajectory, so the provider resolves its geometry from the station list and
- * spends exactly one request.
+ * 线上形式的实时读数：两站一车，没有轨迹，所以提供方从站表解出几何，恰好只花一次请求。
  */
 const liveBody = JSON.stringify({
   jsonr: {
@@ -77,13 +66,10 @@ const liveBody = JSON.stringify({
 })
 
 /**
- * Counted stand-in for every upstream the server can reach. All providers issue
- * their HTTP through `fetch`, so no test here spends real quota.
+ * 服务端能触到的每个上游的计数替身。所有提供方都经 `fetch` 发 HTTP，所以这里没有测试花真实配额。
  *
- * `unavailable` answers with a body the provider cannot read (no `jsonr.data`),
- * which is how an unreachable upstream arrives at the service: the provider's
- * own `try`/`catch` turns the parse failure into null. Flipping `mode` mid-test
- * is therefore how "the upstream went away" is expressed.
+ * `unavailable` 给出提供方读不了的主体（没有 `jsonr.data`），不可达的上游就是这样到达服务的：
+ * 提供方自己的 `try`/`catch` 把解析失败变成 null。中途翻转 `mode` 就是「上游消失了」的表达方式。
  */
 function stubUpstream(): { urls: string[], mode: 'ok' | 'unavailable' } {
   const state: { urls: string[], mode: 'ok' | 'unavailable' } = { urls: [], mode: 'ok' }
@@ -99,12 +85,12 @@ function stubUpstream(): { urls: string[], mode: 'ok' | 'unavailable' } {
   return state
 }
 
-/** A response the provider reads as text, which is what it does for this upstream. */
+/** 提供方按文本读的响应，它对这个上游就是这么读的。 */
 function body(text: string) {
   return { ok: true, status: 200, text: async () => text }
 }
 
-/** An Amap v3 success envelope, for the static reads the subway path uses. */
+/** 一个 Amap v3 成功信封，给地铁路径用的那些静态读取。 */
 function amapOk(payload: Record<string, unknown>) {
   return {
     ok: true,
@@ -114,11 +100,10 @@ function amapOk(payload: Record<string, unknown>) {
 }
 
 /**
- * A provider that records how it was read.
+ * 记录自己被怎么读的提供方。
  *
- * A cache is invisible from outside the aggregator — a cached reading and a
- * freshly obtained one are the same object — so what a cache did is only ever
- * observable as whether the provider was asked at all.
+ * 缓存从聚合器外面看不见 —— 缓存里的读数与刚取得的读数是同一个对象 —— 所以缓存做了什么，
+ * 只能通过「提供方到底有没有被问」来观测。
  */
 class CountingProvider implements ITransitProvider {
   readonly name = 'chelaile' as const
@@ -156,7 +141,7 @@ class CountingProvider implements ITransitProvider {
 
 type App = Awaited<ReturnType<typeof buildApp>>
 
-/** One press of a screen's refresh entry. */
+/** 按一次屏幕上的刷新入口。 */
 function refresh(app: App, lines: unknown[], userId?: string) {
   return app.inject({
     method: 'POST',
@@ -182,16 +167,14 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
       expect(firstData.throttled).toBe(false)
       expect(firstData.dataClass).toBe('live')
       expect(RefreshLiveResultSchema.safeParse(firstData).success, first.body).toBe(true)
-      // The reading was obtained at the frozen instant, so the reported instant
-      // is that instant — not the instant the answer was written.
+      // 读数是在冻结时刻取得的，所以报出的时刻就是那个时刻，不是写出这个回答的时刻。
       expect(firstData.lastUpdatedAt).toBe(T0_MS)
       expect(firstData.lines).toEqual([
         { lineId: LINE_ID, direction: 0, lastUpdatedAt: T0_MS, dataSource: 'chelaile', isDegraded: false },
       ])
       expect(firstData.nextAllowedAt).toBe(T0_MS + LIVE_CADENCE_MS)
-      // The success path sits inside a window it has just spent, so the wait is
-      // the whole cadence: reporting 0 here tells a countdown to say 「可以刷新」
-      // and the next press is refused.
+      // 成功路径处在它刚刚花掉的窗口之内，所以等待时长是整个节奏：这里报 0，倒计时会说「可以刷新」，
+      // 而按下去会被拒。
       expect(firstData.retryAfterSeconds).toBe(LIVE_CADENCE_MS / 1000)
 
       const spentByFirst = upstream.urls.length
@@ -204,15 +187,12 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
       const data = second.json().data
       expect(data.throttled).toBe(true)
       expect(RefreshLiveResultSchema.safeParse(data).success, second.body).toBe(true)
-      // The refusal states when it may be tried again, as a deadline and as a
-      // wait — the same number the header carries.
+      // 拒绝说明何时可以再试，既给时间点也给等待时长 —— 与响应头带的是同一个数。
       expect(second.headers['retry-after']).toBe('13')
-      // Refusing is not reading: the second press must not reach the upstream.
+      // 拒绝不是读取：第二次按不能碰到上游。
       expect(upstream.urls.length).toBe(spentByFirst)
-      // The held reading's instant, unchanged — the payload never claims a
-      // freshness it did not obtain.
+      // 持有的读数时刻不变 —— 载荷从不宣称一个它并没有取得的「新鲜」。
       expect(data.lastUpdatedAt).toBe(T0_MS)
-      // Honest retry information: 13 s of the 18 s window are left.
       expect(data.nextAllowedAt).toBe(T0_MS + LIVE_CADENCE_MS)
       expect(data.retryAfterSeconds).toBe(13)
       expect(data.lines).toEqual([])
@@ -229,9 +209,8 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
     try {
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
 
-      // A different screen, asking about a different line, one second later.
-      // Keying the window by line would let the two screens each refresh once
-      // and so double the on-demand upstream reads.
+      // 一秒之后，另一块屏幕问另一条线路。
+      // 按线路给窗口设键，两块屏幕就能各刷一次，按需的上游读取随之翻倍。
       vi.setSystemTime(T0_MS + 1_000)
       const second = await refresh(app, [target(OTHER_LINE_ID)])
 
@@ -265,9 +244,8 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
   })
 
   it('opens the window again at the cadence, and reports the NEW instant it obtained', async () => {
-    // The cadence is the live cache's own TTL, and it is the design's 18 s: the
-    // cache and the cooldown are one number, so the button can never be pressed
-    // faster than the data every screen reads through can change.
+    // 节奏就是实时缓存自己的 TTL、也就是设计里的 18 秒：缓存与冷却是一个数，所以按钮永远按不了
+    // 比每块屏幕所读数据变化得更快。
     expect(LIVE_CACHE_TTL_MS).toBe(LIVE_CADENCE_MS)
 
     freezeAt(T0)
@@ -277,7 +255,7 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
       const spentByFirst = upstream.urls.length
 
-      // One millisecond short of the cadence: still the same window.
+      // 比节奏早一毫秒：还是同一个窗口。
       vi.setSystemTime(T0_MS + LIVE_CADENCE_MS - 1)
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(429)
 
@@ -286,15 +264,8 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
 
       expect(third.statusCode, third.body).toBe(200)
       expect(upstream.urls.length).toBeGreaterThan(spentByFirst)
-      // What this proves is the WINDOW opening: the reported instant is the new
-      // reading's, taken at the instant the cooldown expired. It does not prove
-      // invalidation — the clock advanced by exactly the cadence, so the previous
-      // entry has expired by TTL here and no legal press can happen earlier; with
-      // `invalidateLive` replaced by a no-op this test still passes. Invalidation
-      // is detected by the tests that count provider reads: 「keeps a separate
-      // window per user」, 「drops the per-station readings the home overview uses,
-      // not only the whole-line one」 and 「re-reads the whole-line reading and the
-      // per-station reading」.
+      // 这里证明的是「窗口打开」：报出的时刻是新读数的，取自冷却到期的那一刻。它不证明失效 ——
+      // 把 `invalidateLive` 换成空操作，这个测试照样通过；失效由数提供方读取次数的那些测试来测。
       expect(third.json().data.lines[0].lastUpdatedAt).toBe(T0_MS + LIVE_CADENCE_MS)
       expect(third.json().data.lastUpdatedAt).toBe(T0_MS + LIVE_CADENCE_MS)
     }
@@ -316,22 +287,19 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
 
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
 
-      // The board is opened at the instant the window allows the next press. It
-      // reads its own per-station entry, and its station table comes from the
-      // line-detail cache — long-TTL data, which is why this costs exactly one
-      // upstream read.
+      // 站牌在窗口允许下一次按的时刻打开：它读自己的按站条目，站表来自线路详情缓存（长 TTL 数据），
+      // 所以这里恰好花掉一次上游读取。
       vi.setSystemTime(T0_MS + LIVE_CADENCE_MS)
       expect((await board()).statusCode).toBe(200)
       const afterBoard = upstream.urls.length
 
-      // Same instant, second press. Its own read is the whole-line one.
+      // 同一时刻，第二次按：它自己的读数是整条线路的那一次。
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
       const afterRefresh = upstream.urls.length
       expect(afterRefresh).toBeGreaterThan(afterBoard)
 
-      // The board asks again immediately, inside the cache's window. Its entry
-      // was primed a moment ago; a press that dropped only the whole-line key
-      // would leave this read served from it, spending nothing.
+      // 站牌紧接着在缓存窗口之内再问一次：它的条目刚被预热过；只丢掉整线键的那一次按下，会让这次
+      // 读由那个条目作答，一个币都不花。
       expect((await board()).statusCode).toBe(200)
       expect(upstream.urls.length).toBe(afterRefresh + 1)
     }
@@ -345,8 +313,7 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
     const upstream = stubUpstream()
     const app = await buildApp()
     try {
-      // A repeated line is one reading, not two: the request names lines, and a
-      // repeat must not multiply the upstream reads the cooldown is bounding.
+      // 重复的线路是一个读数而不是两个：请求点名的是线路，重复不能把冷却所约束的上游读取翻倍。
       const res = await refresh(app, [target(LINE_ID), target(LINE_ID)])
 
       expect(res.statusCode, res.body).toBe(200)
@@ -398,14 +365,12 @@ describe('F11: a refresh that obtained nothing says exactly that', () => {
       expect(data.lines).toEqual([
         { lineId: LINE_ID, direction: 0, lastUpdatedAt: null, dataSource: null, isDegraded: null },
       ])
-      // The instant of the reading actually held; the clock moved on by 18 s and
-      // the payload must not follow it.
+      // 实际持有的那个读数的时刻：时钟又走了 18 秒，载荷不能跟着走。
       expect(data.lastUpdatedAt).toBe(T0_MS)
       expect(data.lastUpdatedAt).not.toBe(T0_MS + LIVE_CADENCE_MS)
       expect(data.nextAllowedAt).toBe(T0_MS + 2 * LIVE_CADENCE_MS)
-      // A failed read spends the window exactly as a successful one does, so the
-      // wait is the cadence — not 0, which is what a 502 body would otherwise
-      // carry while the deadline above is 18 s away.
+      // 失败的读取与成功的一样花掉窗口，所以等待时长是整个节奏 —— 不是 0；否则这个 502 的响应体
+      // 会报 0，而上面的时限在 18 秒之外。
       expect(data.retryAfterSeconds).toBe(LIVE_CADENCE_MS / 1000)
     }
     finally {
@@ -453,18 +418,15 @@ describe('F11: a refresh that obtained nothing says exactly that', () => {
 })
 
 /**
- * The cache keys a refresh has to drop, at the layer that owns them.
+ * 刷新必须丢掉的缓存键，在拥有它们的那个层测。
  *
- * The home overview reads through a per-station key and a whole-line read
- * through another, so both must go: dropping one leaves the screen that pressed
- * the button showing exactly the reading it was trying to replace. A stale cache
- * entry and a fresh one are the same object from outside, so the number of
- * provider reads is the only honest observation of whether a key was dropped.
+ * 首页概览经按站键读、整线读数经另一个键读，所以两个都得丢：只丢一个，按下按钮的那块屏幕会
+ * 继续显示它正想替换掉的那个读数。缓存项与新鲜项从外面看是同一个对象，所以提供方读取次数是
+ * 「键有没有被丢掉」唯一诚实的观测。
  */
 describe('F11: a refresh drops both live cache key shapes', () => {
   it('re-reads the whole-line reading and the per-station reading', async () => {
-    // Frozen, so the entries cannot expire mid-test: the only thing that can
-    // make the reads below reach the provider is the invalidation itself.
+    // 冻结时钟，条目就不会在测试中途过期：唯一能让下面这些读碰到提供方的，只有失效本身。
     freezeAt(T0)
 
     const provider = new CountingProvider()
@@ -474,15 +436,14 @@ describe('F11: a refresh drops both live cache key shapes', () => {
     await aggregator.getLiveStatus(LINE_ID, 0, '027', { targetOrder: 2 })
     expect(provider.reads).toEqual(['whole-line', 'station 2'])
 
-    // Inside the window both readings come from the cache, so nothing is spent.
+    // 窗口之内两次读数都来自缓存，什么都不花。
     await aggregator.getLiveStatus(LINE_ID, 0, '027')
     await aggregator.getLiveStatus(LINE_ID, 0, '027', { targetOrder: 2 })
     expect(provider.reads).toHaveLength(2)
 
     aggregator.invalidateLive(LINE_ID, 0)
 
-    // Both are read again. Dropping only the whole-line key would make the last
-    // read a cache hit and leave this list three long.
+    // 两者都被再读一次：只丢掉整线键，最后一次读会命中缓存，这个列表就只有三项。
     await aggregator.getLiveStatus(LINE_ID, 0, '027')
     await aggregator.getLiveStatus(LINE_ID, 0, '027', { targetOrder: 2 })
     expect(provider.reads).toEqual(['whole-line', 'station 2', 'whole-line', 'station 2'])
@@ -490,21 +451,15 @@ describe('F11: a refresh drops both live cache key shapes', () => {
 })
 
 /**
- * The long-TTL read count for the subway live path.
+ * 地铁实时路径的长 TTL 读取次数。
  *
- * The subway live path resolves its static geometry through `getLineDetail`, so
- * a refresh that dropped that cache would re-read the line from the upstream —
- * quota spent on data that does not change, which F11 rules out.
+ * 地铁实时路径经 `getLineDetail` 解出静态几何，所以丢掉那个缓存的刷新会重新从上游读线路 ——
+ * 为不会变的数据花配额，F11 不允许。
  *
- * The stub db returns no cached row, so what this suite proves is that the
- * refresh spends no upstream read at all under a frozen clock. It does NOT prove
- * WHICH cache served the reads: the Amap layer keeps its own 24 h line cache
- * (`AmapGisService.getLineByName`), which answers a re-read without any upstream
- * call, so this suite stays green even when `invalidateLive` also drops the
- * aggregator's `detailCache`. The detector for that property is the bus-path test
- * 「drops the per-station readings the home overview uses, not only the whole-line
- * one」, which counts the reads a refresh and a board open spend and fails when
- * the detail cache is dropped.
+ * 替身 db 不返回任何缓存行，所以本套件证明的是：冻结时钟下刷新一次上游读取都不花。它并不证明
+ * 哪一层缓存在作答 —— Amap 层有自己的 24 小时线路缓存，重读不经上游，所以即便
+ * `invalidateLive` 连聚合器的 `detailCache` 一起丢，本套件仍然是绿的。那个性质的探测者是
+ * 数读取次数的公交路径测试。
  */
 describe('F11: a refresh never re-reads long-TTL line data', () => {
   const SUBWAY_LINE_ID = 'subway_027_88'
@@ -527,7 +482,7 @@ describe('F11: a refresh never re-reads long-TTL line data', () => {
     const state = { urls: [] as string[] }
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       state.urls.push(String(url))
-      // The static read this suite counts. Anything else is a bug here.
+      // 本套件计数的静态读取。在这里出现别的都是 bug。
       if (String(url).includes('/v3/bus/linename')) return amapOk({ buslines: [subwayLine] })
       return amapOk({})
     }))
@@ -551,7 +506,7 @@ describe('F11: a refresh never re-reads long-TTL line data', () => {
       const staticReads = upstream.urls.length
       expect(staticReads).toBe(1)
 
-      // The cache really is what serves the second read.
+      // 第二次读确实由缓存作答。
       await service.getLineDetail(SUBWAY_LINE_ID, 0, '027')
       expect(upstream.urls.length).toBe(staticReads)
 
@@ -560,17 +515,9 @@ describe('F11: a refresh never re-reads long-TTL line data', () => {
       expect(outcome.outcome).toBe('ok')
       expect(upstream.urls.length).toBe(staticReads)
 
-      // And the reading the refresh produced is the one the live path derived
-      // from that same cached detail: nothing was re-fetched to produce it.
-      // Its provenance travels with it, because this reading is the engine's
-      // own output rather than something a source obtained: `dataSource` names
-      // that engine, and F4 marks it 排班推演 from there instead of letting it
-      // pass for an obtained reading. `isDegraded` is NOT the field that says
-      // this — it is the answering provider's own word that it stood in for
-      // another source, and for a `subway_` id the engine is the only source
-      // that can answer at all, so it declares false. Deriving it from the
-      // provider's position made this line read 「备用来源 · 仅供参考」, which
-      // is false: its number comes from the timetable, not from a backup.
+      // 刷新产生的读数就是实时路径从同一份缓存详情推出的那个，没有为此重读任何东西。
+      // 它的来源跟着它走：这份读数是引擎自己的产出而非某个源取得的，`dataSource` 点名引擎，F4 据此
+      // 标 排班推演。`isDegraded` 不是表示这件事的字段 —— 它说的是作答提供方替别的源顶了班。
       expect(outcome.result.lines).toEqual([
         {
           lineId: SUBWAY_LINE_ID,

@@ -10,18 +10,13 @@ import type {
 const { Pool } = pg
 
 /**
- * A user's settings row: commute hours plus the optional home/work anchors.
+ * 一个用户的设置行：通勤时段，外加可选的家/公司锚点。
  *
- * The anchors are GCJ-02 by the time they are written — `/settings` PATCH
- * converts the browser's raw WGS-84 fix before calling in — and everything that
- * reads one back (the walking route's origin, first of all) takes GCJ-02 and
- * converts nothing. A missing anchor is `null`, never 0: (0, 0) is a real
- * coordinate and would be indistinguishable from an anchor the user saved.
+ * 锚点在写入时已是 GCJ-02，此后读它的每一处都按 GCJ-02 用、不做换算。缺失的锚点是 `null`，
+ * 绝不是 0：(0, 0) 是真实坐标，与用户存过的锚点无法区分。
  *
- * The four times are `null` when the user never chose them (migration 009 made the
- * columns nullable for exactly this). `null` is not a time and must never be
- * rendered as one: a row created by saving an anchor alone holds NO window, and
- * the read reports it as such rather than filling in the built-in hours.
+ * 用户从未选择过的时刻是 `null`。`null` 不是时间，也绝不能渲染成一个时间：只存锚点而创建的
+ * 行不持有任何时段，读侧就按这样报告，而不是填上内置时段。
  */
 export interface StoredUserSettings {
   morningStart: string | null
@@ -35,13 +30,9 @@ export interface StoredUserSettings {
 }
 
 /**
- * The row a user who has never saved anything starts from: nothing chosen.
+ * 从未保存过任何东西的用户起步的那一行：包括四个时刻在内，每个字段都是 null。
  *
- * Every field is null, INCLUDING the four times. It used to start from the
- * built-in window (`DEFAULT_COMMUTE_HOURS`), which is what made an anchors-only
- * write store 06:30–11:30 / 17:00–22:00 as if the user had chosen them — the
- * default wearing the user's own configuration's clothes. A fresh row's starting
- * point must be 「什么都没选」, and that is what null means here.
+ * 内置时段不能作为起点，否则只写了锚点的写入会把它存成用户自己选的样子。
  */
 const EMPTY_USER_SETTINGS: StoredUserSettings = {
   morningStart: null,
@@ -55,13 +46,8 @@ const EMPTY_USER_SETTINGS: StoredUserSettings = {
 }
 
 /**
- * A stored coordinate, or null when the column is unset or unusable.
- *
- * A `NaN` reached a DOUBLE PRECISION column through an earlier write (Postgres
- * stores NaN in that type), so it is reported as unset rather than handed to a
- * walking route, where it would turn every distance into NaN. Exported because
- * it IS the SQL branch's read mapping, and the offline suite cannot reach the
- * SQL branch to exercise it.
+ * 一个存储的坐标，列未设置或不可用时为 null —— 不可用的坐标不得交给步行路线。
+ * 导出是因为它就是 SQL 分支的读映射，而离线套件到不了那个分支。
  */
 export function storedCoord(value: unknown): number | null {
   const n = value === null || value === undefined ? Number.NaN : Number(value)
@@ -69,14 +55,9 @@ export function storedCoord(value: unknown): number | null {
 }
 
 /**
- * A stored `TIME` as `HH:MM`, or null when the column holds no time.
- *
- * `null` is 「从未选择」 (migration 009 dropped the NOT NULL DEFAULT that used to
- * make an unchosen column read as the built-in hour). The `HH:MM:SS` Postgres
- * returns is trimmed to the form the API and the stored windows are written in.
- * Exported for the same reason `storedCoord` is: it IS the SQL branch's read
- * mapping, and the offline suite cannot reach the SQL branch to exercise it — so
- * the rule that a null stays null is pinned on the function itself.
+ * 存储的 `TIME` 读成 `HH:MM`，列里没有时间时为 null。
+ * Postgres 返回的 `HH:MM:SS` 裁成 API 与存储时段所用的形式。导出原因同 `storedCoord`：
+ * 「null 保持 null」这条规则钉在函数上。
  */
 export function storedHHMM(value: unknown): string | null {
   if (value === null || value === undefined) return null
@@ -85,9 +66,7 @@ export function storedHHMM(value: unknown): string | null {
 }
 
 /**
- * Drop the fields the caller never sent, so an absent one is left untouched.
- *
- * `null` survives: clearing an anchor and forgetting one are different writes.
+ * `null` 会保留：清空锚点与没提过锚点是两种不同的写入。
  */
 export function definedOnly<T extends object>(settings: T): Partial<T> {
   return Object.fromEntries(
@@ -96,10 +75,8 @@ export function definedOnly<T extends object>(settings: T): Partial<T> {
 }
 
 /**
- * One ride leg of a stored chain, as it is read back.
- *
- * `seq` is the leg's position in the chain, 0-based. An unset station is `null`
- * in BOTH of its columns — never `''`, which would read as a station named "".
+ * 一条读回的存储腿：`seq` 是它在链路中的位置（0 起）。
+ * 未设置的站点在两列上都是 `null`，绝不是 `''` —— 那会读成一个名字为空串的站。
  */
 export interface StoredCommuteChainLeg {
   seq: number
@@ -113,7 +90,7 @@ export interface StoredCommuteChainLeg {
   transferExtraMinutes: number | null
 }
 
-/** A stored chain with its legs, oldest-position first. */
+/** 一条存储的链路及其腿，按最早位置在前。 */
 export interface StoredCommuteChain {
   id: string
   userId: string
@@ -126,15 +103,13 @@ export interface StoredCommuteChain {
 }
 
 /**
- * A leg as a write carries it. `seq` is optional on the way in — it is the
- * array's position, which the store stamps itself.
+ * 写入时携带的腿。`seq` 在入口是可选的 —— 它就是数组的位置，由存储自己盖上。
  */
 export type CommuteChainLegInput = Omit<StoredCommuteChainLeg, 'seq' | 'cityCode'> & {
   seq?: number
   cityCode?: string
 }
 
-/** The fields a chain is created from. `id` and `createdAt` belong to the store. */
 export interface CommuteChainInput {
   userId?: string
   name: string
@@ -145,8 +120,7 @@ export interface CommuteChainInput {
 }
 
 /**
- * A partial update. An absent field is left as it is; `legs` present means the
- * whole sequence is replaced (a chain's legs are one value, not a merge).
+ * 部分更新。没有的字段保持原样；`legs` 存在即整段替换（一条链路的腿是一个值，不是合并）。
  */
 export interface CommuteChainPatch {
   name?: string
@@ -157,12 +131,10 @@ export interface CommuteChainPatch {
 }
 
 /**
- * Stamp each leg's `seq` from its position in the array and fill the city.
+ * 按腿在数组里的位置盖 `seq` 并填城市。
  *
- * The array order IS the order, so the sequence can never come out with a gap
- * or a duplicate — a caller-supplied `seq` is ignored rather than trusted.
- * Exported because the offline suite cannot reach the SQL branch, and this is
- * the one place the numbering is decided for both branches.
+ * 数组顺序就是顺序，因此序号不会出现空洞或重复 —— 调用方给的 `seq` 被忽略而不是采信。
+ * 导出是因为离线套件到不了 SQL 分支，而这里是两个分支共同决定编号的唯一位置。
  */
 export function normalizeCommuteChainLegs(legs: CommuteChainLegInput[]): StoredCommuteChainLeg[] {
   return legs.map((leg, seq) => ({
@@ -179,11 +151,8 @@ export function normalizeCommuteChainLegs(legs: CommuteChainLegInput[]): StoredC
 }
 
 /**
- * A leg row as the API carries it.
- *
- * An unset station column is `null` and stays `null` — a default name or a 0
- * order would name a station the user never chose. Exported because it IS the
- * SQL branch's read mapping, and the offline suite cannot reach that branch.
+ * API 携带的腿行：未设置的站点列就是 `null` 并保持 `null`，默认名字或 0 序号会命名一个
+ * 用户从未选过的站。导出是因为它就是 SQL 分支的读映射，而离线套件到不了那个分支。
  */
 export function storedCommuteChainLeg(row: Record<string, unknown>): StoredCommuteChainLeg {
   const order = (value: unknown): number | null =>
@@ -203,7 +172,6 @@ export function storedCommuteChainLeg(row: Record<string, unknown>): StoredCommu
   }
 }
 
-/** A chain row plus its already-mapped legs. */
 function storedCommuteChain(
   row: Record<string, unknown>,
   legs: StoredCommuteChainLeg[],
@@ -221,35 +189,23 @@ function storedCommuteChain(
 }
 
 /**
- * The database URL this server may connect to, or undefined for the in-memory store.
+ * 本服务端可以连接的数据库 URL，内存存储时为 undefined。
  *
- * A test process NEVER connects to a real database. The suite is written to run
- * offline, but a shell that exports `DATABASE_URL` for migrations and ad-hoc
- * probes hands it to `buildApp()` through the environment, and the suite then
- * reads and writes the development store — where the rows it leaves behind fail
- * tests that never touch the same tables. An explicit `databaseUrl` option is
- * deliberately NOT filtered here: a test that means to exercise SQL must say so
- * itself, and only the ambient variable is the accident this guards against.
+ * 测试进程绝不连接真实数据库。显式传入的 `databaseUrl` 选项故意不在这里过滤：
+ * 要用 SQL 的测试必须自己说明。
  */
 export function databaseUrlFor(env: Record<string, string | undefined>): string | undefined {
   if (env.VITEST || env.NODE_ENV === 'test') return undefined
   return env.DATABASE_URL || undefined
 }
 
-/** PostgreSQL's `unique_violation`. */
 const UNIQUE_VIOLATION = '23505'
 
 /**
- * Whether an error is the database REFUSING a write because a row with those key
- * columns already exists.
+ * 一个错误是否是数据库因为关键列上已有同键行而拒绝写入。
  *
- * This has to be told apart from every other failure, because every write below
- * falls back to the in-memory store when the pool throws: that fallback is for a
- * database this process cannot reach, and a refused INSERT is not that. Falling
- * back there would hand the caller a row that exists only inside this process
- * while the stored one stays exactly as it was — a follow reported as made that
- * the database never made. The unique index (`008_unique-favorite-per-line.sql`)
- * makes this the one refusal the caller must hear about.
+ * 回退到内存存储是给本进程到不了的数据库用的，被拒的 INSERT 不是那种情况 ——
+ * 在那里回退会报告一次数据库从未发生过的关注。
  */
 export function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === UNIQUE_VIOLATION
@@ -259,19 +215,15 @@ export class Database {
   private pool: pg.Pool | null = null
   private inMemoryFavorites = new Map<string, any>()
   /**
-   * Last instant handed to an in-memory row. Kept here rather than read from
-   * the clock on each insert so `createdAt` is strictly increasing even for two
-   * rows added in the same millisecond — the memory store has no database
-   * sequence to fall back on, and `createdAt` is the order's final tiebreak.
+   * 交给内存行的最后一个时刻，严格递增：内存存储没有数据库时钟，同一毫秒的两行否则会共享
+   * 一个时刻、相对顺序退回 Map 的插入顺序 —— 本字段就是那个隐含决胜档的显式形式。
    */
   private inMemoryCreatedAt = 0
   private inMemoryLineCache = new Map<string, { detail: LineDetail, fetchedAt: number }>()
   private inMemorySettings = new Map<string, StoredUserSettings>()
   /**
-   * Chains, keyed by id, with their legs held inside the chain. The legs are
-   * the chain's substance and are always written as one value, so nesting them
-   * here mirrors what the SQL schema does with `ON DELETE CASCADE` — dropping
-   * the chain drops its legs, with no second map to keep in step.
+   * 链路按 id 索引，腿放在链路里 —— 与 SQL schema 的 `ON DELETE CASCADE` 一致：
+   * 删链路即删腿，不需要第二张表保持同步。
    */
   private inMemoryChains = new Map<string, StoredCommuteChain>()
 
@@ -288,9 +240,8 @@ export class Database {
   }
 
   /**
-   * Verify the schema is present. Table ownership belongs to migrations/
-   * (run `pnpm migrate:up`); this only reports readiness so a missing migration
-   * fails loudly instead of silently degrading to the in-memory store.
+   * 核对 schema 已就位。表的归属在 migrations/（跑 `pnpm migrate:up`）；这里只报告就绪状态，
+   * 让缺失的迁移大声失败，而不是悄悄降级到内存存储。
    */
   async init(): Promise<void> {
     if (!this.pool) return
@@ -301,15 +252,28 @@ export class Database {
           SELECT to_regclass('public.user_favorite_lines') AS favorites,
                  to_regclass('public.cached_transit_lines') AS cache,
                  to_regclass('public.commute_chains') AS chains,
-                 to_regclass('public.commute_chain_legs') AS chain_legs
+                 to_regclass('public.commute_chain_legs') AS chain_legs,
+                 EXISTS (
+                   SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'user_favorite_lines'
+                     AND column_name IN ('pinned_station_order', 'reverse_pinned_station_order')
+                   GROUP BY table_name
+                   HAVING COUNT(*) = 2
+                 ) AS stop_orders
         `)
         const row = res.rows[0]
-        // The commute-chain tables are checked here too: without them every
-        // chain route would answer an empty list, which reads exactly like a
-        // user who has recorded no chains.
+        // 通勤链路的表也在这里检查：没有它们，每条链路路由都会答空列表，
+        // 读起来与「用户没录过链路」完全一样。
         if (!row?.favorites || !row?.cache || !row?.chains || !row?.chain_legs) {
           console.warn(
             'Database schema missing. Run `pnpm migrate:up` to create/upgrade tables.',
+          )
+        }
+        // 缺 010 比缺表安静：读仍然作答，只是每个存储的上车点都读成「顺序未知」。
+        // 要说清欠哪个迁移。
+        if (row?.favorites && !row?.stop_orders) {
+          console.warn(
+            'Board-stop order columns missing. Run `pnpm migrate:up` (010_favorite-stop-orders.sql).',
           )
         }
       }
@@ -323,7 +287,7 @@ export class Database {
     }
   }
 
-  // ---------- Favorites ----------
+  // ---------- 收藏 ----------
 
   async getFavorites(userId: string = DEFAULT_USER_ID): Promise<UserFavoriteLine[]> {
     if (this.pool) {
@@ -342,6 +306,10 @@ export class Database {
           reverseLineId: row.reverse_line_id ?? undefined,
           morningStopName: row.pinned_station_name ?? undefined,
           eveningStopName: row.reverse_pinned_station_name ?? undefined,
+          // 每个上车点身份的另一半。列是 NULL 时缺席（而不是 null），
+          // 与它旁边的名字读法一致 —— 一对里只用一种约定。
+          morningStopOrder: row.pinned_station_order ?? undefined,
+          eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
           morningDirection: row.morning_direction ?? null,
           eveningDirection: row.evening_direction ?? null,
           displayOrder: row.display_order ?? 0,
@@ -350,13 +318,11 @@ export class Database {
         }))
       }
       catch {
-        // Fallback to memory
       }
     }
     return Array.from(this.inMemoryFavorites.values())
       .filter(f => f.userId === userId)
-      // Same precedence as the SQL above: the pin, then the stored position,
-      // then the creation instant this store stamped on the row.
+      // 与上面 SQL 同样的优先级：先置顶，再存储的位置，最后是本存储盖在该行上的创建时刻。
       .sort((x, y) => Number(y.isPinned ?? false) - Number(x.isPinned ?? false)
         || (x.displayOrder ?? 0) - (y.displayOrder ?? 0)
         || String(x.createdAt ?? '').localeCompare(String(y.createdAt ?? '')))
@@ -370,6 +336,8 @@ export class Database {
         reverseLineId: f.reverseLineId,
         morningStopName: f.morningStopName ?? undefined,
         eveningStopName: f.eveningStopName ?? undefined,
+        morningStopOrder: f.morningStopOrder ?? undefined,
+        eveningStopOrder: f.eveningStopOrder ?? undefined,
         morningDirection: f.morningDirection ?? null,
         eveningDirection: f.eveningDirection ?? null,
         displayOrder: f.displayOrder ?? 0,
@@ -379,11 +347,8 @@ export class Database {
   }
 
   /**
-   * The creation instant to stamp on the next in-memory row, strictly after the
-   * previous one. This store has no database clock: without it, two rows added
-   * in the same millisecond would share an instant and their relative order
-   * would silently fall back to Map insertion order — the implicit tiebreak
-   * this field exists to make explicit.
+   * 盖在下一个内存行上的创建时刻，严格晚于上一个：这个存储没有数据库时钟，没有它，
+   * 同一毫秒加进来的两行会共享一个时刻，相对顺序悄悄退回 Map 的插入顺序。
    */
   private nextInMemoryCreatedAt(): string {
     this.inMemoryCreatedAt = Math.max(this.inMemoryCreatedAt + 1, Date.now())
@@ -398,7 +363,11 @@ export class Database {
     preferredDirection?: number
     reverseLineId?: string
     morningStopName?: string
+    morningStopOrder?: number | null
     eveningStopName?: string
+    eveningStopOrder?: number | null
+    morningDirection?: number | null
+    eveningDirection?: number | null
     displayOrder?: number
   }): Promise<UserFavoriteLine> {
     const id = crypto.randomUUID()
@@ -407,9 +376,11 @@ export class Database {
 
     if (this.pool) {
       try {
+        // 上车点按它本身的样子成对写入（name + order）。两个方向列也在这里写：
+        // 创建契约接受它们，而契约接受的字段必须存下来，不能悄悄丢掉。
         const res = await this.pool.query(
-          `INSERT INTO user_favorite_lines (id, user_id, city_code, line_id, line_name, preferred_direction, reverse_line_id, pinned_station_name, reverse_pinned_station_name, display_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          `INSERT INTO user_favorite_lines (id, user_id, city_code, line_id, line_name, preferred_direction, reverse_line_id, pinned_station_name, pinned_station_order, reverse_pinned_station_name, reverse_pinned_station_order, morning_direction, evening_direction, display_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
           [
             id,
             userId,
@@ -418,8 +389,12 @@ export class Database {
             item.lineName,
             item.preferredDirection ?? 0,
             item.reverseLineId || null,
-            item.morningStopName || null,
-            item.eveningStopName || null,
+            item.morningStopName ?? null,
+            item.morningStopOrder ?? null,
+            item.eveningStopName ?? null,
+            item.eveningStopOrder ?? null,
+            item.morningDirection ?? null,
+            item.eveningDirection ?? null,
             item.displayOrder ?? 0,
           ],
         )
@@ -434,19 +409,21 @@ export class Database {
           reverseLineId: row.reverse_line_id ?? undefined,
           morningStopName: row.pinned_station_name ?? undefined,
           eveningStopName: row.reverse_pinned_station_name ?? undefined,
+          morningStopOrder: row.pinned_station_order ?? undefined,
+          eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
+          morningDirection: row.morning_direction ?? null,
+          eveningDirection: row.evening_direction ?? null,
           displayOrder: row.display_order ?? 0,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
-          // Pinning is an explicit single-target action (see setPinned). A create
-          // path that could violate the one-pin-per-user index is not offered.
+          // 置顶是显式的单目标动作（见 setPinned）：会违反「每用户一个置顶」索引的
+          // 创建路径不提供。
           isPinned: false,
         }
       }
       catch (err) {
-        // An answered refusal is not an unreachable database: the unique index
-        // (one row per user/city/line) refused this INSERT, and reporting the row
-        // from memory would report a follow that was never stored.
+        // 得到回答的拒绝不是不可达的数据库：唯一索引（每 user/city/line 一行）拒绝了这次
+        // INSERT，而从内存报告那一行会报告一次从未存储过的关注。
         if (isUniqueViolation(err)) throw err
-        // Fallback to memory
       }
     }
 
@@ -459,7 +436,11 @@ export class Database {
       preferredDirection: item.preferredDirection ?? 0,
       reverseLineId: item.reverseLineId,
       morningStopName: item.morningStopName,
+      morningStopOrder: item.morningStopOrder ?? undefined,
       eveningStopName: item.eveningStopName,
+      eveningStopOrder: item.eveningStopOrder ?? undefined,
+      morningDirection: item.morningDirection ?? null,
+      eveningDirection: item.eveningDirection ?? null,
       displayOrder: item.displayOrder ?? 0,
       createdAt: this.nextInMemoryCreatedAt(),
       isPinned: false,
@@ -468,13 +449,17 @@ export class Database {
     return record
   }
 
+  /**
+   * 更新收藏的行级字段，每个只在调用方命名了它时才写（`COALESCE` 语义：缺席即保留）。
+   * 它任何地方都写不了 NULL，因此不做上车点写者：上车点是「对」（name, order），
+   * 两半都必须可清空，走 `setBoardStops`。
+   */
   async updateFavorite(id: string, item: {
     cityCode?: string
     lineId?: string
     lineName?: string
     preferredDirection?: number
     reverseLineId?: string
-    morningStopName?: string
     displayOrder?: number
     isPinned?: boolean
   }): Promise<boolean> {
@@ -487,9 +472,8 @@ export class Database {
              line_name = COALESCE($4, line_name),
              preferred_direction = COALESCE($5, preferred_direction),
              reverse_line_id = COALESCE($6, reverse_line_id),
-             pinned_station_name = COALESCE($7, pinned_station_name),
-             display_order = COALESCE($8, display_order),
-             is_pinned = COALESCE($9, is_pinned)
+             display_order = COALESCE($7, display_order),
+             is_pinned = COALESCE($8, is_pinned)
            WHERE id = $1`,
           [
             id,
@@ -498,7 +482,6 @@ export class Database {
             item.lineName ?? null,
             item.preferredDirection ?? null,
             item.reverseLineId ?? null,
-            item.morningStopName ?? null,
             item.displayOrder ?? null,
             item.isPinned ?? null,
           ],
@@ -506,23 +489,29 @@ export class Database {
         if ((res.rowCount ?? 0) > 0) return true
       }
       catch {
-        // Fall through to memory
       }
     }
     const rec = this.inMemoryFavorites.get(id)
     if (rec) {
-      Object.assign(rec, item)
+      // 逐字段写，与上面 SQL 同一份清单：`Object.assign(rec, item)` 会复制调用方恰好传进来的
+      // 任何东西（关注守卫折叠时传的是整行），两个分支于是对同一次调用写了不同的列集合。
+      if (item.cityCode !== undefined) rec.cityCode = item.cityCode
+      if (item.lineId !== undefined) rec.lineId = item.lineId
+      if (item.lineName !== undefined) rec.lineName = item.lineName
+      if (item.preferredDirection !== undefined) rec.preferredDirection = item.preferredDirection
+      if (item.reverseLineId !== undefined) rec.reverseLineId = item.reverseLineId
+      if (item.displayOrder !== undefined) rec.displayOrder = item.displayOrder
+      if (item.isPinned !== undefined) rec.isPinned = item.isPinned
       return true
     }
     return false
   }
 
   /**
-   * Pin one favourite as the home screen's single hero card.
+   * 把一个收藏置顶为首页唯一的主卡片。
    *
-   * Only one row per user may be pinned (partial unique index on is_pinned), so
-   * the previous pin is cleared first. The stored ordering is never rewritten:
-   * un-pinning drops the row back to the position display_order always meant.
+   * 每个用户只允许一行置顶（is_pinned 上的部分唯一索引），因此先清掉上一个置顶。
+   * 存储的排序从不重写：取消置顶会让该行回到 display_order 一直表示的位置。
    */
   async setPinned(userId: string, id: string, pinned: boolean): Promise<boolean> {
     if (this.pool) {
@@ -545,7 +534,6 @@ export class Database {
       }
       catch {
         await client.query('ROLLBACK')
-        // Fall through to memory
       }
       finally {
         client.release()
@@ -555,8 +543,7 @@ export class Database {
     const rec = this.inMemoryFavorites.get(id)
     if (!rec) return false
     if (pinned) {
-      // Same scope as the SQL branch's `WHERE user_id = $1`: only the pin of
-      // THIS user's other rows is cleared, never another user's.
+      // 与 SQL 分支的 `WHERE user_id = $1` 同域：只清本用户其它行的置顶，绝不清别人的。
       for (const f of this.inMemoryFavorites.values()) {
         if (f.userId === userId) f.isPinned = false
       }
@@ -566,17 +553,20 @@ export class Database {
   }
 
   /**
-   * Set or clear a favourite's commute board stops and their directions.
+   * 设置或清空一个收藏的通勤上车点及其方向。
    *
-   * Kept separate from `updateFavorite` because that method wraps every column
-   * in COALESCE, which can never write NULL — clearing a stop (or unpicking a
-   * direction) is exactly a NULL write. Here `undefined` leaves a field
-   * untouched and `null` clears it. Fields are keyed by PURPOSE
-   * (morning/evening), mapped onto the storage columns inside this method.
+   * 与 `updateFavorite` 分开，是因为那个方法把每一列都包在 COALESCE 里、永远写不了 NULL，
+   * 而清空上车点正好就是一次 NULL 写入。这里 `undefined` 不动字段，`null` 清空它；
+   * 字段按目的（morning/evening）作键，在本方法内映射到存储列。
+   *
+   * 上车点是「对」（name, order）：一个目的的两列在同一次调用里写入，契约也拒绝单独一半
+   * （`UpdateFavoriteSchema`）。站名重复出现时，序号才说明是哪一个站。
    */
   async setBoardStops(id: string, stops: {
     morningStopName?: string | null
+    morningStopOrder?: number | null
     eveningStopName?: string | null
+    eveningStopOrder?: number | null
     morningDirection?: number | null
     eveningDirection?: number | null
   }): Promise<boolean> {
@@ -588,7 +578,9 @@ export class Database {
       sets.push(`${column} = $${values.length}`)
     }
     push('pinned_station_name', stops.morningStopName)
+    push('pinned_station_order', stops.morningStopOrder)
     push('reverse_pinned_station_name', stops.eveningStopName)
+    push('reverse_pinned_station_order', stops.eveningStopOrder)
     push('morning_direction', stops.morningDirection)
     push('evening_direction', stops.eveningDirection)
 
@@ -604,16 +596,17 @@ export class Database {
         return this.inMemoryFavorites.has(id)
       }
       catch {
-        // Fall through to memory
       }
     }
 
     const rec = this.inMemoryFavorites.get(id)
     if (rec) {
-      if (stops.morningStopName !== undefined) rec.morningStopName = stops.morningStopName
+      if (stops.morningStopName !== undefined) rec.morningStopName = stops.morningStopName ?? undefined
+      if (stops.morningStopOrder !== undefined) rec.morningStopOrder = stops.morningStopOrder ?? undefined
       if (stops.eveningStopName !== undefined) {
-        rec.eveningStopName = stops.eveningStopName
+        rec.eveningStopName = stops.eveningStopName ?? undefined
       }
+      if (stops.eveningStopOrder !== undefined) rec.eveningStopOrder = stops.eveningStopOrder ?? undefined
       if (stops.morningDirection !== undefined) rec.morningDirection = stops.morningDirection
       if (stops.eveningDirection !== undefined) rec.eveningDirection = stops.eveningDirection
       return true
@@ -635,16 +628,14 @@ export class Database {
     return this.inMemoryFavorites.delete(id)
   }
 
-  // ---------- User settings ----------
+  // ---------- 用户设置 ----------
 
   /**
-   * Commute hours and anchors stored in user_settings; null when never configured.
+   * user_settings 里存的通勤时段与锚点；从未配置时为 null。
    *
-   * The four times read as `null` when the user never chose them — the column
-   * holds no time (009) and a null is NOT a time. Nothing here fills one in: a
-   * built-in window handed out on this path is a window the user never set,
-   * indistinguishable from one he did. The engine that genuinely needs a usable
-   * span names its own parameter instead (`UNCONFIGURED_COMMUTE_WINDOW`).
+   * 用户从未选择过的四个时刻读成 `null` —— 列里没有时间，而 null 不是时间。这里任何地方都
+   * 不填内置值：在这条路径上发出去的时段是用户从未设置过的时段，与他设过的无法区分。
+   * 真正需要一个可用跨度的那套逻辑自己命名参数（`UNCONFIGURED_COMMUTE_WINDOW`）。
    */
   async getUserSettings(userId: string = DEFAULT_USER_ID): Promise<StoredUserSettings | null> {
     if (this.pool) {
@@ -658,14 +649,12 @@ export class Database {
         const row = res.rows[0]
         if (!row) return null
         return {
-          // TIME columns come back as "HH:MM:SS" — trimmed to HH:MM for the API,
-          // and an unset column comes back as null and STAYS null.
           morningStart: storedHHMM(row.morning_start),
           morningEnd: storedHHMM(row.morning_end),
           eveningStart: storedHHMM(row.evening_start),
           eveningEnd: storedHHMM(row.evening_end),
-          // An unset anchor column is null, and it stays null: falling back to a
-          // coordinate (0, or a city centre) would invent an anchor.
+          // 未设置的锚点列是 null 并保持 null：回退到一个坐标（0，或某个城市中心）
+          // 等于凭空造出一个锚点。
           homeLat: storedCoord(row.home_lat),
           homeLng: storedCoord(row.home_lng),
           workLat: storedCoord(row.work_lat),
@@ -673,12 +662,11 @@ export class Database {
         }
       }
       catch {
-        // Table missing (migration not applied) or transient failure: the caller
-        // uses its own fallback rather than reading half a row.
+        // 表缺失（迁移没跑）或瞬时故障：调用方用自己的回退，而不是读到半行。
       }
     }
-    // The fallback answers with the SAME row shape as the SQL branch — it is what
-    // the offline suite exercises, so the two may not disagree on scope.
+    // 回退回答的行形状与 SQL 分支完全相同 —— 离线套件练的正是它，
+    // 两者不能在范围上各说各话。
     return this.inMemorySettings.get(userId) ?? null
   }
 
@@ -686,12 +674,10 @@ export class Database {
     userId: string,
     settings: Partial<StoredUserSettings>,
   ): Promise<StoredUserSettings> {
-    // Read-then-write, because every field is written INDEPENDENTLY: a PATCH that
-    // carries only the anchors must not reissue the commute hours, and one that
-    // carries only the hours must not erase a saved anchor. A user with no row yet
-    // starts from NOTHING chosen — the four times stay null until the request
-    // actually names them, which is what stops an anchors-only write from storing
-    // the built-in window as the user's own configuration.
+    // 先读后写，因为每个字段都是独立写入的：只带锚点的 PATCH 不得重发通勤时段，
+    // 只带时段的 PATCH 不得抹掉已存的锚点。还没有行的用户从「什么都没选」起步 ——
+    // 四个时刻保持 null，直到请求真的命名了它们。
+
     const stored = await this.getUserSettings(userId)
     const merged: StoredUserSettings = { ...(stored ?? EMPTY_USER_SETTINGS), ...definedOnly(settings) }
 
@@ -730,18 +716,18 @@ export class Database {
     return merged
   }
 
-  // ---------- Commute chains (F10) ----------
+  // ---------- 通勤链路（F10） ----------
 
-  /** A defensive copy: the in-memory store must not be reachable by reference. */
+  /** 防御性拷贝：内存存储不能被按引用拿到。 */
   private cloneChain(chain: StoredCommuteChain): StoredCommuteChain {
     return { ...chain, legs: chain.legs.map(leg => ({ ...leg })) }
   }
 
   /**
-   * A user's chains, in their stored order, each with its legs in sequence.
+   * 一个用户的链路，按存储顺序，每条带按序列排好的腿。
    *
-   * Ordered like the favourites' list: `display_order` first, `created_at` only
-   * breaking a tie — so moving one chain never rewrites another's position.
+   * 排序与收藏列表相同：先 `display_order`，`created_at` 只用来破平局 ——
+   * 因此移动一条链路从不重写另一条的位置。
    */
   async getCommuteChains(userId: string = DEFAULT_USER_ID): Promise<StoredCommuteChain[]> {
     if (this.pool) {
@@ -751,8 +737,7 @@ export class Database {
           [userId],
         )
         if (chainRes.rows.length === 0) return []
-        // Legs are read in one query for the whole page rather than one per
-        // chain: the number of round trips must not scale with the list.
+        // 整页的腿一次查询读完，而不是每条链路一次：往返次数不得随列表规模增长。
         const legRes = await this.pool.query(
           'SELECT * FROM commute_chain_legs WHERE chain_id = ANY($1::uuid[]) ORDER BY chain_id, seq ASC',
           [chainRes.rows.map(row => row.id)],
@@ -766,7 +751,6 @@ export class Database {
         return chainRes.rows.map(row => storedCommuteChain(row, legsByChain.get(row.id) ?? []))
       }
       catch {
-        // Fall through to memory
       }
     }
     return [...this.inMemoryChains.values()]
@@ -775,7 +759,6 @@ export class Database {
       .map(chain => this.cloneChain(chain))
   }
 
-  /** One chain with its legs, or null when no such chain exists. */
   async getCommuteChain(id: string): Promise<StoredCommuteChain | null> {
     if (this.pool) {
       const client = await this.pool.connect()
@@ -783,7 +766,6 @@ export class Database {
         return await this.readChain(client, id)
       }
       catch {
-        // Fall through to memory
       }
       finally {
         client.release()
@@ -794,10 +776,7 @@ export class Database {
   }
 
   /**
-   * Write a new chain with its legs.
-   *
-   * Both rows land in one transaction: a chain whose legs failed to write would
-   * answer every later question with an empty walk.
+   * 写入一条新链路及其腿。两行落在同一个事务里：腿写失败的链路会对此后每个问题都答一次空走。
    */
   async createCommuteChain(input: CommuteChainInput): Promise<StoredCommuteChain> {
     const id = crypto.randomUUID()
@@ -821,7 +800,6 @@ export class Database {
       }
       catch {
         await client.query('ROLLBACK').catch(() => {})
-        // Fall through to memory
       }
       finally {
         client.release()
@@ -843,12 +821,10 @@ export class Database {
   }
 
   /**
-   * Update a chain, replacing its legs when the patch carries any.
+   * 更新一条链路，补丁带腿时替换它的腿。
    *
-   * `legs` present means the whole sequence is written in place of the old one
-   * — a chain's legs are one value, so a leg is never edited in isolation and
-   * the `seq` numbers cannot drift out of step with the order. Any other field
-   * absent from the patch is left exactly as stored.
+   * `legs` 存在即整段写入以替换旧的 —— 一条链路的腿是一个值，因此腿从不被单独编辑，
+   * `seq` 也不会与顺序脱节。补丁里没有的其它字段保持存储的样子。
    */
   async updateCommuteChain(id: string, patch: CommuteChainPatch): Promise<StoredCommuteChain | null> {
     if (this.pool) {
@@ -887,7 +863,6 @@ export class Database {
       }
       catch {
         await client.query('ROLLBACK').catch(() => {})
-        // Fall through to memory
       }
       finally {
         client.release()
@@ -904,7 +879,7 @@ export class Database {
     return this.cloneChain(record)
   }
 
-  /** Delete a chain; its legs go with it (the foreign key cascades). */
+  /** 删除一条链路；它的腿随之而去（外键级联）。 */
   async removeCommuteChain(id: string): Promise<boolean> {
     if (this.pool) {
       try {
@@ -919,7 +894,6 @@ export class Database {
     return this.inMemoryChains.delete(id)
   }
 
-  /** Read one chain and its legs through an already-open client. */
   private async readChain(client: pg.PoolClient, id: string): Promise<StoredCommuteChain | null> {
     const chainRes = await client.query('SELECT * FROM commute_chains WHERE id = $1', [id])
     const row = chainRes.rows[0]
@@ -931,7 +905,6 @@ export class Database {
     return storedCommuteChain(row, legRes.rows.map(storedCommuteChainLeg))
   }
 
-  /** Write a chain's legs in one statement, seq included. */
   private async insertLegs(
     client: pg.PoolClient,
     chainId: string,
@@ -964,7 +937,7 @@ export class Database {
     )
   }
 
-  // ---------- Static line cache ----------
+  // ---------- 静态线路缓存 ----------
 
   async getCachedLine(lineId: string, direction: number): Promise<LineDetail | null> {
     const key = `${lineId}_${direction}`
@@ -980,7 +953,6 @@ export class Database {
         return null
       }
       catch {
-        // Fallback
       }
     }
     return this.inMemoryLineCache.get(key)?.detail ?? null
@@ -1000,7 +972,6 @@ export class Database {
         return
       }
       catch {
-        // Fallback
       }
     }
     this.inMemoryLineCache.set(key, { detail, fetchedAt: Date.now() })

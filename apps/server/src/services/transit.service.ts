@@ -61,34 +61,15 @@ import type {
 import { legLiveReading, pairTargetedReads, type TargetedArrival } from './commute-chain-assembly.js'
 
 /**
- * The current local `HH:MM` — the form the stored commute windows are written in.
- *
- * Local rather than Beijing on purpose: it is the clock the commute profile
- * already reads, so the leg this row prices is the leg the card is showing.
+ * 当前本地 `HH:MM` —— 存储的通勤时段使用的形式（本地时钟，与通勤档案读的钟一致）。
  */
 function localHHMM(now: Date = new Date()): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 }
 
 /**
- * The span this engine uses to decide WHICH anchor an unconfigured user is asked
- * about — its own parameter, not the user's settings.
- *
- * The same shape as the subway engine's simulation window (`serviceWindowSeconds`):
- * a model needs a span to enumerate over, and that span is never reported back as
- * the line's service hours. Here the span is needed because F1's reference has to
- * name the anchor this leg starts from, and a user who stated no window has given
- * the engine nothing to read — that is 「没有这一行」 and, since 009, equally
- * 「行在，但四个时刻是 NULL」. What it decides is only which of the two anchors the
- * sentence is about — and a user with no chosen window has stored no anchor either
- * (an anchor is a different column of the same row, and the row may hold one: see
- * `commuteWindowFor`), so 「未保存『家』位置」 and 「未保存『公司』位置」 are both true of him
- * whenever the sentence is printed.
- *
- * It is deliberately NOT a `StoredUserSettings` value anywhere else: `/settings`
- * answers a row of nulls with the nulls, and this constant must never be handed to
- * a caller as a row, so it carries no anchors (the two spaces the reference reads
- * from) and no other reader may use it.
+ * 本引擎用来决定「未配置的用户被问到哪个锚点」的跨度：它自己的参数，不是用户的设置；
+ * 它只决定句子说的是哪个锚点，绝不作为一行用户设置交给调用方。
  */
 const UNCONFIGURED_COMMUTE_WINDOW = {
   ...DEFAULT_COMMUTE_HOURS,
@@ -99,18 +80,8 @@ const UNCONFIGURED_COMMUTE_WINDOW = {
 } satisfies StoredUserSettings
 
 /**
- * The span this engine decides `hhmm` against, for a user who stated no window.
- *
- * Every END the user never chose falls back to this engine's OWN parameter
- * (`UNCONFIGURED_COMMUTE_WINDOW`, named above), so a row whose times are NULL is
- * read the same way a store with no row is — which is what keeps the F1 reference
- * reaching its consumer for the state 009 made representable. The stored ends win
- * wherever they exist: a user who chose only a morning window is decided against
- * HIS morning window, and the evening end he never chose is the engine's own span
- * rather than a value pretending to be his.
- *
- * Nothing here is handed back as the user's hours: this value never leaves the
- * engine, and `/settings` and `/commute-profile` report a null as a null.
+ * 用户没有说时段时，本引擎用来判定 `hhmm` 的跨度：他从未选择的每个端点都回落到本引擎自己的
+ * 参数，已存的端点照旧用他的；该值从不作为用户时段交出去。
  */
 function commuteWindowFor(stored: StoredUserSettings | null): CommuteHours {
   return {
@@ -122,41 +93,19 @@ function commuteWindowFor(stored: StoredUserSettings | null): CommuteHours {
 }
 
 /**
- * F11's cooldown, per (user, data class).
- *
- * Deliberately the live cache's own TTL rather than a number of its own. That
- * cache is the cadence every screen reads through, so a reading obtained inside
- * its window cannot differ from the one the next poll would have produced — and
- * a button pressable faster than that would claim a freshness it cannot
- * deliver. Tying the two to a single number means they cannot drift apart in
- * the direction that turns the button into a lie.
+ * F11 的冷却，按 (user, 数据类)：故意取实时缓存自己的 TTL，令两者不可能各自漂移。
  */
 const REFRESH_COOLDOWN_MS = LIVE_CACHE_TTL_MS
 
 /**
- * The wait, in seconds, until a refresh is allowed again — the form a countdown
- * renders.
- *
- * Derived from `nextAllowedAt` in EVERY outcome rather than stated per branch: a
- * response reporting 0 while its own deadline is a full cadence away tells a
- * screen to offer a refresh it will then refuse. `nextAllowedAt` stays the single
- * source of truth, and this is only that deadline expressed as a wait.
+ * 距下次允许刷新还有多少秒：每个分支都从 `nextAllowedAt` 推出来，它是唯一真源。
  */
 function secondsUntil(nextAllowedAt: number, now: number): number {
   return Math.max(0, Math.ceil((nextAllowedAt - now) / 1000))
 }
 
 /**
- * A stop's own point, or null when it carries no position.
- *
- * Everything here that prices a distance or a walking route needs a point at
- * BOTH ends, and an upstream that stated no coordinate has stated no position —
- * so the absence yields null and every caller refuses on it instead of measuring
- * from a stand-in (see `StationSchema`). A zero on EITHER axis is that same
- * absence and not a position: no placed stop on this app's GCJ-02 datum sits at
- * 0, so a stored row carrying `{ lat: 0, lng: 0 }` states no position for that
- * stop. The rule is `statedCoordinate`'s, applied here so a stored row reads no
- * differently from a freshly parsed payload.
+ * 一个站点自己的点，没有位置时为 null；任一轴为 0 也算没有位置（与 `statedCoordinate` 同一条规则）。
  */
 function stationPoint(station: Station | null | undefined): { lng: number, lat: number } | null {
   if (!station) return null
@@ -166,38 +115,25 @@ function stationPoint(station: Station | null | undefined): { lng: number, lat: 
 }
 
 /**
- * One vehicle's arrival at ONE targeted station, as this service priced it.
- *
- * The intermediate the arrivals board and F10's chain deduction share. It carries
- * the vehicle's own id — so two targeted reads can be matched by it — and the
- * BASIS its minute was produced with, and it deliberately leaves F4's mark to the
- * caller: the mark depends on the source that answered, which the caller holds
- * once per reading rather than once per row.
+ * 一辆车到达某一个目标站的读数：带车辆 id（两次定向读取据此配对）与定价用的 basis，
+ * F4 的 mark 由调用方施加。
  */
 interface VehicleArrival {
   /**
-   * The clock this row states, or absent when it states no minute. The two travel
-   * together: a row has a `time` exactly when `etaSeconds` is a number.
+   * 该行声明的时刻，没有声明分钟时缺席 —— 与 `etaSeconds` 同行。
    */
   time?: string
   /**
-   * Seconds until this vehicle reaches the targeted station, or absent when the
-   * row states NO minute.
-   *
-   * Absent is an outcome, not a hole: it is what a targeted reading that published
-   * no arrival time for this vehicle produces, and it is served as an absence
-   * rather than filled with this app's own arithmetic — see the estimate branch in
-   * `vehicleArrivals` for the measurement that removed it.
+   * 到这辆车到达目标站的秒数，该行未声明分钟时缺席 —— 缺席是一种结果，
+   * 不用本应用自己的算术填补。
    */
   etaSeconds?: number
   stopsAway: number
   distanceMeters?: number
   isAtStation?: boolean
-  /** `LiveBusSchema.id` — the vehicle itself. */
   vehicleId: string
   /**
-   * Which arithmetic produced `etaSeconds`. Absent EXACTLY when the row states no
-   * minute, because then no arithmetic produced one.
+   * `etaSeconds` 由哪种算术产生；该行不声明分钟时正好缺席。
    */
   basis?: ArrivalBasis
 }
@@ -208,10 +144,7 @@ export class TransitService {
   private chelaile: ChelaileProvider
   private timetables: StationTimetableService
   /**
-   * Keyed by `${lineId}_${direction}`, NOT lineId alone: a subway line serves
-   * both directions under one lineId, so keying by lineId froze `direction` at
-   * whatever the first subscriber asked for and kept polling the wrong way
-   * after the user switched direction.
+   * 按 `${lineId}_${direction}` 作键，不能只按 lineId：地铁一条线两个方向共用一个 lineId。
    */
   private activeSubscriptions = new Map<string, {
     lineId: string
@@ -225,28 +158,18 @@ export class TransitService {
   private cityListCache: { data: TransitCity[], fetchedAt: number } | null = null
 
   /**
-   * One window per (user, data class) — the whole of F11's throttle.
-   *
-   * Keyed by the CLASS rather than by the screen or the line: F11 gives the home
-   * screen and the line page one entry each, and two entries refreshing once
-   * apiece must not equal two upstream reads. The class is part of the key even
-   * though real-time is the only class today, so a second class later cannot
-   * silently share this window.
+   * 每个 (user, 数据类) 一个窗口：键里带上数据类，虽然今天只有实时这一类。
    */
   private readonly refreshWindows = new Map<string, {
     /**
-     * The newest instant a refresh obtained a reading for this user at, or null
-     * if none ever did. Reported while the window is closed, where no new
-     * reading exists to report instead.
+     * 本用户最近一次取到读数的时刻，从未取到时为 null；窗口关闭期间报告它。
      */
     lastObtainedAt: number | null
     nextAllowedAt: number
   }>()
 
   /**
-   * How many windows are kept. The key carries a caller-supplied user id and
-   * this endpoint is reachable by anyone, so the map must not grow without
-   * bound; the least recently refreshed window is the one worth least.
+   * 保留多少窗口：键带调用方给的 user id 且端点人人可达，映射必须有界；最久未刷新的窗口价值最低。
    */
   private static readonly MAX_REFRESH_WINDOWS = 500
 
@@ -258,9 +181,8 @@ export class TransitService {
     this.amap = new AmapGisService(options?.amapKey || process.env.AMAP_MAPS_API_KEY)
     this.chelaile = new ChelaileProvider()
     this.timetables = new StationTimetableService()
-    // Wire the subway engine to this service's cached getLineDetail so the live
-    // poll path reuses the DB-backed static geometry instead of re-querying
-    // Amap every 18s (one QPS throttle would otherwise 404 a valid line).
+    // 把地铁引擎接到本服务带缓存的 getLineDetail 上：直播轮询路径复用 DB 里的静态几何，
+    // 不再每 18s 重问 Amap。
     const universalSubway = new UniversalSubwayEngine(this.amap, this.timetables, (lineId, direction, cityCode) =>
       this.getLineDetail(lineId, direction, cityCode))
     const subwayRouter = new SubwayRouterProvider(universalSubway, this.chelaile)
@@ -276,17 +198,15 @@ export class TransitService {
   }
 
   /**
-   * City dictionary: merge the auto-generated 497-city chelaile dictionary with
-   * curated metro cities that chelaile does not cover (Guangzhou/Shenzhen/Tianjin...).
+   * 城市字典：把 chelaile 自动生成的城市字典与它未覆盖的人工维护的轨道交通城市合并。
    */
   getCities(): TransitCity[] {
     const dictByCode = new Map(CITY_DICTIONARY.map(c => [c.code, c]))
     const mergedCodes = new Set<string>()
     const merged: TransitCity[] = []
 
-    // Curated hot cities first, in HOT_CITY_META order (Beijing, Shanghai, Guangzhou...).
-    // hasMetro=true for all curated entries: they all operate metro systems, and our
-    // UniversalSubwayEngine simulates them via Amap regardless of chelaile coverage.
+    // 人工维护的热门城市排在最前（按 HOT_CITY_META 顺序），hasMetro 全为 true：
+    // 它们都有轨道交通，通用地铁引擎经 Amap 模拟它们，与 chelaile 覆盖无关。
     for (const c of HOT_CITY_META) {
       const dictEntry = dictByCode.get(c.code)
       merged.push({
@@ -299,14 +219,12 @@ export class TransitService {
       mergedCodes.add(c.code)
     }
 
-    // Then the full dictionary (hot entries already emitted above)
     for (const c of CITY_DICTIONARY) {
       if (mergedCodes.has(c.code)) continue
       merged.push(c)
       mergedCodes.add(c.code)
     }
 
-    // Keep curated order at the top; sort the remainder by code
     const hotCount = HOT_CITY_META.length
     const rest = merged.slice(hotCount).sort((a, b) => a.code.localeCompare(b.code))
     return [...merged.slice(0, hotCount), ...rest]
@@ -317,20 +235,14 @@ export class TransitService {
   }
 
   /**
-   * Tracks geometry-backfill attempts for cache rows written before route
-   * geometry existed. Without this, every request for such a row would re-query
-   * the upstream — and since the subway live poll path resolves static detail
-   * through here, that meant an Amap call every 18s per line, amplifying any
-   * QPS throttle into user-visible 404s. One attempt per cooldown is enough.
+   * 记录几何回填尝试：每个冷却窗口最多回填一次，否则每个请求都会重问上游。
    */
   private readonly geomBackfillAt = new Map<string, number>()
   private static readonly GEOM_BACKFILL_COOLDOWN_MS = 6 * 3600 * 1000
 
   /**
-   * Line detail with static-repository caching:
-   * DB hit -> return instantly (zero upstream quota). Miss -> fetch + persist.
-   * Rows cached before route geometry existed get at most one backfill attempt
-   * per cooldown window; otherwise the cached row is served as-is.
+   * 带静态仓储缓存的线路详情：DB 命中即返回（零上游配额），未命中则取回并落库；
+   * 缓存行缺几何时每个冷却窗口最多回填一次，否则按原样提供。
    */
   async getLineDetail(lineId: string, direction: number = 0, cityCode?: string): Promise<LineDetail | null> {
     const cached = await this.db.getCachedLine(lineId, direction)
@@ -342,8 +254,8 @@ export class TransitService {
       if (hasGeometry) {
         return cached
       }
-      // Geometry-less cached row: only retry upstream once per cooldown window,
-      // then keep serving what we have (the client degrades to even spacing).
+      // 缓存行缺几何：每个冷却窗口只重试上游一次，之后继续提供已有的
+      // （客户端降级为均匀间隔）。
       const key = `${lineId}_${direction}`
       const lastAttempt = this.geomBackfillAt.get(key) ?? 0
       if (Date.now() - lastAttempt < TransitService.GEOM_BACKFILL_COOLDOWN_MS) {
@@ -358,8 +270,8 @@ export class TransitService {
       await this.db.upsertCachedLine(detail, source).catch(() => {})
       return detail
     }
-    // Upstream failed but we have an older cached row: serve it (geometry-less
-    // fallback still renders; vehicles degrade to even spacing).
+    // 上游失败但有更早的缓存行：提供它（无几何的回退仍能渲染，
+    // 车辆降级为均匀间隔）。
     return cached
   }
 
@@ -381,26 +293,17 @@ export class TransitService {
   }
 
   /**
-   * Re-read the real-time data for the lines a screen is showing, once per
-   * cooldown per user.
+   * 为一个屏幕正在看的线路重读实时数据，每个用户每个冷却窗口一次。
    *
-   * The outcome is one of three facts and they are not interchangeable:
-   * `throttled` — nothing was read at all; `unavailable` — the reads were made
-   * and none of them returned a reading; `ok` — at least one did. Only `ok` may
-   * carry a new instant, and a failed attempt keeps the instant it already had,
-   * because the readings on screen are still the ones from then.
-   *
-   * Real-time class only: each target's live readings are dropped and re-read,
-   * while long-TTL line data is left exactly as cached.
+   * 结果是三种不可互换的事实：`throttled` 什么都没读；`unavailable` 读了而都没答；
+   * `ok` 至少一个答了。只有 `ok` 可带新时刻，失败的尝试保留原有时刻。只覆盖实时类，
+   * 长 TTL 线路数据保持缓存原样。
    */
   async refreshLive(params: RefreshLiveRequest): Promise<{
     outcome: 'ok' | 'throttled' | 'unavailable'
     result: RefreshLiveResult
   }> {
     const attemptedAt = Date.now()
-    // One window per (user, data class): the class is in the key even though
-    // real-time is the only class today, so a second class cannot silently share
-    // this window later.
     const key = `${params.userId}:live`
     const held = this.refreshWindows.get(key)
 
@@ -413,46 +316,41 @@ export class TransitService {
           lastUpdatedAt: held.lastObtainedAt,
           nextAllowedAt: held.nextAllowedAt,
           retryAfterSeconds: secondsUntil(held.nextAllowedAt, attemptedAt),
-          // No line was read, so there is no per-line outcome to report. Listing
-          // them with a null reading would state the opposite: that they were read
-          // and answered nothing.
+          // 没有读任何线路，就没有按线路的结果可报：用 null 读数列出它们
+          // 等于说相反的话（读了而没答）。
           lines: [],
         },
       }
     }
 
-    // The window opens on the ATTEMPT, not on its result: a failed refresh has
-    // already spent its upstream calls, so it must not become a retry loop.
+    // 窗口在尝试时开，而不是在结果时开：失败的刷新已经花掉了
+    // 上游调用，不能变成重试循环。
     const nextAllowedAt = attemptedAt + REFRESH_COOLDOWN_MS
 
     const lines: RefreshLiveLineResult[] = []
     let newestObtainedAt: number | null = null
 
-    // The same line twice is one reading, not two: the request names lines, and
-    // a repeated one must not multiply the upstream reads.
+    // 同一条线出现两次是一次读数：请求命名的是线路，
+    // 重复的不得把上游读取翻倍。
     const targets = new Map(params.lines.map(target => [
       `${target.lineId}_${target.direction}`,
       target,
     ]))
 
     for (const target of targets.values()) {
-      // Drops the cached reading so this call is a real one. Overlapping the poll
-      // loop can still spend two upstream reads for this key — the aggregator has
-      // no single-flight (see `TransitAggregator.getLiveStatus`).
+      // 丢掉缓存读数，让这次调用是真的读；与轮询循环重叠时仍可能为这个
+      // 键花掉两次上游读取（聚合器没有 single-flight）。
       this.aggregator.invalidateLive(target.lineId, target.direction)
       const status = await this.getLiveStatus(target.lineId, target.direction, target.cityCode)
-      // The instant the reading was obtained, as the source that produced it
-      // stamped it — never the instant this method answers.
+      // 取得读数的时刻，按产生它的来源所盖，绝不是本方法作答的时刻。
       const obtainedAt = status ? status.updatedAt : null
 
       lines.push({
         lineId: target.lineId,
         direction: target.direction,
         lastUpdatedAt: obtainedAt,
-        // The reading's provenance, carried through from the status that
-        // produced it — null when there is no reading at all. A generated
-        // reading is stamped with the current time like any other, so the
-        // instant alone cannot tell a caller what kind of value it holds.
+        // 读数的 provenance，随产生它的状态一路带来；没有任何读数时为 null。
+        // 生成的读数与别的读数一样盖当前时间，只看时刻无法知道手里是什么值。
         dataSource: status?.dataSource ?? null,
         isDegraded: status?.isDegraded ?? null,
       })
@@ -461,9 +359,8 @@ export class TransitService {
       }
     }
 
-    // A refresh that obtained nothing keeps the newest instant it ever obtained
-    // for this user: the reading is still the one from then, and the clock is
-    // not a reading.
+    // 什么都没取到的刷新保留本用户曾取到的最新时刻：读数仍是那时的，
+    // 而时钟不是读数。
     const lastObtainedAt = newestObtainedAt ?? held?.lastObtainedAt ?? null
     this.rememberRefreshWindow(key, { lastObtainedAt, nextAllowedAt })
 
@@ -474,9 +371,7 @@ export class TransitService {
         throttled: false,
         lastUpdatedAt: lastObtainedAt,
         nextAllowedAt,
-        // This attempt spent the window whether or not it obtained anything, so
-        // the wait is the whole cadence — the same derivation as a refusal, and
-        // the same number the deadline above says.
+        // 这次尝试无论是否取到东西都花掉了窗口，因此等待时间是整个节拍。
         retryAfterSeconds: secondsUntil(nextAllowedAt, attemptedAt),
         lines,
       },
@@ -484,11 +379,8 @@ export class TransitService {
   }
 
   /**
-   * Record a window, keeping the map bounded.
-   *
-   * Re-inserted rather than overwritten so iteration order is recency order, and
-   * the first key is then the least recently refreshed one — the window worth
-   * least when the map is full.
+   * 记录窗口并让映射有界：重新插入而不是覆盖，迭代顺序即最近使用顺序，
+   * 第一个键就是最久未刷新的窗口。
    */
   private rememberRefreshWindow(key: string, window: { lastObtainedAt: number | null, nextAllowedAt: number }): void {
     this.refreshWindows.delete(key)
@@ -502,9 +394,7 @@ export class TransitService {
   }
 
   /**
-   * True when the environment forces generated vehicles instead of upstream
-   * live data. Exposed to the web app so the UI can label simulated data
-   * unmistakably — a user must never mistake generated vehicles for real ones.
+   * 环境强制生成车辆而非上游实时数据时为 true；暴露给 web 端以便明确标注模拟数据。
    */
   isSimulationEnabled(): boolean {
     return process.env.TRANSIT_SIMULATION === 'true'
@@ -569,8 +459,6 @@ export class TransitService {
         nextOrder: stopIdx + 2,
         progress: timeCycle,
         speed: 7.5 + (i % 3) * 1.5,
-        // A simulated vehicle has no crowding reading and no plate; inventing
-        // either dresses it up as an observed one.
         congestion: 'unknown',
         distanceFromStart: Math.round(currentDist),
         distanceToWaitStn,
@@ -590,16 +478,9 @@ export class TransitService {
   }
 
   /**
-   * Backfill `reverseLineId` for favourites saved before routes were followed
-   * as a whole (both directions).
-   *
-   * Resolved from the line's own cached detail, never guessed:
-   * - subway: one upstream lineId serves both directions, so the reverse is the
-   *   same id (only the direction param changes)
-   * - bus: chelaile issues a distinct lineId per direction, taken from the
-   *   provider's `otherDirectionLineId`
-   * Rows whose reverse way cannot be resolved stay as they are, and the UI then
-   * offers no direction switch for them rather than switching to a wrong line.
+   * 为「线路作为整体（两个方向）被关注之前存下的收藏」回填 `reverseLineId`：
+   * 地铁两个方向共用一个上游 lineId（反向就是同一个 id），公交每个方向一个 lineId
+   * （取 provider 的 `otherDirectionLineId`）。解析不出来的行保持原样，界面因此不为它提供方向切换。
    */
   async resolveFavoriteDirections(list: UserFavoriteLine[]): Promise<UserFavoriteLine[]> {
     const resolved: UserFavoriteLine[] = []
@@ -623,7 +504,6 @@ export class TransitService {
         }
       }
       catch {
-        // Leave unresolved; the row still works for its stored direction.
       }
       resolved.push(fav)
     }
@@ -632,21 +512,16 @@ export class TransitService {
   }
 
   /**
-   * Walking ETA for a GCJ-02 pair — the origin converted at the HTTP boundary,
-   * the destination a stored station coordinate (already GCJ-02). Pass-through:
-   * the Amap client takes GCJ-02 and converts nothing.
+   * 一个 GCJ-02 点对的步行 ETA：起点已在 HTTP 边界换算，终点是存储的站点坐标（已是 GCJ-02）；
+   * Amap 客户端只接 GCJ-02、不做换算。
    */
   async getWalkingEta(originLng: number, originLat: number, destLng: number, destLat: number) {
     return this.amap.getWalkingEta(originLng, originLat, destLng, destLat)
   }
 
   /**
-   * Catch-the-bus decision: compares real-road walking ETA (amap) against the
-   * nearest vehicle's remaining travel time for a station on a given line.
-   *
-   * `origin*` is GCJ-02 (converted at the HTTP boundary); the station's own
-   * coordinates come from the cached line detail, which is GCJ-02 as Amap
-   * returns it, so both ends of the walking leg are in the same system.
+   * 赶公交决策：把真实道路步行 ETA 与某条线某站最近车辆的剩余行程时间相比。
+   * `origin*` 是 GCJ-02，站点坐标来自缓存的线路详情（Amap 返回的 GCJ-02），步行段两端同一系统。
    */
   async getWalkDecision(params: {
     originLng: number
@@ -660,9 +535,8 @@ export class TransitService {
     if (!detail) return null
 
     const station = detail.stops.find(s => s.name === params.stationName)
-    // A platform the line detail cannot place prices no walk: there is no
-    // destination to route to, and a route from a stand-in point would answer
-    // about a place nobody named.
+    // 线路详情无法定位的站台定不出步行价：没有终点可规划，
+    // 从替代点算出的路线回答的是没人命名的地点。
     const destination = stationPoint(station)
     if (!destination) return null
 
@@ -673,10 +547,8 @@ export class TransitService {
     const nextArrival = arrivalsResult?.arrivals?.[0]
     let vehicleEtaSeconds: number | null = null
     if (nextArrival) {
-      // `statedArrivalMinutes` is the one rule for "a minute or none": the
-      // at-platform state answers 0, a row that states a minute answers it, and a
-      // row whose reading published none leaves this null — no walk comparison
-      // against a number nobody stated, rather than a fabricated figure.
+      // `statedArrivalMinutes` 是「有分钟或没有」的唯一规则：到站态答 0，
+      // 声明分钟的行答它，读数没发布分钟的行留空 —— 绝不与没人说过的数字做步行比较。
       vehicleEtaSeconds = statedArrivalMinutes(nextArrival)
     }
 
@@ -719,72 +591,43 @@ export class TransitService {
   }
 
   /**
-   * F1's reference row for one platform: the real walking time from the anchor
-   * the user is standing at, and the departure conclusion drawn from it.
+   * F1 针对一个站台的参考行：从用户所在锚点出发的真实步行时间，以及由此得出的出门结论。
    *
-   * The anchor is read HERE, server-side, as the stored row holds it — GCJ-02,
-   * because the `/settings` PATCH boundary converts a raw device fix exactly
-   * once — and is handed to Amap as-is, together with the station coordinate
-   * from the cached line detail (GCJ-02 as Amap returns it). The HTTP GIS
-   * routes' `originLng/originLat` are, by contract, a RAW WGS-84 device fix and
-   * convert on entry, so pushing a stored anchor through them would convert it a
-   * second time: ~520 m of origin error, which against F1's 3-minute tolerance
-   * inverts the 出门结论. Resolving the origin here also keeps the walking-ETA
-   * cache effective — its key is the coordinate pair sent upstream, and a saved
-   * anchor is a fixed value rather than a moving GPS stream.
+   * 锚点在服务端按存储行读（GCJ-02），原样交给 Amap；HTTP GIS 路由的 `originLng/originLat`
+   * 按契约是原始 WGS-84 设备定位、入口即换算，把存储锚点推过去会换算第二次。
    *
-   * Returns null — no row — whenever the answer would be a guess: no anchor
-   * means 「where you are」 (outside both commute windows), no vehicle to walk
-   * to, no walking route priced, or arrival numbers that are stale or degraded.
-   * A platform whose stop states no coordinate is one of those: there is no
-   * point to price the walk to. The one non-conclusion it DOES report is an
-   * anchor that was never saved, which is a fact about the stored row and points
-   * the user at 设置.
+   * 答案会是猜测时返回 null：没有锚点、没有可走到的车、没定出步行路线、到站数字过期或降级。
+   * 它唯一报告的非结论是从未保存的锚点。
    */
   private async departureReference(params: {
     /**
-     * The platform's coordinates as the line detail holds them, or null — also
-     * when that stop carries no coordinate, which is the same absence for
-     * pricing purposes: no position means no walking time to compare against.
+     * 站台坐标（按线路详情所持），该站没有坐标时为 null —— 定价意义上同样是缺席。
      */
     station: { lng: number, lat: number } | null
-    /** The arrivals this platform's answer carries, in order. */
     arrivals: readonly ArrivalRow[]
     trust: DepartureTrust
   }): Promise<DepartureReference | null> {
     if (!params.station) return null
 
     const stored = await this.db.getUserSettings(DEFAULT_USER_ID)
-    // Which anchor means 「where you are」 is decided by the commute window — and
-    // for a user who has chosen none there is no window of HIS. That is two states
-    // now (`/settings` answers `unset` with no row, or a row whose four times are
-    // null), and both reach this engine as the same thing: the ends he never chose.
-    // The span below is this engine's OWN parameter, named as such — exactly the
-    // pattern `serviceWindowSeconds` uses for a line whose service hours nobody
-    // stated — and each end he DID choose is used as his. It is never reported as
-    // the user's hours: `/settings` answers a row of nulls with the nulls, nothing
-    // in this payload carries a window at all, and what the span decides is only
-    // WHICH anchor the row asks about. That sentence is true either way: the anchor
-    // this names was never saved (a different column of the same row may be set, and
-    // the row still holds no position for this leg).
+    // 「你在哪」指哪个锚点由通勤时段决定；没有选中时段的用户没有属于他的窗口
+    // （没有行，或一行四个时刻为 NULL），两者到这里是同一件事：他从未选择的端点。
+    // 下面的跨度是本引擎自己的参数，他选过的端点按他的用；该跨度从不作为用户时段报出，
+    // 它只决定这一行问的是哪个锚点。
     const hours = commuteWindowFor(stored)
     const leg = anchorLegAt(localHHMM(), hours)
     if (!leg) return null
 
-    // The anchors are read from the STORED row, and only from it: the span above
-    // carries none (it is the engine's parameter, not a row), and a store with no row
-    // has stored no anchor — so `stored` being null here means the same thing as its
-    // anchor columns being null, which is the null below.
+    // 锚点只从存储行读：上面的跨度不带锚点，而没有行的库里也没存锚点，
+    // 因此这里 `stored` 为 null 与它的锚点列为 null 是同一件事。
     const lng = leg === 'home' ? stored?.homeLng ?? null : stored?.workLng ?? null
     const lat = leg === 'home' ? stored?.homeLat ?? null : stored?.workLat ?? null
-    // Unset is reported as unset: the settings screen is where it gets fixed,
-    // and the row says so instead of falling back to a coordinate the user
-    // never saved.
+    // 未设置就报未设置：修它在设置页，这一行要说出来，
+    // 而不是回退到用户从未保存的坐标。
     if (lng === null || lat === null) return { status: 'anchor-unset', anchor: leg }
 
-    // Nothing to conclude from, and no reason to spend a walking request on
-    // either: 「现在就走」 built on an old or degraded reading is the one thing
-    // this row must never say.
+    // 没有可据以结论的东西，也没有理由为它花一次步行请求：
+    // 「现在就走」建在过期或降级的读数上是这一行绝不能说的话。
     if (params.trust !== 'ok') return null
     if (params.arrivals.length === 0) return null
 
@@ -802,46 +645,24 @@ export class TransitService {
     return { status: 'advice', anchor: leg, advice }
   }
 
-  /** Nearby radar around a GCJ-02 point (converted at the HTTP boundary). */
+  /** 一个 GCJ-02 点周边的站点（该点已在 HTTP 边界换算）。 */
   async getNearbyStations(lng: number, lat: number, radius: number = 800) {
     return this.amap.getNearbyStations(lng, lat, radius)
   }
 
-  /** Landmark for a GCJ-02 point (converted at the HTTP boundary). */
+  /** 一个 GCJ-02 点的地标（该点已在 HTTP 边界换算）。 */
   async reverseGeocode(lng: number, lat: number) {
     return this.amap.reverseGeocode(lng, lat)
   }
 
   /**
-   * Station arrivals with precision awareness:
-   * - exact minute-level timetable registered for the platform -> official departures
-   * - otherwise -> the live reading (or the subway engine's trains), isExact: false
+   * 站点到站，带精度意识：平台注册了分钟级时刻表则给官方发车，否则给实时读数
+   * （或地铁引擎的列车），`isExact: false`。
    *
-   * Every row carries its own F4 provenance, because the minute can come from three
-   * places and only the first of them is the payload's:
+   * 每一行自带 F4 provenance：上游 `travelTimeSec` 是实时，地铁引擎的 135 s/站是排班推演，
+   * 没有分钟则没有 mark。生成车辆优先于前两者（地铁行会带上引擎编的 `travelTimeSec`）。
    *
-   *   1. upstream `travelTimeSec`          -> 实时（上游给的分钟）
-   *   2. the subway engine's 135s/station  -> 排班推演
-   *   3. nothing — no minute is stated     -> no mark, an absence the UI words
-   *
-   * Branch 3 is the owner's decision of 2026-09-25. It used to hold two arithmetics
-   * of our own (a real position + a nominal dwell per remaining stop, and a flat
-   * per-stop constant) both marked 位置推算, and neither is stated any more: they
-   * extrapolated a snapshot speed and a nominal dwell across every remaining stop,
-   * the error had no fixed sign, and the user acts on the number rather than on the
-   * mark that qualifies it. The row is still served — the vehicle IS on its way —
-   * with no `time`, no `etaSeconds` and no provenance.
-   *
-   * A generated vehicle outranks the first two: the engine puts a `travelTimeSec` on
-   * every train it invents, so a subway row reaches branch 1 while its train does
-   * not exist — hence the vehicle's own provenance is resolved first, and a row can
-   * never come back claiming 实时 for a train the model made up.
-   *
-   * The answer also carries F1's `reference` row for this platform, priced from
-   * the anchor the user is at. It rides along here rather than on a route of its
-   * own so the walk is compared against the very arrival minutes the caller
-   * displays — one fetch, one set of numbers, no second opinion about the same
-   * bus.
+   * 答案还带该站台的 F1 `reference` 行，用的是调用方显示的同一批到站分钟。
    */
   async getStationArrivals(
     lineId: string,
@@ -854,34 +675,22 @@ export class TransitService {
     isExact: boolean
     arrivals: ArrivalRow[]
     /**
-     * F3: whether service is running, derived from the first/last departure the
-     * line itself carries. An empty `arrivals` alone cannot tell 首班前 from
-     * 已过末班 from 运营中-but-nothing-in-range, and each of those is a different
-     * answer for someone standing on the platform.
+     * F3：服务是否在运营，由线路自己的首末班推导 —— 空 `arrivals` 单独分不出首班前 /
+     * 已过末班 / 运营中但没有车。
      */
     operatingStatus: OperatingStatus
     /**
-     * F-C: the exact table's own caveat for this platform, verbatim (「0:16 半程至
-     * 高楼金」 — a last departure that does not go the whole way), or null when the
-     * answering path holds no such caveat. It is carried rather than dropped
-     * because it is a fact about the day's remaining service that nothing else in
-     * the answer states: the departures list says when the last train leaves, not
-     * how far it goes. Only the registered timetable has it — the live and
-     * simulated paths hold no such remark and say so with null.
+     * F-C：该站台精确时刻表自己的注意事项，原样携带，没有时为 null；
+     * 只有注册时刻表有它，实时与模拟路径以 null 说明没有。
      */
     note: string | null
-    /** F1's walking reference, or null when no honest conclusion exists. */
     reference: DepartureReference | null
   } | null> {
     const now = Date.now()
-    // Seconds into the Beijing operating day (00:00~28:00). 00:00-03:59 belongs
-    // to the previous day's tail, which is why the shift is applied here rather
-    // than by reading the calendar date.
+    // 北京运营日内的秒数（00:00~28:00）：00:00-03:59 属前一天的尾巴，
+    // 因此在这里移位而不读日历日期。
     const nowSecOfDay = operatingDaySecondsOf(new Date(now))
 
-    // 1) Station resolution first: both paths below price F1's walk to THIS
-    // platform, and `getLineDetail` is cached (the DB row, or the aggregator's
-    // hour), so resolving it here adds no upstream call to either path.
     const detail = await this.getLineDetail(lineId, direction, cityCode)
     const station = detail
       ? ((typeof targetOrderParam === 'number' && targetOrderParam > 0)
@@ -889,11 +698,8 @@ export class TransitService {
           : (detail.stops.find(s => s.name === stationName) || detail.stops.find(s => s.name.includes(stationName))))
       : undefined
 
-    // 2) Exact timetable overlay
     const exact = this.timetables.query(lineId, stationName, direction, nowSecOfDay, { count })
     if (exact) {
-      // A published table is neither an observation nor a model of ours: every row
-      // is the timetable itself.
       const arrivals: ArrivalRow[] = exact.arrivals.map(a => ({
         time: a.time,
         etaSeconds: a.etaSeconds,
@@ -902,23 +708,17 @@ export class TransitService {
       return {
         isExact: true,
         arrivals,
-        // The station's own first/last departure decides the state here, not the
-        // line's: it is the same table the list above is built from, so the state
-        // and the departures beside it cannot disagree about whether service has
-        // ended at THIS platform. (`exact.first` / `exact.last` are the window the
-        // table's OWN departures imply — see `queryStationArrivals`.)
+        // 这里由该站自己的首末班决定状态，而不是线路的：与上面的发车列表同源，
+        // 因此状态与旁边的发车不能对「这个站台的运营是否已结束」各说各话。
         operatingStatus: operatingStatusOf({
           firstDeparture: exact.first,
           lastDeparture: exact.last,
           nowSecOfDay,
         }),
-        // F-C: the table's own caveat travels with the departures it qualifies.
-        // An empty string is not a caveat: the field is null when there is
-        // nothing to say, so a renderer's `v-if` states a fact rather than
-        // testing for whitespace.
+        // F-C：时刻表自己的注意事项随它所限定的发车一起走；
+        // 空串不是注意事项 —— 没有可说时该字段是 null，渲染方的 v-if 于是陈述事实而不是测空白。
         note: exact.note.trim() ? exact.note : null,
-        // A registered timetable is a function of the clock rather than a cached
-        // observation, so it is never stale: the walk decision may use it.
+        // 注册时刻表是时钟的函数而非缓存观测，因此永不陈旧：步行决策可以用它。
         reference: await this.departureReference({ station: stationPoint(station), arrivals, trust: 'ok' }),
       }
     }
@@ -926,49 +726,44 @@ export class TransitService {
     if (!detail || !station) return null
     const targetOrder = station.order
 
-    // F3: the line's own service hours, as the static detail carries them. Absent
-    // hours stay absent — the state then says 未知 instead of assuming a window.
+    // F3：线路自己的服务时段，按静态详情所持；缺失的时段保持缺失 ——
+    // 状态这时报 未知，而不是假定一个窗口。
     const operatingStatus = operatingStatusOf({
       firstDeparture: detail.firstBusTime,
       lastDeparture: detail.lastBusTime,
       nowSecOfDay,
     })
 
-    // 3) Request live status targeted to this station
     const live = await this.getLiveStatus(lineId, direction, cityCode, false, { targetOrder })
-    // A missing reading is a degraded answer for anything derived from it: it can
-    // never support a conclusion, and saying so is cheaper than pretending.
+    // 缺读数对任何由它推导的答案都是降级：它支撑不了结论，说出来比假装便宜。
     const trust: DepartureTrust = live
       ? arrivalTrust({ isDegraded: live.isDegraded, updatedAt: live.updatedAt })
       : 'degraded'
     if (!live || !live.buses || live.buses.length === 0) {
-      // No vehicle to walk to. The reference still reports an anchor that was
-      // never saved — a fact about the settings row, not about this platform.
+      // 没有车可走。参考行仍会报从未保存的锚点 —— 那是设置行的事实，不是这个站台的事实。
       return {
         isExact: false,
         arrivals: [],
         operatingStatus,
-        // No registered table answered here, so this path holds no caveat of its
-        // own to state — and it must not borrow the table's.
+        // 这里没有注册时刻表作答，因此这条路径没有自己的注意事项要声明，
+        // 也不得借用时刻表的。
         note: null,
         reference: await this.departureReference({ station: stationPoint(station), arrivals: [], trust }),
       }
     }
 
     /**
-     * F4: what kind of vehicle these rows are about, from the source that answered
-     * — `null` when this build does not know that source, in which case its rows
-     * come back unclassified instead of being rounded to 实时.
+     * F4：这些行说的是什么车，按作答的来源；本构建不认识该来源时为 null，
+     * 此时其行不分类，而不是一律归到 实时。
      */
     const vehicle = vehicleProvenanceOf(live.dataSource)
 
     const arrivals: ArrivalRow[] = this.vehicleArrivals({ detail, live, targetOrder, now })
       .slice(0, count)
       .map(row => ({
-        // A row states its own minute or none, and the two travel together: a row
-        // with no `etaSeconds` carries no `time` and no mark either, because a
-        // mark qualifies a NUMBER. The vehicle is still named (`busId`) with what
-        // is observed about it (`stopsAway`, `distanceMeters`).
+        // 一行给出自己的分钟或不给，二者同行：没有 `etaSeconds` 的行既没有 `time`
+        // 也没有 mark，因为 mark 限定的是一个数字。车辆仍被命名（`busId`），
+        // 并带上观测到的东西（`stopsAway`、`distanceMeters`）。
         ...(row.time !== undefined ? { time: row.time } : {}),
         ...(row.etaSeconds !== undefined ? { etaSeconds: row.etaSeconds } : {}),
         stopsAway: row.stopsAway,
@@ -982,36 +777,21 @@ export class TransitService {
       isExact: false,
       arrivals,
       operatingStatus,
-      // The live/simulated paths hold no timetable remark: null, never the
-      // table's caveat borrowed for a platform it does not cover.
+      // 实时/模拟路径没有时刻表注意事项：null，绝不借用不覆盖该站台的时刻表的注意事项。
       note: null,
       reference: await this.departureReference({ station: stationPoint(station), arrivals, trust }),
     }
   }
 
   /**
-   * Price every vehicle a reading carries at ONE targeted station.
+   * 把一次读数带的每辆车在同一个目标站定价。
    *
-   * Extracted from the arrivals board so that the board and F10's chain deduction
-   * price a vehicle's minute exactly once and identically: a chain leg's board and
-   * alight minutes are the same numbers the platform board shows for the same
-   * vehicle at the same station, and a second implementation of this arithmetic
-   * would be free to disagree with the screen the user compares it against.
-   *
-   * EVERY usable row is returned, sorted by arrival; the caller decides how many
-   * to keep. The chain deduction must not slice: a vehicle seventh by its alight
-   * minute can still be the one a chain boards, and truncating there would drop a
-   * catchable bus out of the answer for no reason the user could see.
-   *
-   * F4 is deliberately NOT applied here: the mark depends on the source that
-   * answered, which the caller holds once per reading rather than once per row.
-   * Each row therefore carries the BASIS it was priced with, and whoever builds a
-   * row turns that into the mark.
+   * 抽出来是为让站牌与 F10 的链路扣减对一辆车的分钟定价一次且完全一致。每个可用行都返回
+   * （按到站排序），由调用方决定保留几条；F4 不在这里施加，每行带定价用的 basis。
    */
   private vehicleArrivals(params: {
     detail: LineDetail | null
     live: LiveLineStatus
-    /** The station this read targeted. */
     targetOrder: number
     now: number
   }): VehicleArrival[] {
@@ -1025,42 +805,23 @@ export class TransitService {
     for (const b of live.buses) {
       if (typeof b.order !== 'number') continue
 
-      // Upstream -1 sentinel (chelaile): this bus is already past the target station.
+      // 上游 -1 哨兵（chelaile）：这辆车已过目标站。
       if (b.distanceToWaitStn === -1) continue
 
-      // The vehicle's nose is heading to nextOrder; it has cleared order.
-      // A bus serves the target station only when nextOrder === targetOrder.
+      // 车头朝 nextOrder 走，已过了 order：只有 nextOrder === targetOrder 时
+      // 这辆车才服务目标站。
       //
-      // THIS FILTER IS MONOTONE IN `targetOrder`, AND F10 RELIES ON IT: a vehicle
-      // not past a LATER order is not past an EARLIER one, so the rows returned for
-      // a board order are a subset of the rows returned for an alight order further
-      // along the same line. That is what makes F10's two targeted reads
-      // intersect — see `readChainLeg`, whose whole pairing depends on it. The
-      // subset relation needs the alight order to be FURTHER ALONG than the board one
-      // IN THE DIRECTION THE LEG IS READ. The caller resolves a subway leg stored the
-      // other way round by reading direction 1 with BOTH orders translated into its
-      // numbering (`chainLegInput`), so such a leg arrives here with alight > board
-      // like any forward one. A leg that cannot be read that way — a bus stored the
-      // wrong way round, a station-to-itself leg — inverts the relation instead, which
-      // is why the schema rejects such a record on write and the deduction refuses a
-      // stored one as `leg-recorded-backwards`. It is upstream's behaviour, which this
-      // repo neither controls nor documents: id matching is the rule (never position),
-      // so if a provider ever returned a board row absent from the alight read, the
-      // vehicle would simply lose its pair and be dropped rather than have a minute
-      // invented for it.
+      // 这个过滤对 `targetOrder` 单调，F10 依赖它：没过更靠后的 order 的车也没过更靠前的
+      // order，因此上车 order 的行是同一方向更靠后的下车 order 的行的子集 —— `readChainLeg`
+      // 的整个配对都建在这一点上。该关系只在腿沿其被读取的方向向前时成立；反向存储的公交腿与
+      // 「站到自身」的腿会把它反转，因此 schema 在写入时拒绝，扣减把它们判为
+      // `leg-recorded-backwards`。id 配对是规则（绝不按位置）。
       if (b.nextOrder !== undefined && b.nextOrder > targetOrder) continue
       if (b.nextOrder === undefined && b.order >= targetOrder) continue
 
-      // Currently dwelling at station platform (within 35m of the stop line) —
-      // or the source saying so outright. On a target-ordered read chelaile
-      // answers `travelTime 0` for a vehicle standing AT the requested stop
-      // (observed with `distanceToWaitStn 0` and `speed` ~0), and that zero is a
-      // statement about where the vehicle IS: at-platform, not a duration. The
-      // metre window above cannot stand in for it — it is measured in metres of
-      // this app's own linear reference and the reported reproduction missed it by
-      // 60 m — and a row that fell past this branch printed a minute from the
-      // position/dwell estimate, which is our arithmetic stating 「3 分」 for a bus
-      // on the platform. Read first, so the source's own fact wins.
+      // 此刻正停在该站台（或来源直接这么说）：定向读取中，chelaile 对站在请求站点上的车
+      // 会给 `travelTime 0`（观测到 `distanceToWaitStn 0`、`speed` ~0），那个 0 说的是车在哪
+      // （在站台），不是时长。先读它，让来源自己的事实占先。
       const sourceSaysAtPlatform = b.travelTimeSec === 0
       const isAtPlatform = sourceSaysAtPlatform
         || (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number'
@@ -1073,52 +834,38 @@ export class TransitService {
           stopsAway: 0,
           isAtStation: true,
           vehicleId: b.id,
-          // An observation of the vehicle — of a REAL vehicle, which is why the
-          // basis and not the branch decides the answer.
+          // 这是对车辆的观测 —— 真实车辆的观测，因此由 basis 而不是分支决定答案。
           basis: 'at_platform',
         })
         continue
       }
 
-      // Bus is approaching: stopsAway counts full hops from nextOrder to target
+      // 车正在接近：stopsAway 是从 nextOrder 到 target 的完整跳数。
       const stopsAway = Math.max(1, targetOrder - (b.nextOrder ?? b.order))
       const distanceMeters = b.distanceToWaitStn && b.distanceToWaitStn > 0 ? b.distanceToWaitStn : undefined
 
       /**
-       * The minute this row states, or `null` when nothing published or modelled
-       * one. Only two sources remain: the payload's own arrival time, and the
-       * subway engine's declared model.
+       * 这一行声明的分钟，没有任何来源发布或建模时为 `null`：只剩两个来源 ——
+       * payload 自己的到站时间与地铁引擎声明的模型。
        */
       let minute: { etaSeconds: number, basis: ArrivalBasis } | null = null
 
       if (typeof b.travelTimeSec === 'number' && b.travelTimeSec > 0) {
-        // The data source's own arrival time for this vehicle.
+        // 数据源自己给出的这辆车的到站时间。
         minute = { etaSeconds: b.travelTimeSec, basis: 'upstream' }
       }
       else if (isSubway) {
-        // 135 s/station is an assumption, not a reading — and it is the subway
-        // ENGINE's declared model (`dataSource: 'subway_schedule'`, marked
-        // 排班推演 by `arrivalProvenanceOf`), not this app's guess about a bus.
+        // 135 s/站是假设而不是读数，且它是地铁引擎声明的模型（`dataSource: 'subway_schedule'`，
+        // 由 `arrivalProvenanceOf` 标为 排班推演），不是本应用对公交的猜测。
         const progress = typeof b.progress === 'number' ? b.progress : 0
         minute = { etaSeconds: Math.max(30, Math.round((stopsAway - progress) * 135)), basis: 'our_estimate' }
       }
 
       if (!minute) {
-        // NO MINUTE IS STATED. The targeted reading published no arrival time for
-        // this bus, and the arithmetic that used to fill the gap extrapolated the
-        // vehicle's SNAPSHOT speed and a nominal per-stop dwell across every stop
-        // still to come — the remaining metres at a plausible bus speed, plus a
-        // fixed dwell per remaining stop, floored; or, with no geometry at all, a
-        // flat nominal per-stop constant. Measured against real data its error has
-        // no fixed sign: ~12 minutes mean, worst 28 minutes late on a long loop
-        // line, 5-10 minutes EARLY on a short busy one — a number the user acts on,
-        // so it is not stated at all.
-        //
-        // The row is still served. The vehicle is really on its way, and what WAS
-        // observed about it travels: this stop count and its distance. The
-        // caller's contract has no minute to carry, so `time`, `etaSeconds` and
-        // `basis` are all absent and the served row's provenance is null — a mark
-        // qualifies a NUMBER, and this row has none.
+        // 没有分钟被声明：定向读数没有为这辆车发布到站时间，而以前用来填空的算术是外推的
+        // 快照速度与标称停站时间，已不再声明。行仍然提供 —— 车确实在途，观测到的东西随行带上
+        // （剩余站数、距离）；`time`、`etaSeconds`、`basis` 全部缺席，provenance 为 null：
+        // mark 限定的是一个数字，这一行没有数字。
         rows.push({ stopsAway, distanceMeters, vehicleId: b.id })
         continue
       }
@@ -1134,11 +881,9 @@ export class TransitService {
       })
     }
 
-    // Rows that state a minute lead, in minute order. A row that states none
-    // cannot be placed in a time order at all, so it follows them, and among
-    // themselves those rows keep the one order they do describe — how many stops
-    // are left. Putting them last claims nothing about when they arrive;
-    // interleaving them would claim they arrive after the bus above.
+    // 声明分钟的行在前（按分钟排序）；不声明分钟的行无法排进时间序，跟在后面，
+    // 彼此按它们唯一描述的次序（剩余站数）排列 —— 放在最后不对它们何时到达作任何声明，
+    // 交错进来则等于说它们在上面的车之后到。
     return rows.sort((a, b) => {
       const ax = a.etaSeconds ?? Number.POSITIVE_INFINITY
       const bx = b.etaSeconds ?? Number.POSITIVE_INFINITY
@@ -1151,54 +896,17 @@ export class TransitService {
   // ---------- F10 · 换乘链路的实时组装 ----------
 
   /**
-   * F10's server half: the recorded chains of ONE commute purpose, each walked
-   * against live readings.
+   * F10 的服务端一半：某一个通勤目的下已录的链路，各自对着实时读数走一遍。
    *
-   * What this method may do is deliberately narrow — turn a stored chain into the
-   * pure engine's inputs and hand them over. The margin, the band and every
-   * 「不给结论」 reason belong to `deduceCommuteChain`; nothing here computes a
-   * minute, a distance or a verdict, and wherever a fact is missing the absence
-   * travels as `null` rather than as a value, so the engine names the missing fact
-   * in its own code instead of concluding on a substitute.
+   * 这里只把存储的链路转成纯引擎的输入；余量、区间与每个「不给结论」的理由都归
+   * `deduceCommuteChain`，缺失的事实以 `null` 传递而不是传一个替代值。
    *
-   * Per ride leg:
+   * 每段乘车腿的衔接按前一段腿被留下的点定价（第一段用链路存的锚点，两端都是 GCJ-02、原样发出）；
+   * 腿的线路读两次（分别定向到上车站与下车站），按车辆 id 配对。链路止于最后一段乘车腿的下车站，
+   * 之后不定价、不给总到达时间。
    *
-   *  - the connection INTO the leg is priced by the path service
-   *    (`getWalkingEta`), from the point the previous leg was left at — or from
-   *    the chain's stored anchor, for the first leg. Both ends are GCJ-02 and are
-   *    sent as held; the stored anchor was converted once, at the settings
-   *    boundary, and converting it again would move the origin ~500 m.
-   *  - the leg's line is read TWICE, once targeted at the board order and once at
-   *    the alight order, and the two reads are matched by vehicle id — see
-   *    `readChainLeg`.
-   *  - the connection's MODE is passed as walking, and that is a known gap rather
-   *    than a measurement: neither the chain nor `user_settings` stores one (007
-   *    has no such column), so a cycling connection is priced by the walking route
-   *    and 「找车与停车」 is not added. The alternative — inventing a cycling
-   *    duration — is exactly what this project forbids, so the gap is stated
-   *    instead. A leg's own `transferExtraMinutes` is still applied to it, because
-   *    that number is the user's and does not depend on the mode we had to guess.
-   *
-   * The chain ENDS at its last ride leg's alight station. Nothing past it is
-   * priced and no total arrival time is produced: the product need is the
-   * per-transfer margin (「我能不能赶上这个换乘点的车」), the chain records an ORIGIN
-   * anchor and no destination, and walking from the last alight station to a
-   * guessed end would be inventing the destination.
-   *
-   * Reads are spent only where they can change the answer. A leg whose stations are
-   * unset, whose connection could not be priced, or which its own record settles as
-   * BACKWARDS (a bus stored the wrong way round, or the same station twice) is
-   * refused by the engine BEFORE it ever looks at a reading — and the assembly
-   * therefore does not read any of them (`chainLegInput`). Once the engine's refusal
-   * is settled on some leg, NO later leg is read at all: the engine walks in leg
-   * order and returns on the first leg it cannot conclude on, so a later leg's reads
-   * could not change the answer. The engine is asked after every leg for exactly
-   * that, rather than the rule being copied here.
-   *
-   * The two reads that ARE spent are the ones the answer depends on: a stale or a
-   * degraded reading is discoverable only BY reading, so those are necessarily paid
-   * for before the engine can refuse on them — and a leg that is read and then
-   * refused spent nothing that could have been predicted.
+   * 只在可能改变答案的地方花读取：站点未设置、衔接定不出价、或记录本身判为反向的腿，在引擎看读数
+   * 之前就被拒，因此不读；引擎对某段给出拒绝后，之后的腿一概不读。
    */
   async deduceCommuteChains(params: {
     purpose: CommuteChainPurpose
@@ -1213,19 +921,14 @@ export class TransitService {
     const views: CommuteChainDeductionView[] = []
 
     for (const chain of chains) {
-      // Where the next connection starts: the chain's own anchor for the first
-      // leg, then wherever the leg before it was left. Only the anchor can stay
-      // unresolved, and only for the FIRST leg: a leg whose alight station cannot
-      // be located is refused, the engine answers that refusal for the prefix this
-      // loop holds, and the chain ends there — so no later leg is ever assembled
-      // from an unresolved point (`chainLegInput` states the one cause there is).
+      // 下一段衔接的起点：第一段用链路自己的锚点，之后用前一段腿被留下的点。
+      // 只有锚点可能解析不出来，且只对第一段：下车站定位不了的腿被引擎拒，链路到此为止，
+      // 因此不会有后面的腿从没解析出来的点组装。
       let from = this.anchorPoint(chain.originAnchor, settings)
       const legs: ChainLegInput[] = []
 
-      // The engine's answer for the legs assembled SO FAR. Asking it after each
-      // leg is how the short-circuit stays the engine's rule rather than a second
-      // copy of it: an engine that refuses the prefix refuses the whole chain at
-      // the same leg (it walks in leg order), and no later read could change that.
+      // 引擎对目前已组装腿的答案：每段之后问它一次，正是让短路保持为引擎的规则
+      // 而不是这里的副本（引擎按腿序走，拒了前缀就在同一段拒绝整条链路）。
       let deduction: CommuteChainDeduction = deduceCommuteChain({ legs, now })
 
       for (const leg of chain.legs) {
@@ -1249,12 +952,8 @@ export class TransitService {
   }
 
   /**
-   * The stored anchor a chain starts from, as the settings row holds it (GCJ-02),
-   * or null when it was never saved.
-   *
-   * Unset stays null: falling back to a coordinate would put the connection's
-   * origin somewhere the user never saved, and a walking route from it would be a
-   * real route from the wrong place.
+   * 链路起点的存储锚点，按设置行所持（GCJ-02）；从未保存时为 null。
+   * 未设置就保持 null：回退到一个坐标会把衔接起点放到用户从未保存的地方。
    */
   private anchorPoint(
     anchor: CommuteChainAnchor,
@@ -1267,22 +966,11 @@ export class TransitService {
   }
 
   /**
-   * A station of a stored leg, located in the line's stop list, or null.
+   * 存储腿的某个站，在线路站序中定位；定位不到为 null。
    *
-   * The stored pair is (name, order) and the ORDER is what locates a station in a
-   * stop list (`CommuteChainLegSchema`) — but the name is checked against the stop
-   * that order holds, because the two are one value the user chose together. They
-   * disagree when the leg was recorded from a different stop list than the one
-   * this build reads, and a subway line numbers the same station differently in
-   * each direction, so locating by order alone would hand a walking route — and an
-   * ETA — the wrong platform: a plausible number about a station the user never
-   * named. A mismatch is therefore treated as 「not located」: nothing is priced and
-   * nothing is read for that leg (see `chainLegInput`).
-   *
-   * Being IN the list is all this can promise. Whether the list places the stop
-   * anywhere is the second fact a leg needs, and it is not decided here: a stop
-   * carried without a coordinate is located and unplaceable at once, and the
-   * caller's own branch answers that (`station-without-coordinate`).
+   * 存储的是 (name, order) 对，定位按 ORDER，但名字要与该 order 上的站核对 —— 两者是用户一起
+   * 选下的一个值。不一致时（记录来自另一份站序，或地铁两个方向对同一站编号不同）按「未定位」
+   * 处理：不为该腿定价也不读。
    */
   private storedStation(
     detail: LineDetail | null,
@@ -1295,56 +983,19 @@ export class TransitService {
   }
 
   /**
-   * One stored leg as the engine needs it, plus the point the leg is left at.
+   * 引擎需要的一条存储腿，加上该腿被留下的点。
    *
-   * The leg's DIRECTION is derived from the stored orders, never guessed. The
-   * stored pair numbers the stop list the editor showed, which is direction 0's, so
-   * both stations are located there first — that is what proves the record's stops
-   * exist on this line. Then:
-   *
-   *  - alight order > board order: the ride runs with direction 0 — read direction
-   *    0 at the stored orders, exactly as before;
-   *  - alight order < board order on a SUBWAY: the ride runs the other way — read
-   *    DIRECTION 1, translating BOTH orders into its numbering first. Two subway
-   *    directions share one lineId while numbering the same station oppositely, so
-   *    the stored orders are what say which way the leg runs and the translation is
-   *    the provider's own construction rather than a guess: it builds direction 1 by
-   *    reversing direction 0's station list and renumbering from 1
-   *    (`universal-subway.ts` `getLineDetail`), which makes
-   *    `directionOrder = totalStops + 1 - storedOrder`;
-   *  - alight order < board order on a bus: the two ways there are two distinct
-   *    upstream lineIds and the stored `lineId` already names one, so this remains
-   *    the recording error it is;
-   *  - the two ends equal: not a ride on any line, and still refused.
-   *
-   * Whichever direction is read, it is priced with THAT direction's geometry:
-   * `readChainLeg` receives the direction's own detail, whose `stops` and
-   * `stationDistances` are numbered in that direction, so a direction-1 read is
-   * never priced against direction 0's platforms.
-   *
-   * A leg its own record settles as BACKWARDS (a bus stored the wrong way round, or
-   * the same station twice on any line) is not read at all: the engine decides that
-   * from the stored leg, so two upstream reads could not change the answer.
-   *
-   * When no connection can be priced, WHY is stated as the engine's input expects
-   * it (`connectionUnpricedReason`): the layer that tried to price it is the only
-   * one that knows whether the origin was unresolved, the stop list was unreadable,
-   * the stored station was not in it, the list carries it there without a
-   * coordinate, or the path service gave no duration. The
-   * engine turns that into the refusal code the page reads — the anchor case apart,
-   * the other causes are one code, so a caller can be exact here without every
-   * distinction becoming wire.
+   * 方向由存储的 order 推导，绝不猜：两站先在方向 0 的站序里定位，alight order > board order 时
+   * 按方向 0 读；地铁 alight < board 时读方向 1，并把两个 order 都换算进它的编号；公交
+   * alight < board 是记录错误，两站相同同样被拒。按哪个方向读就用那个方向的几何定价。
+   * 记录本身判为反向的腿完全不读。衔接定不出价时，原因按引擎输入所需的方式写明。
    */
   private async chainLegInput(params: {
     leg: StoredCommuteChainLeg
     /**
-     * Where the connection into this leg starts, or null when the chain's origin
-     * anchor was never saved.
-     *
-     * A leg after the first starts at the station the leg before it was left at,
-     * and that point is always resolved by the time a later leg is assembled: an
-     * unresolved one is a refusal the engine answers for the prefix, which ends the
-     * chain. Null here therefore names the anchor and nothing else.
+     * 进入这条腿的衔接从哪开始；链路起点锚点从未保存时为 null。
+     * 第一段之后的腿起点是前一段被留下的站，到组装后续腿时必定已解析
+     * （未解析是引擎对前缀作答的拒绝，链路到此结束）。
      */
     from: { lng: number, lat: number } | null
     now: number
@@ -1353,11 +1004,8 @@ export class TransitService {
     const boardOrder = leg.boardStationOrder
     const alightOrder = leg.alightStationOrder
 
-    // A leg whose stations were never chosen has nothing to locate, nothing to
-    // price and nothing to read: the engine answers `station-unset` for it without
-    // a reading, so no read is spent here either. No connection is attempted —
-    // there is no station to walk to — so this leg's connection states no cause of
-    // its own; the engine never reaches that check.
+    // 站点从未被选择的腿没有可定位、可定价、可读的东西：引擎不看读数就答
+    // `station-unset`，因此这里也不花读取。
     if (boardOrder === null || alightOrder === null) {
       return {
         input: { leg, connectionSeconds: null, connectionMode: 'walk', live: null },
@@ -1365,19 +1013,11 @@ export class TransitService {
       }
     }
 
-    // The chain's origin anchor, settled FIRST and before anything is read. It is
-    // the one cause of an unpriced connection the user can act on, and which cause
-    // a connection has must not depend on the outcome of an upstream read: an
-    // anchor that was never saved leaves no point to walk from at all, so no route
-    // can be priced and no station needs locating — the answer is the same
-    // whichever of those reads would also have failed, and settling it here spends
-    // none of them. The alternative order lets a leg's own unreadable stop list
-    // speak for a settings row the user can repair, and sends them nowhere.
+    // 链路起点锚点最先确定，先于任何读取：它是用户唯一能对之采取行动的
+    // 「衔接定不出价」原因，而一条衔接的原因不得取决于上游读取的结果。
     //
-    // Reachable for the FIRST leg only: a leg is assembled only while every leg
-    // before it was concluded, and returning an unresolved origin — here, or as a
-    // leg below whose alight station cannot be located — is a refusal the engine
-    // answers for the prefix, which ends the chain.
+    // 只有第一段会遇到：后面每段都在前一段有结论时才组装，
+    // 返回未解析的起点是引擎对前缀作答的拒绝，链路到此结束。
     if (from === null) {
       return {
         input: {
@@ -1395,13 +1035,8 @@ export class TransitService {
     const board = this.storedStation(detail, boardOrder, leg.boardStationName)
     const alight = this.storedStation(detail, alightOrder, leg.alightStationName)
 
-    // Both stations, or neither: a leg whose board station is not the one the user
-    // stored is not this leg, so nothing about it is priced or read — the engine
-    // then refuses on the connection, which has no duration, and no number about a
-    // wrong platform is printed in its place. WHICH fact left the pair unlocated is
-    // stated: a line this app could not read at all, or a stop list this direction
-    // carries at other orders. Both leave the user no action, so both reach the
-    // page as one code.
+    // 两站都要，或都不要：上车站不是用户存的那个就不是这条腿，关于它的一切都不定价也不读；
+    // 之后引擎因衔接没有时长而拒绝，不会印出一个关于错误站台的数字。哪一类事实导致未定位会写明。
     if (!board || !alight) {
       return {
         input: {
@@ -1415,14 +1050,9 @@ export class TransitService {
       }
     }
 
-    // A located stop must also be PLACEABLE for anything about this leg to be
-    // priced. The connection is a walking route to the BOARD station's own
-    // coordinate and the point the leg is left at is the ALIGHT station's, so a
-    // stop the direction's list carries without a coordinate leaves both
-    // unanswerable: the record is intact and the position is simply what upstream
-    // never gave. No route is requested and no platform is read — a walk priced
-    // to a substitute point would be a real route to a place nobody named, and it
-    // would make the leg look located enough to conclude from.
+    // 定位到的站还必须可放置：衔接是到上车站自己坐标的步行路线，腿被留下的点是下车站的，
+    // 因此方向站序里没有坐标的站让两者都答不出来。不请求路线也不读站台 ——
+    // 定价到替代点的步行是到没人命名的地方的真实路线。
     const boardPoint = stationPoint(board)
     const alightPoint = stationPoint(alight)
     if (!boardPoint || !alightPoint) {
@@ -1438,47 +1068,31 @@ export class TransitService {
       }
     }
 
-    // The connection's duration, from the resolved point to the resolved platform.
-    // Nothing is substituted for a missing duration, and the six ways this method
-    // can leave one unpriced are each decided at the branch that learns the fact:
-    // the chain's anchor was never saved (`anchor-unset`), this build could not
-    // read the leg's line (`line-unavailable`), the stored station is not in the
-    // direction's stop list (`station-unlocated`), the list carries it there and
-    // states no coordinate for it (`station-without-coordinate`) — all four named
-    // above, without a route request — and the path service priced no route
-    // between two ends that BOTH resolved (`route-unpriced`, below). A leg whose
-    // stations were never chosen is the sixth and is named by the engine's own
-    // `station-unset`, which it answers before it ever reaches the connection.
+    // 衔接时长，从解析出的点到解析出的站台。缺时长不做替代；六种定不出价的原因各自在
+    // 获知该事实的分支决定：锚点从未保存（`anchor-unset`）、本构建读不了该腿的线路
+    // （`line-unavailable`）、存储的站不在此方向站序里（`station-unlocated`）、站序里有该站
+    // 但没有坐标（`station-without-coordinate`）、路径服务在两个都已解析的端点间没定出路线
+    // （`route-unpriced`），以及站点从未被选择（引擎自己的 `station-unset`）。
     const connectionSeconds = (await this.getWalkingEta(from.lng, from.lat, boardPoint.lng, boardPoint.lat))?.durationSeconds ?? null
     const connectionUnpricedReason: ChainConnectionUnpricedReason | undefined = connectionSeconds === null
       ? 'route-unpriced'
       : undefined
 
-    // Which way the ride runs, from the stored orders alone. The subway test is the
-    // project's own convention — a subway id carries the `subway_` prefix, which is
-    // what routes a read to the subway engine (`subway-router.ts`,
-    // `universal-subway.ts`, and `vehicleArrivals` below) — so this asks the same
-    // question of the same field the engine and the schema ask.
+    // 乘车方向只由存储的 order 决定。地铁判据是本项目的约定：
+    // 地铁 id 带 `subway_` 前缀（路由到地铁引擎的依据）。
     const forward = alightOrder > boardOrder
     const subway = leg.lineId.startsWith('subway_')
-    // A subway ride the other way round is REAL; a bus stored the wrong way round,
-    // and a station-to-itself leg on any line, are settled from the record. The
-    // engine names them `leg-recorded-backwards`, and it decides that without a
-    // reading — so the two targeted reads are skipped rather than spent on an
-    // answer that cannot move.
+    // 反向的地铁乘车是真实的；反向存储的公交腿与「站到自身」的腿由记录本身判定
+    // （引擎命名为 `leg-recorded-backwards`，不看读数），因此两次定向读取被跳过。
     const settledBackwards = !forward && !(subway && alightOrder < boardOrder)
 
     let live: ChainLegLive | null = null
     if (connectionSeconds !== null && !settledBackwards) {
-      // The direction actually travelled, and ITS stop list. A direction-1 read's
-      // target orders must address direction 1's numbering, and its geometry must be
-      // direction 1's, or the minutes would be about two other platforms.
+      // 实际乘坐的方向与它自己的站序：方向 1 的目标 order 必须用方向 1 的编号，
+      // 几何也必须是方向 1 的。
       const readDetail = forward ? detail : await this.getLineDetail(leg.lineId, 1, leg.cityCode)
-      // No stop list for the direction the ride runs in: there is no numbering to
-      // target and no geometry to price against, and reading direction 0's platforms
-      // instead would state minutes about stations this ride never touches. No read
-      // is spent, and the engine answers `no-live` — the leg's line was not read in
-      // the direction this leg runs.
+      // 该方向没有站序：没有可定位的编号，也没有可定价的几何；读方向 0 会给出这次乘车
+      // 不会经过的站的分钟。不花读取，引擎答 `no-live`。
       if (readDetail) {
         const totalStops = readDetail.stops.length
         const directionOrder = (order: number): number => totalStops + 1 - order
@@ -1501,40 +1115,12 @@ export class TransitService {
   }
 
   /**
-   * A leg's live reading, built from TWO targeted reads of its line.
+   * 一条腿的实时读数，由对该线路的两次定向读取组成。
    *
-   * The adapter answers for ONE requested target station per read — chelaile
-   * matches a vehicle's `travels` by the order the request named — so one
-   * vehicle's board minute and alight minute cannot come from a single read. Both
-   * reads go through the aggregator's per-station cache
-   * (`<lineId>_<direction>_target_<order>`, 18 s), which is also what keeps the
-   * second read of a platform inside its window free.
-   *
-   * The two are matched by the provider's stable vehicle id and never by position:
-   * each read is ordered by ITS OWN arrival minutes, so the nth row of one read is
-   * routinely a different vehicle than the nth of the other. A vehicle only one
-   * read carries has no usable pair and is dropped — that is the only pairing rule
-   * under which a ride duration cannot end up describing nobody's journey.
-   *
-   * THE INTERSECTION IS NON-EMPTY ONLY BECAUSE OF AN UPSTREAM INVARIANT this repo
-   * does not control or document: `vehicleArrivals` drops every vehicle whose
-   * `nextOrder` is past the requested order, a filter monotone in that order, so
-   * the board read's rows are a subset of the alight read's and the matched set is
-   * the board set. That relation holds FOR A LEG THAT RUNS FORWARD IN THE DIRECTION
-   * IT IS READ — its alight order greater than its board order in THAT direction's
-   * numbering. The caller resolves the direction from the stored orders and
-   * translates both into it (`chainLegInput`), so a subway leg stored the other way
-   * round arrives here with alight > board as well. A bus leg stored backwards, and
-   * a station-to-itself leg, invert the relation instead — which is why those are
-   * refused as `leg-recorded-backwards` before this pairing is ever reached and the
-   * schema rejects them on write. Nothing here may lean on it beyond that: the two
-   * reads are each answered for their own order, the rows are truncated NOWHERE on
-   * this path (the display board's own six-row cap is applied in
-   * `getStationArrivals`, not here), and the pairing is by id — so if a future
-   * provider broke the invariant, a board-only vehicle would lose its pair and be
-   * dropped, never have a minute invented. `boardVehiclesOnTheWay` travels with the
-   * leg precisely so that an empty pair can say whether the service was empty or the
-   * reading was.
+   * 每次定向读取只回答一个目标站，因此同一辆车的上车与下车分钟不可能来自一次读取。
+   * 两次读取按 provider 稳定的 vehicle id 配对，绝不按位置：每次读取按自己的到站分钟排序，
+   * 只被一次读取带的车辆没有可用配对而被丢弃。`boardVehiclesOnTheWay` 随腿一起走，
+   * 让空配对能说出是服务空还是读数空。
    */
   private async readChainLeg(params: {
     lineId: string
@@ -1550,8 +1136,8 @@ export class TransitService {
       this.getLiveStatus(params.lineId, params.direction, params.cityCode, false, { targetOrder: params.alightOrder }),
     ])
 
-    // Priced ONCE each and kept whole: the board read's own rows are what
-    // `boardVehiclesOnTheWay` counts, and its full set is what gets paired.
+    // 各定价一次并整体保留：上车读取自己的行正是 `boardVehiclesOnTheWay` 数的东西，
+    // 其全集才是参与配对的东西。
     const boardArrivals = board
       ? this.vehicleArrivals({ detail: params.detail, live: board, targetOrder: params.boardOrder, now: params.now })
       : []
@@ -1560,28 +1146,16 @@ export class TransitService {
       : []
 
     /**
-     * The rows a pair can be built from: the ones that STATE a minute.
-     *
-     * A ride duration is `alight - board`, so a vehicle priced at neither end has
-     * no pair to give and is dropped here instead of being handed over with a
-     * substitute — the absence is what upstream published, and inventing the
-     * missing half is the one thing this path may not do. On the bus path the row
-     * that states no minute is the one whose targeted reading published none (this
-     * app's own extrapolation is gone), so a chain leg over such a vehicle reports
-     * that it cannot confirm a rideable service rather than a duration built on a
-     * snapshot speed.
+     * 能参与配对的行：声明了分钟的那些。行程时长是 `alight - board`，
+     * 两端都没定价的车没有配对可给，在这里丢掉而不是传一个替代值。
      */
     const priced = (rows: VehicleArrival[]): TargetedArrival[] =>
       rows.filter((row): row is VehicleArrival & { etaSeconds: number, basis: ArrivalBasis } =>
         row.etaSeconds !== undefined && row.basis !== undefined)
 
-    // F3's service state for THIS leg's line, from the detail this path already
-    // resolved to locate the two stations and from the same `now` the reads are
-    // judged against — `operatingStatusOf`, the derivation the station board
-    // states, so the two screens cannot disagree about one line. Deriving it here
-    // costs no upstream call: the detail is the cached line read the leg needed
-    // anyway, and the state is a function of it and the clock. An empty chain row
-    // needs it to tell 首班前 / 已过末班 from a gap in a service that is running.
+    // 这条腿所属线路的 F3 服务状态，来自本路径为定位两站已解析的详情，
+    // 用的也是判读读数所用的同一个 `now` —— 与站牌同一套推导，两个屏幕不会对一条线各说各话。
+    // 空链路行需要它来分辨 首班前 / 已过末班 与服务运行中的空档。
     const operatingStatus = operatingStatusOf({
       firstDeparture: params.detail?.firstBusTime,
       lastDeparture: params.detail?.lastBusTime,
@@ -1591,13 +1165,9 @@ export class TransitService {
     return legLiveReading({
       board,
       alight,
-      // Only the rows that state a minute can be paired — see `priced`.
       vehicles: pairTargetedReads(priced(boardArrivals), priced(alightArrivals)),
-      // Every row the BOARD read carried, minute or no minute. A vehicle we could
-      // not price is still a vehicle on its way here, so counting only the priced
-      // rows would let an empty pair be reported as an empty SERVICE
-      // (`no-vehicle`, 「暂时没有开往这一站的车」) when what is true is that nobody
-      // published a time for it (`no-shared-vehicle`).
+      // 上车读取带的所有行，有分钟与否都算：定不出价的车仍在往这里来，
+      // 只数已定价的行会把空配对报成空服务（`no-vehicle`）。
       boardVehiclesOnTheWay: boardArrivals.length,
       operatingStatus,
     })
@@ -1615,12 +1185,12 @@ export class TransitService {
       this.activeSubscriptions.set(key, sub)
     }
     else {
-      // Keep the city in sync with the latest subscriber for this line+direction.
+      // 让 city 与这条线+方向的最新订阅者保持同步。
       sub.cityCode = cityCode
     }
     sub.clients.add(ws)
 
-    // Immediately push current status
+    // 立即推送当前状态
     void (async () => {
       const status = await this.getLiveStatus(lineId, direction, cityCode)
 
@@ -1637,9 +1207,8 @@ export class TransitService {
   }
 
   /**
-   * Drop one client from one subscription. `direction` is required: a subway
-   * line has two independent subscriptions under the same lineId, and leaving
-   * one must not tear down the other.
+   * 把一个客户端从一次订阅中移除；`direction` 必须有：地铁一条线在同一个 lineId 下
+   * 有两个独立订阅，移除一个不得拆掉另一个。
    */
   unsubscribe(ws: WebSocket, lineId: string, direction?: number): void {
     if (direction !== undefined) {
@@ -1653,7 +1222,7 @@ export class TransitService {
       }
       return
     }
-    // Legacy form: remove this client from every direction of the line.
+    // 旧形式：把这个客户端从该线路的每个方向都移除。
     for (const [key, sub] of this.activeSubscriptions.entries()) {
       if (sub.lineId !== lineId) continue
       sub.clients.delete(ws)

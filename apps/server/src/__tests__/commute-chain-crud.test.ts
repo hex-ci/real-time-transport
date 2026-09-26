@@ -7,8 +7,8 @@ import {
 } from '../db/client.js'
 
 /**
- * F10: chains are stored, never deduced — these tests are network-free by
- * construction. A call that escaped would throw here rather than spend quota.
+ * F10：链路是存下来的，从不推导 —— 本文件按构造就是离网的。
+ * 一旦有调用逃出去，这里会抛错而不是花掉配额。
  */
 function forbidNetwork(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -20,7 +20,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** A leg as the wire carries it: one line, a board station and an alight one. */
 const LEG = {
   lineId: '010-2-0',
   lineName: '2路',
@@ -82,13 +81,13 @@ describe('F10 chains: storage', () => {
     const [chain] = await db.getCommuteChains('default_user')
     const [first, second] = chain!.legs
 
-    // Unset is null. An empty string would be a station named "".
+    // 未设置是 null。空串会是一个名字为 "" 的站。
     expect(first!.boardStationName).toBeNull()
     expect(first!.boardStationOrder).toBeNull()
     expect(first!.boardStationName).not.toBe('')
     expect(second!.alightStationName).toBeNull()
     expect(second!.alightStationOrder).toBeNull()
-    // The configured extra minutes and the unset one are different facts.
+    // 配置过的加时与未设置的是两件事。
     expect(second!.transferExtraMinutes).toBe(3)
     expect(first!.transferExtraMinutes).toBeNull()
   })
@@ -103,13 +102,13 @@ describe('F10 chains: storage', () => {
       ],
     })
 
-    // The array is the order: seq is stamped from it, so no client-supplied
-    // number can leave a gap or a duplicate behind.
+    // 数组就是顺序：seq 由它盖章，所以客户端传的数字
+    // 留不下空档或重复。
     expect(updated!.legs.map(l => l.seq)).toEqual([0, 1])
     expect(updated!.legs.map(l => l.lineId)).toEqual(['010-9-0', '010-52-0'])
 
     const [read] = await db.getCommuteChains('default_user')
-    // The first leg is gone, not merged: legs are one value, written whole.
+    // 第一段是没了，不是被合并：legs 是一个值，整份写入。
     expect(read!.legs).toHaveLength(2)
     expect(read!.legs.some(l => l.lineId === '010-2-0')).toBe(false)
   })

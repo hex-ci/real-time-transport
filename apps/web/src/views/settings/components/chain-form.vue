@@ -1,17 +1,12 @@
 <script setup lang="ts">
 /**
- * The chain editor: one chain's name, its origin anchor, its commute purpose and its
- * ride legs.
+ * 链路编辑器：一条链路的名称、起点锚点、通勤目的与乘车段。
  *
- * Everything the user can get wrong is settled HERE, before the request exists: the
- * draft is judged by `refuseChainDraft` on the save press, and a refusal renders in
- * place of the request. That is F10's 「同一套判据在录入时就地拦下，不靠提交后报错」 —
- * the write boundary's own rules are the same ones, stated again at the point of
- * entry, and the server's answer is never used as the error message for something
- * this screen could see.
+ * 用户可能弄错的一切都在此敲定，先于请求存在：保存按下时由 `refuseChainDraft` 评判草稿，
+ * 拒绝就渲染在请求的位置。写入边界自己的规则就是这些规则，在录入之处再说一遍，
+ * 服务端的答案绝不拿来当本屏自己看得见之事的错误消息。
  *
- * It offers no route search and no plan: 「系统不替使用者选路线」, so the only choices
- * on it are the user's own lines and stations.
+ * 它不提供线路搜索、不提供方案：系统不替使用者选路线，故上面可选的只有用户自己的线路与站点。
  */
 import { computed, ref, watch } from 'vue'
 import { Plus, RefreshCw, TriangleAlert } from '@lucide/vue'
@@ -31,28 +26,27 @@ import type { ChainDraft, ChainRefusal } from '../chain-draft'
 import type { ChainLineOption } from '../types'
 
 const props = defineProps<{
-  /** The chain being edited, or null when a new one is being recorded. */
+  /** 正在编辑的链路；新录入时为 null。 */
   chain: CommuteChain | null
-  /** Every line+direction the editor offers. */
+  /** 编辑器提供的每条线路+方向。 */
   lines: ChainLineOption[]
   /**
-   * Which of the three states the page's followed-lines read is in — `lines` IS that list,
-   * per direction, so an empty `lines` means one of three different things and this decides
-   * which. The page owns the read (`line-stops.ts`) and passes its state down; the form
-   * cannot ask the length, because an empty array is what a failed read leaves behind.
+   * 页面那次关注线路读取处于三种状态中的哪一种——`lines` **就是**那份按方向的列表，
+   * 故空的 `lines` 意味着三件不同的事之一，由本字段决定是哪一件。页面拥有那次读取
+   * （`line-stops.ts`）并把状态传下来；表单不能去问长度，因为读失败留下的正是一个空数组。
    */
   linesRead: ReadState
   saving: boolean
-  /** The server's own refusal, verbatim — never re-worded here. */
+  /** 服务端自己的拒绝，逐字——绝不在此改写。 */
   error: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'submit', write: ReturnType<typeof chainBodyOf>): void
   (e: 'cancel'): void
-  /** The draft changed: whatever was last said about it is about a draft that is gone. */
+  /** 草稿变了：之前就它所说的一切，都是关于一个已不存在的草稿。 */
   (e: 'edit'): void
-  /** The followed set could not be read: re-read it where it is owned. */
+  /** 关注集合读不到：在它被拥有的地方重读。 */
   (e: 'retry-lines'): void
 }>()
 
@@ -60,17 +54,15 @@ const draft = ref<ChainDraft>(props.chain ? chainDraftOf(props.chain, props.line
 const refusal = ref<ChainRefusal | null>(null)
 
 /**
- * Forget the last refusal the moment the draft it was about changes.
+ * 草稿一变，就忘掉上一次的拒绝。
  *
- * A refusal names a state — 「第 1 段的下车站还没选」 — and it is rendered beside the very
- * controls that state belongs to. Left standing while the user does what it asked, it
- * still claims a screen that no longer exists: the alight picker reads 「建国门 第4站」 and
- * the sentence underneath denies it. The rule is not kept across edits; the next save
- * re-judges the draft from scratch, so anything still wrong is said again, and anything
- * fixed is simply no longer mentioned.
+ * 拒绝点名的是一种状态——「第 1 段的下车站还没选」——而它渲染在那种状态所属的控件旁。
+ * 用户照它说的做了之后它还站着，就在断言一个已不存在的屏幕：下车选择器读作「建国门 第4站」，
+ * 而下面那句话否认它。规则不跨编辑保留；下一次保存从头重新评判草稿，
+ * 故仍然错的会再说一遍，已改好的就不再提及。
  *
- * The parent is told for the same reason: the server's own answer to a save is about the
- * request THAT draft produced, so an edit retires it too.
+ * 通知父级同理：服务端对一次保存的答案是关于**那份**草稿产生的请求，
+ * 故一次编辑也把它退掉。
  */
 watch(draft, () => {
   refusal.value = null
@@ -87,16 +79,15 @@ const PURPOSES = [
 ]
 
 /**
- * Whether the editor has any line to offer at all.
+ * 编辑器到底有没有线路可提供。
  *
- * False means no line is on offer — and WHY is three different facts that must not be told
- * as one: the followed set has not answered yet, its read failed, or it answered and there
- * is nothing followed. The empty case is the only one that is about what the user stored,
- * and the block below is where each of the three is stated as itself.
+ * false 表示没有线路可提供——而**为什么**是三件不同的事实，不能当成一件说：关注集合还没作答、
+ * 它的读取失败、或它已作答而什么都没关注。只有空的那种是关于用户存了什么，
+ * 而下面的区块正是三种各自照原样陈述的地方。
  */
 const hasLines = computed(() => props.lines.length > 0)
 
-/** What the missing lines read as when the followed set could not be read at all. */
+/** 关注集合完全读不到时，缺失的线路读作什么。 */
 const noLinesUnreadable = followedLinesUnreadableText('暂时无法录入乘车段')
 const atLegLimit = computed(() => draft.value.legs.length >= MAX_CHAIN_LEGS)
 
@@ -106,17 +97,17 @@ function addLeg(): void {
 }
 
 function removeLeg(index: number): void {
-  // The last leg is not removable — the control that would fire this is disabled, so
-  // this guard is the same rule stated once more where the array is written.
+  // 最后一段不可移除——会触发此函数的那个控件是禁用的，
+  // 故这个守卫是同一条规则在写数组之处的再陈述。
   if (draft.value.legs.length <= 1) return
   draft.value.legs = draft.value.legs.filter((_, at) => at !== index)
 }
 
 /**
- * Judge the draft, then either refuse in place or hand the write up.
+ * 评判草稿，然后要么就地拒绝，要么把写入交上去。
  *
- * A refusal is rendered beside the controls and NO request is made — the point of
- * catching it here is that the server never has to say what this screen already knew.
+ * 拒绝渲染在控件旁，且**不发任何请求**——在此拦下的意义，
+ * 就是服务端永远不必说出本屏已经知道的事。
  */
 function onSave(): void {
   const found = refuseChainDraft(draft.value, props.lines)
@@ -139,10 +130,9 @@ function onCancel(): void {
       <span class="text-xs text-slate-400">逐段录入，不由系统规划</span>
     </div>
 
-    <!-- No line to offer: WHICH cause it is decides the words. A read that failed says so
-         and offers the retry that can change it; nothing has answered yet says that; only an
-         ANSWERED empty list is worded as 「还没有关注线路」, which is a claim about the stored
-         rows and needs that answer to be true. -->
+    <!-- 无线路可提供：是哪一个成因决定措辞。读失败就说出并给出能改变它的重试；
+         尚无任何作答就陈述这一点；只有**已作答的空列表**才措辞为「还没有关注线路」，
+         那是对已存记录的断言，需要那个答案成立。 -->
     <div
       v-if="!hasLines"
       class="flex flex-wrap items-center gap-2 rounded-xl border border-dashed p-3"
@@ -245,8 +235,8 @@ function onCancel(): void {
       </button>
     </div>
 
-    <!-- The refusal, worded as the fact it is: 「半截的链路存下去，链路页只能回
-         station-unset」, so what the entry screen can settle in place it settles here. -->
+    <!-- 拒绝，按它本来的事实措辞：半截的链路存下去，链路页只能回 station-unset，
+         故录入屏能就地敲定的就就地敲定。 -->
     <p
       v-if="refusal"
       data-chain-refusal

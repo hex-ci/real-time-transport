@@ -6,42 +6,33 @@ import { definedOnly, storedCoord } from '../db/client.js'
 import type { FastifyInstance } from 'fastify'
 
 /**
- * The anchor write path on `/api/transit/settings`.
+ * `/api/transit/settings` 的锚点写入路径。
  *
- * `navigator.geolocation` reports WGS-84 and the browser converts nothing, so
- * the fix arrives at this endpoint raw. THIS endpoint is the one place it is
- * converted — the same boundary that already converts the GIS routes' incoming
- * device fix — and from then on the anchor is GCJ-02, read back by `GET
- * /settings` and consumed unconverted by every walking route.
+ * `navigator.geolocation` 报的是 WGS-84，浏览器不做任何换算，所以定位原样到达本接口。
+ * 本接口是唯一做换算的地方 —— 与已经换算 GIS 路由设备定位的是同一条边界 —— 此后锚点
+ * 就是 GCJ-02，由 `GET /settings` 读回，每条步行路径原样使用。
  *
- * Getting this wrong twice is the expensive direction: the double-converted
- * walking leg measured 1208 m/16.1 min as 2680 m/35.7 min, and F1 compares
- * `walk` against a 3-minute wait tolerance, so ~500 m of coordinate error is
- * enough to invert the 出门结论.
+ * 方向错了代价不对称：重复换算会把步行腿量长一倍以上，而 F1 拿 `walk` 与 3 分钟的
+ * 等车容忍度比较，足以把 出门结论 颠倒过来。
  */
 
-/** A raw device fix in WGS-84 — the same origin the GIS boundary tests use. */
+/** 一份原始 WGS-84 设备定位，与 GIS 边界测试用的是同一个起点。 */
 const DEVICE_FIX = { lng: 116.3974, lat: 39.90931 }
 
 /**
- * What this repo's own `wgs84ToGcj02` makes of that fix, computed here rather
- * than typed in: the stored value must equal the conversion, not a fixture that
- * happens to be near it.
+ * 本仓自己的 `wgs84ToGcj02` 对它的结果，在此算出而非写死：存下来的值必须等于换算结果，
+ * 而不是一个碰巧接近的固定值。
  */
 const [GCJ_LNG, GCJ_LAT] = wgs84ToGcj02(DEVICE_FIX.lng, DEVICE_FIX.lat)
 
-/** The shift the two datums differ by at this location, in metres. */
 const DATUM_SHIFT_M = haversineMeters(DEVICE_FIX.lat, DEVICE_FIX.lng, GCJ_LAT, GCJ_LNG)
 
 /**
- * Every settings answer, read through the API rather than the store.
+ * 设置应答一律经 API 读出，而不是读存储本身。
  *
- * Only a STORED row is handed back. A store nothing has been written to answers
- * `data: null` with `settingsState: 'unset'` (the read found no row — see
- * `settings-read-state.test.ts`), and the row it does not have cannot carry
- * anchors: reading one out of it would be exactly the fabrication this endpoint
- * used to serve. A test that wants to assert 「nothing was written」 reads the
- * state itself, through `readSettings`.
+ * 只有已存储的那一行会被交回：没有写入过的存储以 `settingsState: 'unset'` 与
+ * `data: null` 作答（见 `settings-read-state.test.ts`），而没有的那一行带不了锚点。
+ * 要断言「什么都没写」的测试，请经 `readSettings` 读状态本身。
  */
 async function getSettings(app: FastifyInstance): Promise<Record<string, unknown>> {
   const body = await readSettings(app)
@@ -49,7 +40,6 @@ async function getSettings(app: FastifyInstance): Promise<Record<string, unknown
   return body.data as Record<string, unknown>
 }
 
-/** The whole settings answer: the state of the read and whatever it carried. */
 async function readSettings(app: FastifyInstance): Promise<{ settingsState: string, data: unknown }> {
   const res = await app.inject({ method: 'GET', url: '/api/transit/settings' })
   expect(res.statusCode).toBe(200)
@@ -61,13 +51,9 @@ async function patchSettings(app: FastifyInstance, payload: unknown) {
 }
 
 /**
- * Assert that a refused write left NO row behind.
+ * 断言被拒的写入没有留下任何行。
  *
- * A store with nothing in it answers `unset` with `data: null` — a stronger
- * statement than 「the anchor is null」: the anchor is absent AND there is no row
- * for it to be absent from. Before the settings read carried its state, this case
- * was indistinguishable from a row full of nulls, and the endpoint answered the
- * built-in hours beside those nulls as if the user had configured them.
+ * `unset` 加 `data: null` 比「锚点是 null」更强：锚点不存在，而且没有一行让它不存在于其中。
  */
 async function expectNothingStored(app: FastifyInstance): Promise<void> {
   const body = await readSettings(app)
@@ -81,10 +67,6 @@ describe('GET /settings states whether there is a row at all, and carries no inv
     try {
       const body = await readSettings(app)
 
-      // The read succeeded and found no row for this user. Before this, the
-      // endpoint answered the built-in hours here — `morningStart: '06:30'` —
-      // so 「没有这一行」 and 「保存过 06:30」 were the same bytes, and the 设置
-      // index row printed the built-in window as the user's own configuration.
       expect(body.settingsState).toBe('unset')
       expect(body.data).toBeNull()
     }
@@ -96,10 +78,8 @@ describe('GET /settings states whether there is a row at all, and carries no inv
   it('answers state=stored with the row once one is written, and null anchors inside it', async () => {
     const app = await buildApp()
     try {
-      // The anchors' own rule, held on a row that exists: null, never 0 and never
-      // undefined — (0, 0) is a real coordinate in the Gulf of Guinea,
-      // indistinguishable from an anchor the user saved, and it would silently
-      // become the origin of every walking route.
+      // 锚点自己的规则：null，从不是 0 也不是 undefined —— (0, 0) 是几内亚湾的真实坐标，
+      // 会静默成为每一条步行路径的起点。
       await patchSettings(app, { morningStart: '06:30', morningEnd: '11:30' })
 
       const data = await getSettings(app)
@@ -121,7 +101,6 @@ describe('GET /settings states whether there is a row at all, and carries no inv
 
       const data = await getSettings(app)
       expect(data.homeLat).toBeCloseTo(GCJ_LAT, 6)
-      // The untouched anchor stays a real "not set", not a copy of its sibling.
       expect(data.workLat).toBeNull()
       expect(data.workLng).toBeNull()
     }
@@ -139,16 +118,13 @@ describe('PATCH /settings converts each anchor exactly once', () => {
       expect(res.statusCode).toBe(200)
       const stored = JSON.parse(res.body).data
 
-      // Not merely "a value was stored": the raw fix must not survive into the
-      // column, and the stored point is the converted one.
       expect(stored.homeLat).not.toBe(DEVICE_FIX.lat)
       expect(stored.homeLng).not.toBe(DEVICE_FIX.lng)
       expect(stored.homeLat).toBeCloseTo(GCJ_LAT, 6)
       expect(stored.homeLng).toBeCloseTo(GCJ_LNG, 6)
 
-      // The magnitude of the move, measured: the datum shift for Beijing, not
-      // an arbitrary difference. A missing conversion reads as 0 m here and a
-      // double conversion as roughly twice this.
+      // 位移的量级：北京两个基准之间的偏移，不是任意差值 —— 漏做换算是 0 m，
+      // 重复换算是它的约两倍。
       const shiftM = haversineMeters(DEVICE_FIX.lat, DEVICE_FIX.lng, stored.homeLat, stored.homeLng)
       expect(DATUM_SHIFT_M).toBeGreaterThan(300)
       expect(DATUM_SHIFT_M).toBeLessThan(700)
@@ -166,7 +142,7 @@ describe('PATCH /settings converts each anchor exactly once', () => {
 
       const data = await getSettings(app)
       expect([data.workLng, data.workLat]).toEqual([GCJ_LNG, GCJ_LAT])
-      // The origin F1 will walk from, in the one system the GIS layer takes.
+      // F1 将要起步的起点，落在 GIS 层唯一接受的基准上。
       expect(haversineMeters(data.workLat as number, data.workLng as number, GCJ_LAT, GCJ_LNG))
         .toBeCloseTo(0, 6)
     }
@@ -181,7 +157,6 @@ describe('PATCH /settings converts each anchor exactly once', () => {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
       const home = await getSettings(app)
 
-      // A second fix ~1 km north-east of the first, still a raw WGS-84 fix.
       const otherFix = { lat: 39.91831, lng: 116.4074 }
       const res = await patchSettings(app, { workLat: otherFix.lat, workLng: otherFix.lng })
       expect(res.statusCode).toBe(200)
@@ -192,7 +167,6 @@ describe('PATCH /settings converts each anchor exactly once', () => {
       const [workLng, workLat] = wgs84ToGcj02(otherFix.lng, otherFix.lat)
       expect(after.workLat).toBeCloseTo(workLat, 6)
       expect(after.workLng).toBeCloseTo(workLng, 6)
-      // The two anchors are told apart by their own coordinates.
       expect(after.workLat).not.toBe(after.homeLat)
     }
     finally {
@@ -207,13 +181,9 @@ describe('PATCH /settings converts each anchor exactly once', () => {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
 
       const data = await getSettings(app)
-      // An anchor-only PATCH carries no hours and must not reset them.
       expect(data.morningStart).toBe('07:15')
       expect(data.morningEnd).toBe('10:45')
-      // And the window the request did NOT name stays 「从未选择」 — it USED to read
-      // back `17:00`, the built-in hour 004's NOT NULL DEFAULT had stored as if the
-      // user had picked it. That value is exactly the defect 009 removes: nothing
-      // about this request said anything about the evening window.
+      // 请求没有点名的窗口保持「从未选择」：关于晚间窗口，这个请求什么都没说。
       expect(data.eveningStart, 'an untouched window was invented for a user who never chose one').toBeNull()
     }
     finally {
@@ -225,8 +195,7 @@ describe('PATCH /settings converts each anchor exactly once', () => {
     const app = await buildApp()
     try {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
-      // A window is ONE value, so both ends travel together (a lone end is refused
-      // by the contract — see `settings-windows.test.ts`).
+      // 窗口是一个值，两端必须一起走（单独的端点被契约拒绝，见 `settings-windows.test.ts`）。
       await patchSettings(app, { eveningStart: '17:30', eveningEnd: '21:30' })
 
       const data = await getSettings(app)
@@ -262,9 +231,8 @@ describe('PATCH /settings refuses to poison an anchor', () => {
       const res = await patchSettings(app, { homeLat: 999, homeLng: DEVICE_FIX.lng })
       expect(res.statusCode).toBe(400)
 
-      // Rejected means not written — a half-written anchor would be worse than
-      // a rejected request, because every later walking route would use it. Here
-      // that means no row at all was created.
+      // 被拒就是没写：写了一半的锚点比被拒的请求更糟，之后每条步行路径都会用到它。
+      // 这里尤其意味着连一行都没有建。
       await expectNothingStored(app)
     }
     finally {
@@ -275,8 +243,7 @@ describe('PATCH /settings refuses to poison an anchor', () => {
   it('rejects a non-finite coordinate', async () => {
     const app = await buildApp()
     try {
-      // `1e999` survives JSON.parse as Infinity, so this is the wire form of the
-      // non-finite input the schema has to refuse.
+      // `1e999` 经 JSON.parse 之后是 Infinity，所以这是模式必须拒绝的非有限输入的线上形式。
       expect(JSON.parse('{"homeLat":1e999}').homeLat).toBe(Number.POSITIVE_INFINITY)
       const res = await app.inject({
         method: 'PATCH',
@@ -296,9 +263,8 @@ describe('PATCH /settings refuses to poison an anchor', () => {
   it('rejects a lone half of a pair, which has no conversion', async () => {
     const app = await buildApp()
     try {
-      // The WGS-84 -> GCJ-02 offset depends on BOTH axes, so a lone latitude
-      // cannot be converted. Storing it raw would leave a WGS-84 value in a
-      // column everything downstream reads as GCJ-02.
+      // WGS-84 -> GCJ-02 的偏移同时依赖两个轴，所以单独的纬度无法换算：原样存下，
+      // 会在一个下游全部按 GCJ-02 读的列里留下一个 WGS-84 值。
       const res = await patchSettings(app, { homeLat: DEVICE_FIX.lat })
       expect(res.statusCode).toBe(400)
 
@@ -323,19 +289,12 @@ describe('PATCH /settings refuses to poison an anchor', () => {
 })
 
 /**
- * The failed-fix pair, refused by the write path.
+ * 失败定位的那一对，被写入路径拒绝。
  *
- * (0, 0) is what a device reports when a fix could not be made — and it is a real
- * coordinate in the Gulf of Guinea, so a stored one is indistinguishable from an
- * anchor the user saved and becomes the origin of every walking route. It is
- * rejected as a PAIR only: a single axis of 0 is the equator or the prime
- * meridian, a real coordinate that a device can legally report.
+ * (0, 0) 是设备做不出定位时报的值，而它本身又是真实坐标：存下来就与用户自己保存的锚点
+ * 无从区分，并成为每一条步行路径的起点。
  *
- * The precedent for the opposite direction is `statedCoordinate` in
- * `@real-time-transport/shared/geo`, which reads a 0 as absence for UPSTREAM
- * station data. That is a different rule for a different source: absence on the
- * user's own path is a NULL column, not a zero, so the write path refuses the
- * sentinel rather than re-reading the rule here.
+ * 只按「一对」拒绝：单独一个轴为 0 是赤道或本初子午线，是设备可以合法报出的真实坐标。
  */
 describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
   it('rejects a (0, 0) anchor pair and stores nothing', async () => {
@@ -345,7 +304,6 @@ describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
       expect(res.statusCode).toBe(400)
       expect(JSON.parse(res.body).error).toContain('定位')
 
-      // Rejected means not written: a stored (0, 0) would be walked from.
       await expectNothingStored(app)
     }
     finally {
@@ -369,8 +327,7 @@ describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
   it('keeps a single axis of 0 legal — the equator is a real coordinate', async () => {
     const app = await buildApp()
     try {
-      // A fix on the equator with a real longitude is not a failed fix, and
-      // refusing it would invent a rule about where a user may stand.
+      // 赤道上带真实经度的定位不是失败的定位；拒绝它等于凭空规定用户能站在哪里。
       const res = await patchSettings(app, { homeLat: 0, homeLng: DEVICE_FIX.lng })
       expect(res.statusCode).toBe(200)
 
@@ -378,7 +335,6 @@ describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
       const [gcjLng, gcjLat] = wgs84ToGcj02(DEVICE_FIX.lng, 0)
       expect(stored.homeLat).toBeCloseTo(gcjLat, 6)
       expect(stored.homeLng).toBeCloseTo(gcjLng, 6)
-      // Read back through the endpoint, the anchor is still there.
       expect((await getSettings(app)).homeLng).not.toBeNull()
     }
     finally {
@@ -389,7 +345,7 @@ describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
   it('keeps a single axis of 0 legal for the other axis too', async () => {
     const app = await buildApp()
     try {
-      // The prime meridian: longitude 0, a real latitude.
+      // 本初子午线：经度 0，纬度真实。
       const res = await patchSettings(app, { workLat: DEVICE_FIX.lat, workLng: 0 })
       expect(res.statusCode).toBe(200)
       expect((await getSettings(app)).workLat).not.toBeNull()
@@ -401,18 +357,16 @@ describe('PATCH /settings refuses the failed-fix sentinel as a pair', () => {
 })
 
 /**
- * The SQL branch of `user_settings` cannot run in this suite (a test process
- * never accepts an ambient `DATABASE_URL`, and a test must never write the dev
- * database), so its READ mapping is pinned directly: the values it produces are
- * what the endpoint hands out and what a walking route would use as an origin.
+ * `user_settings` 的 SQL 分支在本套件里跑不了（测试进程不接受环境里的 `DATABASE_URL`，
+ * 测试也绝不能写开发库），所以它的读映射直接钉在这里：它产出的值就是接口交出的值，
+ * 也是步行路径会当作起点的值。
  */
 describe('the stored row cannot hand out a poisoned coordinate', () => {
   it('reads an unset or non-finite column as unset, never as a coordinate', () => {
     expect(storedCoord(null)).toBeNull()
     expect(storedCoord(undefined)).toBeNull()
-    // Postgres stores NaN in a DOUBLE PRECISION column, so this is the shape a
-    // poisoned row has when it comes back: it must read as unset rather than
-    // become an origin that turns every walking distance into NaN.
+    // Postgres 能把 NaN 存进 DOUBLE PRECISION 列，这就是中毒行回来时的形状：
+    // 必须读成「未设置」，而不是变成一个把每条步行距离都变成 NaN 的起点。
     expect(storedCoord(Number.NaN)).toBeNull()
     expect(storedCoord(Number.POSITIVE_INFINITY)).toBeNull()
   })
@@ -423,8 +377,8 @@ describe('the stored row cannot hand out a poisoned coordinate', () => {
   })
 
   it('writes only the fields the request carried, and keeps an explicit null', () => {
-    // `undefined` means "leave it alone"; `null` means "clear it". Collapsing
-    // the two would either erase a saved anchor or make clearing impossible.
+    // `undefined` 是「别动它」，`null` 是「清掉它」：把两者混同，要么抹掉已保存的锚点，
+    // 要么让清空无法进行。
     expect(definedOnly({ homeLat: 39.9, workLat: undefined })).toEqual({ homeLat: 39.9 })
     expect(definedOnly({ homeLat: null })).toEqual({ homeLat: null })
     expect(definedOnly({})).toEqual({})

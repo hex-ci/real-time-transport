@@ -1,51 +1,44 @@
 import type { DepartureAdvice, DepartureReference } from '@real-time-transport/shared/departure'
 
 /**
- * F1's reference line, as text.
+ * F1 的参考行，作为文本。
  *
- * Kept out of the card component so the wording is a tested fact rather than a
- * template that only a browser can check: this app has no DOM test harness, and
- * the one thing F1 is strict about here is that different states never read
- * alike — 「暂无数据」 is not 「不用着急」, and a missing value is never dressed up
- * as an answer.
+ * 放在卡片组件之外，是为了让措辞成为可断言的事实，而不是只有浏览器能检查的模板。这里 F1 严格
+ * 的一点是：不同的状态读起来绝不能一样 ——「暂无数据」不是「不用着急」，缺失的值也永远不会被
+ * 打扮成一个答案。
  */
 
 export interface ReferenceLine {
-  /** 「步行 6 分」, or null when there is no walk to name. */
   walk: string | null
-  /** The conclusion, in the user's own terms. */
   conclusion: string
 }
 
 /**
- * The conclusion for one verdict.
+ * 一个结论的措辞。
  *
- * The row states a fact and leaves the decision where F1 puts it — with the
- * user, reading the arrival minutes beside it.
+ * 这一行陈述事实，把决定留在 F1 放它的地方 —— 留给用户，让他对照旁边的到站分钟数。
  */
 export function conclusionOf(advice: DepartureAdvice): string {
   if (advice.state === 'comfortable') {
     return `${advice.leaveInMinutes} 分钟后出门`
   }
   if (advice.state === 'hurry') {
-    // The PRD's own wording: being in time is a fact, not an instruction.
+    // 产品文档自己的措辞：赶得上是一个事实，不是一条指令。
     return '现在走还来得及'
   }
-  // This bus is gone. With no second bus priced there is no cost to state, and
-  // an invented one would be the failure mode this whole row guards against.
+  // 这班车已经走了。没有第二班车被定价时就没有成本可说，而编一个出来正是这一整行守着的
+  // 失败模式。
   return advice.missCostMinutes === null
     ? '赶不上这班'
     : `赶不上这班 · 下一班多等 ${advice.missCostMinutes} 分`
 }
 
 /**
- * The line to render, or null for no line at all.
+ * 要渲染的那一行，或 null 表示根本没有行。
  *
- * `null` covers every case where the server drew no conclusion — outside both
- * commute windows, no walking route, no vehicle, stale or degraded arrivals —
- * and the row is then simply absent. The one non-conclusion with content of its
- * own is an anchor that was never saved: that points at 设置, because otherwise
- * the feature looks broken exactly when the user has never set it up.
+ * `null` 覆盖服务端没有画出结论的所有情形 —— 两个通勤窗口之外、没有步行路线、没有车、数据
+ * 过期或降级 —— 那时这一行干脆缺席。唯一自带内容的「非结论」是从未保存过的锚点：它指向
+ * 「设置」，否则这个功能恰好在用户从未设置它的时候看起来是坏的。
  */
 export function referenceLineOf(reference: DepartureReference | null | undefined): ReferenceLine | null {
   if (!reference) return null

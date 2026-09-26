@@ -1,10 +1,7 @@
 import { shallowRef } from 'vue'
 import type { WalkDecision, NearbyStation } from '@real-time-transport/shared'
 
-/**
- * GIS composable wrapping the backend Amap endpoints.
- * All calls go through the Node layer (Amap Web-Service key never touches the browser).
- */
+/** GIS 组合式：请求全部经后端转发，Web-Service key 不下发到浏览器。 */
 export function useGis() {
   const walkDecision = shallowRef<WalkDecision | null>(null)
   const nearbyStations = shallowRef<NearbyStation[]>([])

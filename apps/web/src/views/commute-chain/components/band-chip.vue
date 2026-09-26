@@ -3,18 +3,10 @@ import { computed } from 'vue'
 import type { ChainMarginBand } from '@real-time-transport/shared'
 
 /**
- * F10's band, as a chip.
+ * 余量档位的芯片。
  *
- * The PRD asks for both the band and the minutes, and both are views of ONE
- * number: the band is the interpretation (`chainMarginBandOf` of the very margin
- * the row prints beside this chip) and the number is the reading. Nothing here
- * decides either — the label arrives already worded from `margin.ts`, so the chip
- * cannot disagree with the minute it is printed next to.
- *
- * The tone only backs the word up: every band has its own label, so no band is
- * ever signalled by colour alone, and each tone clears 4.5:1 at 12px on the
- * surfaces this page uses. 不足 (the vehicle the chain was timed against has gone)
- * is stated as a fact about a bus that left, not as a warning about the user.
+ * 词由 `margin.ts` 给出，此处不另造句，故芯片与旁边的分钟不会互相矛盾。
+ * 颜色只作辅助：档位由文字标签承载，任何档位都不只靠颜色区分。
  */
 const props = defineProps<{
   band: ChainMarginBand

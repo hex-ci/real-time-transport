@@ -8,7 +8,6 @@ import type { ITransitProvider } from '../types.js'
 import type { UniversalSubwayEngine } from './universal-subway.js'
 import type { ChelaileProvider } from './chelaile.js'
 
-/** Chinese-numeral -> arabic for common metro line numbers */
 const CN_NUM: Record<string, string> = {
   一: '1', 二: '2', 三: '3', 四: '4', 五: '5',
   六: '6', 七: '7', 八: '8', 九: '9', 十: '10',
@@ -16,7 +15,6 @@ const CN_NUM: Record<string, string> = {
   十六: '16', 十七: '17', 十八: '18', 十九: '19', 二十: '20',
 }
 
-/** Named (non-numbered) metro lines that must keep their full name as keyword. */
 const NAMED_LINE_RE = /^(机场线|磁悬浮|首都机场线|大兴机场线|亦庄线|房山线|昌平线|燕房线|西郊线|s\d+线)$/i
 
 function normalizeLineNo(raw: string): string {
@@ -25,14 +23,6 @@ function normalizeLineNo(raw: string): string {
   return t.replace(/号线$/, '').replace(/号$/, '')
 }
 
-/**
- * Multi-city aware subway search + routing provider.
- * - subway lineIds -> UniversalSubwayEngine (Amap static station sequence + headway sim)
- * - bus lineIds    -> ChelaileProvider (497-city realtime bus)
- *
- * Supports numbered lines (99号线 / 地铁99号线) and named lines
- * (亦庄线 / 机场线 / S1线 ...) in any city.
- */
 export class SubwayRouterProvider implements ITransitProvider {
   readonly name: DataSourceType = 'subway_schedule'
 
@@ -57,7 +47,7 @@ export class SubwayRouterProvider implements ITransitProvider {
 
     const lineId = `subway_${cityCode}_${lineKey}`
 
-    // Single Amap lookup: direction 1 is derived by reversing the stop sequence
+    // 只做一次高德查询：方向 1 由站点序列倒序推导
     const d0 = await this.subwayEngine.getLineDetail(lineId, 0, cityCode).catch(() => null)
     if (!d0) return []
 
@@ -71,8 +61,8 @@ export class SubwayRouterProvider implements ITransitProvider {
         direction: 0,
         startStop: first,
         endStop: last,
-        // Same rule as the subway engine's getLineDetail: the terminal names
-        // the direction, so search and the direction selector agree.
+        // 与地铁引擎的 getLineDetail 同一条规则：终点站决定方向名，
+        // 使搜索行与方向选择器给出的方向名一致。
         directionName: `开往 ${last || '终点站'}`,
         cityCode,
       },

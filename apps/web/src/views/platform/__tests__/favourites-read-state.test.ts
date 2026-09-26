@@ -9,20 +9,15 @@ import {
 import PlatformPage from '../index.vue'
 
 /**
- * The platform board's share of §4.1's own rule: a followed-lines read that FAILED is not an
- * empty followed-lines list.
+ * 站台屏在 §4.1 规则中的那一份：**失败**的关注线路读取不是空的关注线路列表。
  *
- * The board is where the two look most alike. Its station options come from the followed
- * lines, so a read that failed leaves it with no station to show — and it announced
- * 「该站台暂无已关注线路途经，请在「设置」中关注经过此站的线路」, which is a claim about what
- * the user follows and sends them to re-follow lines they already follow. The truth is
- * 「没读到」, and the only action that can change it is another read.
+ * 站台屏是两者最相像之处。它的站点选项来自关注线路，故失败的读取让它没有站点可显示——而它曾宣布
+ * 「该站台暂无已关注线路途经，请在「设置」中关注经过此站的线路」，这是对用户关注了什么的断言，
+ * 并把用户送去重新关注他们已关注的线路。真相是「没读到」，唯一能改变它的动作是再读一次。
  *
- * The PAGE is mounted, not the board alone, because which state the page hands down is half of
- * the claim. This repo has one DOM-free mount harness (设置's), and a second copy would drift
- * from it. The station header is replaced with an inert stub because it drives a native
- * `<select>`, which runtime-dom's `v-model` writes through `options.length` — a DOM API this
- * harness deliberately does not model. Nothing here is about the header.
+ * 挂载的是**页面**而非仅报告板，因为页面向下传递哪个状态是断言的一半。本仓库只有一个无 DOM 挂载
+ * 装置（`设置` 的），第二份副本会与之漂移。站点头部被换成惰性桩件，因为它驱动原生 `<select>`，
+ * 而 runtime-dom 的 `v-model` 通过 `options.length` 写入——本装置刻意不建模的 DOM API。此处无关头部。
  */
 
 vi.mock('../components/platform-header.vue', () => ({
@@ -34,7 +29,7 @@ vi.mock('../components/platform-header.vue', () => ({
   },
 }))
 
-/** One followed line of the active city. */
+/** 当前城市的一条关注线路。 */
 function favourite(): Record<string, unknown> {
   return {
     id: 'fav-1',
@@ -47,12 +42,12 @@ function favourite(): Record<string, unknown> {
   }
 }
 
-/** What the followed-lines read answers, in a box so a test can repair it mid-run. */
+/** 关注线路读取所答，放在盒子里以便测试中途修好它。 */
 interface FavouritesAnswer { value: 'ok' | 'empty' | 'fail' }
 
 /**
- * The reads the page makes on mount. `/lines/` answers nothing on purpose: this file is about
- * the words an unreadable followed-lines list produces, not about the departures.
+ * 页面在挂载时发出的读取。`/lines/` 刻意什么都不答：本文件关乎不可读的关注线路列表产生的措辞，
+ * 而非发车。
  */
 function routes(answer: FavouritesAnswer): Route[] {
   return [
@@ -71,7 +66,7 @@ async function mountPlatform(answer: FavouritesAnswer): Promise<MountedHost> {
   return host
 }
 
-/** The failed read's retry control, or a thrown error naming what was missing. */
+/** 失败读取的重试控件，或一个点名缺失之物的抛错。 */
 function retryControl(host: MountedHost): HostElement {
   const found = host.nodes((item: HostElement) => item.tag === 'button' && host.textOf(item).trim() === '重试')[0]
   if (!found) throw new Error('the failed read offered no retry')

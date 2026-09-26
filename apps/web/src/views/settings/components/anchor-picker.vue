@@ -1,16 +1,12 @@
 <script setup lang="ts">
 /**
- * Home / work anchor picker — the origin of the walking time F1 measures.
+ * 家 / 公司锚点选择器——步行时间的起点。
  *
- * Two buttons, each taking ONE current-position fix and PATCHing it to
- * `/api/transit/settings`. Deliberately no map picking: that needs a
- * browser-side JS API key, and our Amap key is a Web-service key that must never
- * reach the browser (`rule 4`).
+ * 两个按钮，各取**一次**当前位置定位并 PATCH 到 `/api/transit/settings`。刻意不做地图选点：
+ * 那需要浏览器侧的 JS API key，而本项目的 key 是 Web-service key，绝不能下发到浏览器。
  *
- * The fix leaves this component exactly as `navigator.geolocation` reported it —
- * WGS-84, converted by nobody. The server converts it once at the PATCH boundary
- * and stores GCJ-02. What is rendered here is what the SERVER returned, so the
- * screen can never claim a coordinate the stored row does not hold.
+ * 定位结果原样离开本组件，WGS-84、无人转换。服务端在 PATCH 边界转换一次并存为 GCJ-02。
+ * 此处渲染的是**服务端**返回的内容，故屏幕绝不会声称一条已存记录并不持有的坐标。
  */
 import { computed, onMounted, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -39,27 +35,26 @@ const stored = shallowRef<StoredAnchors>({
   workLng: null,
 })
 
-/** True until the first read of the stored row has answered. */
+/** 在已存记录的首次读取作答之前为 true。 */
 const loading = shallowRef(true)
-/** The read itself failed: whether an anchor is set is then UNKNOWN, not unset. */
+/** 读取本身失败：此时某个锚点是否已设置是**未知**，而不是未设置。 */
 const loadFailed = shallowRef(false)
-/** Anchor whose fix is being taken right now, so only that button shows pending. */
+/** 正在抓取定位的锚点，故只有那个按钮显示进行中。 */
 const capturing = shallowRef<AnchorId | null>(null)
-/** Anchor the last successful save landed on. */
+/** 最近一次成功保存落在哪个锚点。 */
 const savedAnchor = shallowRef<AnchorId | null>(null)
 const saveError = shallowRef<string | null>(null)
 
-/** Whether an anchor has a stored position — the same rule the index row states. */
+/** 某锚点是否有已存位置——与索引行陈述的是同一条规则。 */
 function isSet(id: AnchorId): boolean {
   return isAnchorSet(stored.value, id)
 }
 
 /**
- * The stored coordinates, to five decimals (~1 m).
+ * 已存的坐标，五位小数（约 1 米）。
  *
- * Five is the precision this app treats as identity — the walking-time cache
- * keys a coordinate at the same scale — so what is shown is the anchor as the
- * walking path sees it, and two anchors are told apart by their own numbers.
+ * 五位是本应用当作同一性的精度——步行时间缓存以同一尺度为坐标建键——故展示的是步行路径
+ * 眼中的那个锚点，两个锚点靠各自的数字区分。
  */
 function coordsLabel(id: AnchorId): string | null {
   const anchor = ANCHORS.find(a => a.id === id)!
@@ -82,8 +77,8 @@ onMounted(async () => {
     stored.value = pickAnchors(json.data)
   }
   catch {
-    // Keep every anchor unknown and say so: claiming 「未设置」 here would be a
-    // statement about the stored row that this screen has not actually read.
+    // 保持每个锚点未知并如此陈述：此处声称「未设置」会是一句关于已存记录、
+    // 而本屏并未真正读过的断言。
     loadFailed.value = true
   }
   finally {
@@ -92,13 +87,11 @@ onMounted(async () => {
 })
 
 /**
- * Take one fix for `id` and store it.
+ * 为 `id` 取一次定位并存起来。
  *
- * `captureAnchorFix` resolves the browser's own position once, unconverted; the
- * PATCH carries that raw fix to the server, which converts it once and stores
- * GCJ-02. A failure — denied permission, timeout, no device position — arrives
- * as copy that names the departure time, because without an anchor there is no
- * walking time and therefore no departure time to show.
+ * `captureAnchorFix` 取一次浏览器自己的位置，不做转换；PATCH 把这次原始定位带到服务端，
+ * 由它转换一次并存为 GCJ-02。失败——拒绝授权、超时、设备无位置——以点名出门时间的文案到达，
+ * 因为没有锚点就没有步行时间，也就没有可展示的出门时间。
  */
 async function grab(id: AnchorId): Promise<void> {
   if (capturing.value) return
@@ -129,12 +122,12 @@ async function grab(id: AnchorId): Promise<void> {
   }
 }
 
-/** Whether the buttons can be used at all: a simulated grab never fails. */
+/** 按钮是否可用：模拟抓取永不失败。 */
 const canGrab = computed(() => capturing.value === null)
 </script>
 
 <template>
-  <!-- Location anchors (F1's origin): set once, from the current position -->
+  <!-- 位置锚点：从当前位置一次性设置 -->
   <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5">
     <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-200 lg:text-base">
       <MapPin class="h-4 w-4 shrink-0 text-cyan-400" aria-hidden="true" />
@@ -144,10 +137,8 @@ const canGrab = computed(() => capturing.value === null)
       用当前位置设置「家」和「公司」，用于计算步行到站台的耗时
     </p>
 
-    <!-- Development GPS override. Deliberately distinct from the vehicle-data
-         simulation strip (amber, 模拟数据模式): the position can be simulated
-         while the vehicle data is real, and mistaking one for the other would
-         make a correct board look wrong. -->
+    <!-- 开发用 GPS 覆盖。与车辆数据模拟横幅（琥珀色）刻意区分：位置可以是被模拟的，
+         而车辆数据是真的，把两者弄混会让一块正确的屏看起来出错。 -->
     <div
       v-if="isSimulated"
       data-anchor-gps-simulation
@@ -172,8 +163,7 @@ const canGrab = computed(() => capturing.value === null)
           <component :is="anchor.icon" class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
           <div class="min-w-0">
             <div class="text-xs font-medium text-slate-300 lg:text-sm">{{ anchor.label }}</div>
-            <!-- Three honest states, never collapsed into two: still reading,
-                 read failed (unknown), and a real answer from the stored row. -->
+            <!-- 三种诚实的状态，绝不折叠成两种：仍在读取、读取失败（未知），以及来自已存记录的真实答案。 -->
             <div v-if="loading" class="mt-0.5 text-xs text-slate-400">读取中…</div>
             <div v-else-if="loadFailed" class="mt-0.5 text-xs text-amber-400">
               未能读取已保存的位置，是否已设置未知
@@ -217,8 +207,8 @@ const canGrab = computed(() => capturing.value === null)
       </div>
     </div>
 
-    <!-- A failed grab or save is never silent: the copy names what the failure
-         costs (no anchor, so no departure time) and what to do about it. -->
+    <!-- 抓取或保存失败从不沉默：文案点名该失败代价是什么（没有锚点，就没有出门时间），
+         以及该怎么办。 -->
     <p
       v-if="saveError"
       role="alert"

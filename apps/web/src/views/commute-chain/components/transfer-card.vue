@@ -6,34 +6,26 @@ import TransferRow from './transfer-row.vue'
 import type { BranchView, ChainCardView, TransferRowView } from '../types'
 
 /**
- * One chain: what it is, whether the transfers can be made, and what the answer is
- * worth.
+ * 一张链路：它是什么、能不能赶上换乘，以及这个答案值多少。
  *
- * A chain is EITHER a conclusion or a refusal — never both, and never a partial
- * one: a refusal is a code rather than a smaller answer, so this card holds no
- * margin, no minute and no vehicle for it. The verdict line states the band and the
- * tightest margin WITH the transfer it belongs to, because a chain's number is the
- * smallest of its legs and a reader who cannot see which leg that is cannot act on
- * it. The two readings of an unresolvable margin are printed on that same transfer,
- * and nowhere else.
- *
- * Nothing below adds up the legs: the chain ends at its last leg's alight station,
- * so the last row's own minute is the last number the answer has.
+ * 链路要么是结论要么是拒绝，绝不是两者，也不是部分——拒绝是一个码而不是更小的答案。
+ * 判决行把档位与最紧的余量连同它所属的那一段一起陈述：链路的数字是最小的那一段，
+ * 看不出是哪一段的读者无法据此行动。余量不可解析时的两个读数只印在那一处。
+ * 此处不加总各段：链路止于末段的下车站。
  */
 const props = defineProps<{ card: ChainCardView }>()
 
 /**
- * F4's mark for one leg — or nothing, when the chain is already stating the one
- * word. When the legs disagree the chain states none, and then every leg states
- * its own, so a modelled minute never rides under a live word.
+ * F4 在这一段的标记；链路已在陈述那个词时为 null。各段不一致时链路不陈述，
+ * 于是每段各述其类。
  */
 function markFor(row: TransferRowView): string | null {
   return legMarkOf(row.provenance, props.card.chainProvenance)
 }
 
 /**
- * The two readings of an unresolvable margin, for the transfer that margin belongs
- * to — the engine's own `bindingSeq`, never an index of ours.
+ * 余量不可解析时的两个读数，只给余量所属的那一段——用引擎自己的 `bindingSeq`，
+ * 不是本页的下标。
  */
 function branchesFor(row: TransferRowView): BranchView[] | null {
   const conclusion = props.card.conclusion
@@ -56,7 +48,6 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
       />
     </header>
 
-    <!-- Deduced: the band, the margin, and which transfer the margin is at. -->
     <div v-if="card.conclusion" class="mt-2.5">
       <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.conclusion?.verdict }}</p>
       <p class="mt-0.5 text-xs text-slate-400 lg:text-base">
@@ -73,10 +64,7 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
       </ul>
     </div>
 
-    <!-- Refused: one sentence, which transfer it is about, and the cause's own
-         affordance. Nothing may sit beside a refusal that could be read as an
-         answer, and the service state rides beside it only where the empty answer
-         is a question about the service day. -->
+    <!-- 拒绝：句子旁不得有任何可被读成答案的东西。 -->
     <div v-else-if="card.refusal" class="mt-2.5">
       <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.refusal?.sentence }}</p>
       <p v-if="card.refusal?.legText" class="mt-0.5 text-xs text-slate-400 lg:text-base">
@@ -85,9 +73,7 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
       <p v-if="card.refusal?.serviceText" class="mt-0.5 text-xs text-slate-300 lg:text-base">
         {{ card.refusal?.serviceText }}
       </p>
-      <!-- The action is about one 设置 row (the anchor a chain starts from), so it names
-           that page rather than the index: 设置 is an index plus four pages now, and the
-           refusal's own cause decides which one. -->
+      <!-- 动作属于设置里的一行，故点名那一页而非设置的索引。 -->
       <RouterLink
         v-if="card.refusal?.action === 'settings'"
         to="/settings/anchors"
@@ -98,8 +84,6 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
       </RouterLink>
     </div>
 
-    <!-- The reading this answer came from: its own instant, and the kind of number
-         it is. A refusal whose leg was never read has no reading and states none. -->
     <p v-if="card.reading" class="mt-2 text-xs text-slate-400 lg:text-base">{{ card.reading?.text }}</p>
   </article>
 </template>

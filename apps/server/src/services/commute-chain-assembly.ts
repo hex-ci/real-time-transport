@@ -7,72 +7,42 @@ import type {
 } from '@real-time-transport/shared'
 
 /**
- * F10's server half, the pure part: two targeted readings turned into the ONE
- * reading the engine takes.
+ * F10 的服务端一半，纯逻辑部分：两次定向读取合成引擎吃的那一份读数。
  *
- * The adapter answers for ONE requested target station per read — chelaile
- * matches a vehicle's `travels` by the order the request named — so one vehicle's
- * board minute and alight minute can only ever come from two reads, each returned
- * in its own arrival order. Everything that can go wrong between the two is
- * decided here, and it is decided by the provider's stable vehicle id
- * (`LiveBusSchema.id`) and by nothing else.
+ * 每次定向读取只回答一个被请求的目标站，因此同一辆车的上车分钟与下车分钟只能来自两次读取，
+ * 各自按自己的到站顺序返回。两次之间会出岔子的一切都在这里裁决，且只按 provider 稳定的
+ * vehicle id（`LiveBusSchema.id`）裁决。
  *
- * Nothing in this file reads a clock, a socket or a distance: the two readings
- * and the matching are the whole input, which is what makes 「which vehicle did
- * this chain board, and how long is its ride」 testable without an upstream.
+ * 本文件不读时钟、不读 socket、不读距离：两次读数与这次匹配就是全部输入。
  */
 
-/** One vehicle's arrival at ONE targeted station, as the live path priced it. */
 export interface TargetedArrival {
-  /** `LiveBusSchema.id` — the vehicle itself. */
   vehicleId: string
-  /** Seconds until THIS vehicle reaches the station the read targeted. */
   etaSeconds: number
-  /** How this minute was produced (F4's basis, before the mark is applied). */
   basis: ArrivalBasis
 }
 
 /**
- * A targeted row reaches this type only when it STATES a minute.
+ * 定向行只有在它给出分钟时才进入这个类型。
  *
- * `vehicleArrivals` serves a row with no `time`/`etaSeconds`/`basis` when the
- * targeted reading published no arrival time for that vehicle (this app no longer
- * extrapolates one), and such a row is filtered out before pairing rather than
- * carrying an absent minute through this contract: a ride duration needs BOTH ends'
- * minutes, so a half-priced pair would have to invent the missing one. It is the
- * caller (`readChainLeg`) that filters, and it still counts that vehicle as one on
- * the way.
+ * 定向读取未给某辆车发布到站时间时，`vehicleArrivals` 会给出没有 `time`/`etaSeconds`/`basis`
+ * 的行；这样的行在配对前被滤掉，而不是带着缺失的分钟穿过这份契约：行程时长需要两端都有分钟。
+ * 过滤由调用方（`readChainLeg`）完成，那辆车仍被计为一辆在途车。
  */
 
 /**
- * Pair a leg's two targeted reads into the vehicles the deduction can use.
+ * 把一条腿的两次定向读取配对成扣减可用的车辆。
  *
- * The match is by vehicle id, NEVER by position: the two reads are ordered by
- * their own arrival minutes, so a board read's first row is routinely a different
- * vehicle than the alight read's first row, and pairing the nth with the nth would
- * put one vehicle's alight minute beside another vehicle's board minute — a ride
- * duration about no journey anyone takes.
+ * 匹配按 vehicle id，绝不按位置：两次读取各按自己的到站分钟排序，把第 n 个配第 n 个会把一辆车
+ * 的下车分钟放到另一辆车的上车分钟旁边。
  *
- * A vehicle only one read carries is dropped, and it must be: it has no pair, so
- * offering it would mean inventing the missing half. Within ONE snapshot of the
- * upstream that is always the vehicle only the ALIGHT read carries — one already
- * past the board station but not yet past the alight one, so it has no board
- * minute to give (upstream returns a vehicle for a requested order iff it has not
- * passed it, and that filter is monotone, which makes the board read's rows a
- * subset of the alight read's — FOR A LEG WHOSE ALIGHT STOP IS FURTHER ALONG IN THE
- * DIRECTION IT IS READ). A subway leg stored the other way round is read in the
- * opposite direction with both orders translated into its numbering
- * (`transit.service.ts`, `chainLegInput`), so it too arrives here with alight >
- * board in the numbering the two reads used. A board row the alight read lacks is
- * NOT something that upstream produces; the `continue` below is kept as a defence,
- * not as a case the caller is expected to hit.
+ * 只有一次读取带的车辆被丢弃，它没有配对，端出去就等于凭空造出缺的另一半。上车读取的行是
+ * 下车读取的行的子集（下车站在其被读取的方向上更靠后的腿）；反向存储的地铁腿也在这条关系下
+ * 到达这里。
  *
- * The nesting is a precondition, not a property of any input: a BUS leg whose
- * alight order is upstream of its board order INVERTS it (the alight read becomes
- * the subset), which is why the deduction refuses such a leg as
- * `leg-recorded-backwards` before the empty-pair check that consults this pairing,
- * and the schema rejects it on write. Nothing here may assume the relation
- * without it.
+ * 这种包含关系是前提，不是任何输入的属性：alight order 在 board order 之前的公交腿会把它反转，
+ * 因此扣减会先把这种腿判为 `leg-recorded-backwards`，schema 在写入时也拒绝它。没有这个前提，
+ * 这里任何地方都不得假定该关系。
  */
 export function pairTargetedReads(
   board: readonly TargetedArrival[],
@@ -88,10 +58,9 @@ export function pairTargetedReads(
       vehicleId: row.vehicleId,
       arrivalAtBoardSeconds: row.etaSeconds,
       arrivalAtAlightSeconds: other.etaSeconds,
-      // The pair is one vehicle, but the mark the row shows qualifies the ALIGHT
-      // minute (`ChainLegVehicle.basis`), so it is that read's basis which
-      // travels: a board minute the payload carried beside an alight minute this
-      // app computed is 位置推算, not 实时.
+      // 配对是一辆车，但行上显示的 mark 限定的是下车分钟（`ChainLegVehicle.basis`），
+      // 因此走的是那次读取的 basis：payload 带的上车分钟配本应用算出的下车分钟不是同一份读数。
+
       basis: other.basis,
     })
   }
@@ -99,65 +68,33 @@ export function pairTargetedReads(
 }
 
 /**
- * The leg's reading, from the two reads that produced it — or nothing.
+ * 这条腿的读数，来自产生它的两次读取 —— 或者什么都没有。
  *
- * One leg has ONE reading, so it declares one source, one instant, one degraded
- * mark and one service state. Each of the first three is derived so that it
- * cannot flatter the pair:
+ * 一条腿只有一份读数，因此它声明一个来源、一个时刻、一个降级标记和一个运营状态。
+ * 来源只在两次读取命名同一个时才给，否则引擎报告 `provenance-unknown`；
+ * 时刻取两者中更旧的那个；任一次读取回退即降级。
  *
- *  - a source only when BOTH reads named the same one. A board minute from one
- *    source beside an alight minute from another is not one reading, and naming
- *    either would claim a provenance the pair does not have; the engine then
- *    reports `provenance-unknown`, which is the honest answer for a pair nothing
- *    vouches for.
- *  - the OLDER instant of the two, because freshness is judged once for the leg
- *    and the newer instant would state an age that half the pair does not have.
- *  - degraded when EITHER read fell back, because the reading is only as good as
- *    its weaker half.
- *
- * `operatingStatus` is not derived from either read: it is F3's state for the
- * line the leg is about, which the caller derives once from the line detail it
- * already resolved (`operatingStatusOf`) and passes in. The DERIVATION is shared
- * with the station board — one function, one vocabulary — but the INPUTS are NOT,
- * and the two can therefore disagree about one line:
- *
- *  - this leg's state is the LINE's own service hours, the `firstBusTime` /
- *    `lastBusTime` carried by the line detail (`transit.service.ts`,
- *    `readChainLeg`);
- *  - the board's exact-timetable branch states the STATION's own official table,
- *    the `exact.first` / `exact.last` of the platform the request named
- *    (`transit.service.ts`, `getStationArrivals`), because that is the table its
- *    departures are listed from.
- *
- * For the one station this repo ships a published table for, the two
- * values differ, so there is a real window in which the chain and the board state
- * two different service states for one line. The chain states the LINE's hours
- * rather than a station's; it is not a second status model and must not be read as
- * one. It belongs to the leg's one reading because that is where every other fact
- * about this leg travels, and an empty answer needs it: 首班前 / 已过末班 and
- * 运营中·暂无来车 are not one sentence.
+ * `operatingStatus` 不从任一次读取推导：它是这条腿所属线路的 F3 状态，由调用方从它已解析出的
+ * 线路详情算一次后传入（`operatingStatusOf`）。它与站牌的推导共用，但输入不共用，
+ * 因此两者对同一条线可以不一致 —— 链路声明的是线路自己的服务时段，站牌的精确时刻表分支声明的
+ * 是该站自己的官方表。这不是第二套状态模型。
  */
 export function legLiveReading(params: {
   board: LiveLineStatus | null
   alight: LiveLineStatus | null
   vehicles: readonly ChainLegVehicle[]
   /**
-   * How many vehicles the BOARD read carried, before the id match — every row
-   * still to reach the board order, whether or not the reading published an
-   * arrival time for it, and NOT the alight read's rows. A fact of the reading,
-   * not of the pair: it is what lets the engine answer `no-shared-vehicle` (the
-   * read carried vehicles, the match kept none) instead of `no-vehicle` (the read
-   * carried nothing at all). A vehicle we could not price counts, because it IS on
-   * its way — claiming an empty service for it would be a different lie.
+   * 上车读取带的车辆数，在按 id 匹配之前 —— 所有尚未到达上车 order 的行，无论那次读数是否
+   * 发布了它的到站时间，且不含下车读取的行。正是它让引擎能答 `no-shared-vehicle`（读取带了车，
+   * 匹配一辆没留）而不是 `no-vehicle`（读取什么车都没带）。定不出价的车也算，因为它在途。
    */
   boardVehiclesOnTheWay: number
-  /** F3's state for the leg's line, derived by the caller from the leg's own line. */
   operatingStatus: OperatingStatus
 }): ChainLegLive | null {
   const { board, alight } = params
-  // Half a pair is not a reading: with either read missing there is no board
-  // minute and no alight minute to compare, and reporting the half that answered
-  // would claim a reading the leg does not have.
+  // 半对不是读数：任一次读取缺失就没有上车分钟
+  // 也没有下车分钟可比，报告回答的那一半
+  // 等于声明这条腿没有的读数。
   if (!board || !alight) return null
 
   return {

@@ -4,45 +4,38 @@ import { arrivalMinutes } from '@real-time-transport/shared'
 import { buildApp } from '../app.js'
 
 /**
- * F1's reference row, on the server side of the coordinate boundary.
+ * F1 的参考行，在坐标边界的服务端一侧。
  *
- * The stored anchor is GCJ-02 — written by `/settings`' PATCH boundary, which
- * converts a raw device fix exactly once — and so is the station coordinate from
- * the cached line detail. Both therefore reach the walking service as held. The
- * HTTP GIS routes convert their origin on entry (they are defined as a RAW
- * WGS-84 device fix), so an anchor that travelled up to the browser and back
- * through them would be converted twice: ~520 m of origin error, which against
- * F1's 3-minute wait tolerance is not a rounding difference but an inverted
- * 出门结论.
+ * 存下的锚点是 GCJ-02（由 `/settings` 的 PATCH 边界写入，那里只把原始设备定位转换一次），
+ * 缓存线路详情里的站点坐标也是 GCJ-02，所以两者都原样到达步行服务。HTTP 的 GIS 路由在入口
+ * 转换它们的 origin（它们的定义就是原始 WGS-84 设备定位），所以一个经浏览器走一趟 GIS 路由
+ * 再回来的锚点会被转换两次。
  *
- * These tests hold the whole path end to end: the fix goes in through the real
- * PATCH endpoint, the arrivals answer comes back through the real route, and the
- * only thing inspected in between is the walking request the server issued.
+ * 这些测试端到端跑整条路径：定位经真实的 PATCH 端点进入，到达答案经真实路由返回，中间唯一
+ * 被检查的是服务端发出的那次步行请求。
  */
 
-/** The raw device fix a phone reports, in WGS-84. */
+/** 手机上报的原始设备定位，WGS-84。 */
 const DEVICE_FIX = { lng: 116.3974, lat: 39.90931 }
 
-/** The same point in GCJ-02, from this repo's own converter — the stored form. */
+/** 同一个点的 GCJ-02 结果，即存储形式。 */
 const [ANCHOR_LNG, ANCHOR_LAT] = wgs84ToGcj02(DEVICE_FIX.lng, DEVICE_FIX.lat)
 
-/** The station coordinate as the app holds it (Amap static sequence = GCJ-02). */
+/** 应用持有的站点坐标（Amap 静态站序 = GCJ-02）。 */
 const STATION_GCJ02 = { lng: 116.39254, lat: 39.924299 }
 const STATION_AS_HELD = '116.392540,39.924299'
 
 const LINE_ID = 'subway_027_7'
 const STATION_NAME = '群芳'
 
-/** A 966 s / 1208 m walking leg — the measurement the PRD's example is built on. */
 const WALK_SECONDS = 966
 const WALK_METERS = 1208
 
-/** Upstream calls the stubbed `fetch` saw, in order. */
+/** 替身 `fetch` 看到的上游调用，按顺序。 */
 let upstream: string[] = []
 
 /**
- * Counted stand-in for every upstream the server can reach: no test here can
- * spend real quota, and no call can leave the process.
+ * 服务端能触达的每个上游的带计数替身：这里没有测试能花真实配额，也不会有调用离开进程。
  */
 function stubUpstream(options: { walking?: boolean } = {}): void {
   upstream = []
@@ -60,7 +53,6 @@ function stubUpstream(options: { walking?: boolean } = {}): void {
   }))
 }
 
-/** An Amap v3 success envelope around `payload`. */
 function ok(payload: Record<string, unknown>) {
   return {
     ok: true,
@@ -69,7 +61,7 @@ function ok(payload: Record<string, unknown>) {
   }
 }
 
-/** A two-stop GCJ-02 subway line, so the engine can build a detail from the stub. */
+/** 一条两站 GCJ-02 地铁线路，引擎才能从替身建出详情。 */
 const subwayLine = {
   id: 'BJ_88',
   name: '地铁88号线',
@@ -84,28 +76,21 @@ const subwayLine = {
   ],
 }
 
-/** The walking request the server made, as it saw it. */
 function walkingRequest(): URL | undefined {
   const found = upstream.find(u => u.includes('/v3/direction/walking'))
   return found ? new URL(found) : undefined
 }
 
-/**
- * The pair this repo's own converter turns `point` into — i.e. the stored form
- * of a raw fix.
- */
 function convertedOnce(lng: number, lat: number): string {
   const [gcjLng, gcjLat] = wgs84ToGcj02(lng, lat)
   return `${gcjLng.toFixed(6)},${gcjLat.toFixed(6)}`
 }
 
 /**
- * Freeze the wall clock inside the morning commute window, so which anchor means
- * 「where you are」 is a fact of the fixture rather than of when the suite ran.
- * The date is a Thursday, i.e. an operating workday for the timetable fixture.
+ * 把墙上时钟冻结在早通勤窗口内，所以「你在哪里」指哪个锚点是夹具的事实，而不是套件何时跑
+ * 的事实。日期是周四，即时时刻表夹具的营运工作日。
  *
- * Only `Date` is faked: the timers stay real, because the app under test polls
- * and the providers use request timeouts.
+ * 只伪造 `Date`：定时器保持真实，因为被测应用在轮询、provider 也用请求超时。
  */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -117,14 +102,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** PATCH the stored settings through the real endpoint. */
 async function patchSettings(app: Awaited<ReturnType<typeof buildApp>>, body: Record<string, unknown>) {
   const res = await app.inject({ method: 'PATCH', url: '/api/transit/settings', payload: body })
   expect(res.statusCode, res.body).toBe(200)
   return res.json() as { success: boolean, data: Record<string, unknown> }
 }
 
-/** The arrivals answer for the fixture station, through the real route. */
 async function arrivals(app: Awaited<ReturnType<typeof buildApp>>) {
   const res = await app.inject({
     method: 'GET',
@@ -154,12 +137,12 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
       const walk = walkingRequest()
       expect(walk, `no walking call was made (saw: ${upstream.join(' ')})`).toBeDefined()
 
-      // The fix entered once, at the PATCH boundary, and is sent as stored.
+      // 定位在 PATCH 边界只进入一次，并按存储形式发出。
       expect(walk!.searchParams.get('origin')).toBe(convertedOnce(DEVICE_FIX.lng, DEVICE_FIX.lat))
-      // A second conversion is what a browser round-trip through the GIS routes
-      // would have produced: ~520 m off, and a different verdict.
+      // 第二次转换是浏览器经 GIS 路由走一趟会产生的，
+      // 会给出不同的结论。
       expect(walk!.searchParams.get('origin')).not.toBe(convertedOnce(ANCHOR_LNG, ANCHOR_LAT))
-      // The station end is a stored coordinate too: forwarded as held, byte for byte.
+      // 站点那一端也是存储坐标：原样转发，逐字节。
       expect(walk!.searchParams.get('destination')).toBe(STATION_AS_HELD)
 
       expect(data.reference?.status).toBe('advice')
@@ -180,10 +163,10 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
       const first = data.arrivals[0]
 
       expect(first).toBeDefined()
-      // 966 s of real walking, rounded the way the row displays it.
+      // 真实的 966 s 步行，按行的显示方式取整。
       expect(advice?.walkMinutes).toBe(16)
-      // Not a second opinion about the same bus: the verdict's eta₁ IS the
-      // list's first row, so the row and the minutes beside it cannot disagree.
+      // 不是对同一趟车的第二种意见：结论里的 eta₁ 就是
+      // 列表的第一行，所以行与旁边的分钟不可能互相矛盾。
       expect(advice?.nextArrivalMinutes).toBe(arrivalMinutes(first!.etaSeconds))
     }
     finally {
@@ -195,7 +178,7 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
     void stubUpstream()
     const app = await buildApp({ amapKey: 'test-key' })
     try {
-      // Commute hours only: 家 was never saved.
+      // 只有通勤时刻：家 从未保存过。
       await patchSettings(app, { morningStart: '06:30', morningEnd: '11:30' })
 
       const data = await arrivals(app)
@@ -212,7 +195,7 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
 describe('F1 reference: no anchor means 「where you are」, so no conclusion', () => {
   it('draws no reference outside both commute windows', async () => {
     void stubUpstream()
-    // 15:00 is between the morning and evening windows.
+    // 15:00 落在早高峰与晚高峰之间。
     freezeAt('2026-09-24T15:00:00')
     const app = await buildApp({ amapKey: 'test-key' })
     try {
@@ -252,8 +235,8 @@ describe('F1 reference: no anchor means 「where you are」, so no conclusion', 
 
       expect(data.reference?.status).toBe('advice')
       expect(data.reference?.anchor).toBe('work')
-      // The evening origin is the 公司 anchor — its stored form, converted once
-      // by the PATCH that wrote it and never again here.
+      // 晚上的起点是 公司 锚点 —— 它的存储形式，由写入它的那次
+      // PATCH 转换一次，在这里不再转换。
       const walk = walkingRequest()
       expect(walk!.searchParams.get('origin')).toBe(convertedOnce(116.45, 39.95))
     }
@@ -271,8 +254,8 @@ describe('F1 reference: no anchor means 「where you are」, so no conclusion', 
 
       const data = await arrivals(app)
 
-      // The arrivals still answer; only the reference is withheld, because
-      // there is no walk to compare them against (no speed, no estimate).
+      // 到达照旧作答；只有参考行被压掉，因为
+      // 没有步行可以拿来对照（没有速度，也没有推算）。
       expect(data.arrivals.length).toBeGreaterThan(0)
       expect(data.reference).toBeNull()
     }

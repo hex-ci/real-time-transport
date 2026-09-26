@@ -20,32 +20,29 @@ import type {
 } from '@real-time-transport/shared'
 
 /**
- * F11's manual refresh, as the two screens that each own an entry see it.
+ * F11 的手动刷新，按各自拥有入口的两块界面看到的样子。
  *
- * Both entries call the one action below, and it spends its upstream read through
- * the server's own endpoint. The window itself is the SERVER's: this side never
- * decides whether a press is allowed, because a cooldown computed here would be a
- * second clock — and one that cannot refuse anything.
+ * 两个入口都调用下面那一个 action，它把这次读取花在服务端自己的端点上。窗口属于服务端：
+ * 这一侧从不判断某次按压是否被允许 —— 在这里算冷却期就是第二个时钟，而且是一个什么都拒绝
+ * 不了的时钟。
  */
 
 /**
- * How one manual refresh attempt ended.
+ * 一次手动刷新请求的结局。
  *
- * - `ok`          a reading was obtained
- * - `throttled`   the window refused it: nothing was read for it
- * - `unavailable` the reads were made and the source answered nothing
- * - `offline`     the request never reached the server
+ * - `ok`          取到了一次读数
+ * - `throttled`   窗口拒绝了它：什么都没为它读到
+ * - `unavailable` 读取发生了，而来源什么都没答
+ * - `offline`     请求没有到达服务端
  */
 export type RefreshOutcome = 'ok' | 'throttled' | 'unavailable' | 'offline'
 
 /**
- * One chain as a write carries it — the shape `CommuteChainSchema` /
- * `UpdateCommuteChainSchema` accept, minus what the server owns.
+ * 一次写入携带的链路，其形状即契约接受的那份，减去服务端自己拥有的部分。
  *
- * `seq` is absent on purpose: a leg's position is the array's order, and the server
- * writes the number from it. The station fields are nullable because 「未选」 is a real
- * state of a draft (`null`, never an empty name), and `transferExtraMinutes` is
- * nullable because 「未设置」 and 「确实没有额外时间」 are different facts.
+ * 刻意不带 `seq`：一段的位置就是数组的顺序，那个数字由服务端从它写出来。站字段可空，因为
+ * 「未选」是草稿的真实状态（是 `null`，绝不是一个空名字）；`transferExtraMinutes` 可空，
+ * 因为「未设置」与「确实没有额外时间」是两个事实。
  */
 export interface CommuteChainLegWrite {
   lineId: string
@@ -58,7 +55,7 @@ export interface CommuteChainLegWrite {
   transferExtraMinutes: number | null
 }
 
-/** A chain's substance as a write carries it, without the position the server can compute. */
+/** 一次写入携带的链路内容，不含服务端能算出的位置。 */
 export interface CommuteChainWrite {
   name: string
   originAnchor: CommuteChainAnchor
@@ -67,12 +64,10 @@ export interface CommuteChainWrite {
 }
 
 /**
- * The reading a manual refresh last obtained, with the KIND of value it is.
+ * 上一次手动刷新取到的读数，连同它是哪一类值。
  *
- * The instant alone cannot say what kind of number it belongs to: a generated
- * reading is stamped with the instant it was produced exactly like an observed
- * one, so a screen holding only the instant would report a model output as a
- * plainly obtained reading.
+ * 光有那个时刻说不出它属于哪一类数字：生成的一次读数与观测到的一次读数被盖上同一个时刻的戳，
+ * 只有时刻的界面会把模型的产出报成一次平白取得的读数。
  */
 export interface RefreshReading {
   at: number
@@ -80,24 +75,18 @@ export interface RefreshReading {
   isDegraded: boolean | null
 }
 
-/** What the control states about the freshness of the reading it reports. */
 export interface RefreshFreshness {
-  /** The reading's own clock time, or null when none was obtained. */
   time: string | null
-  /** F4's mark for the reading's kind — null when the reading states no source. */
   mark: string | null
-  /** True when a fallback source produced the reading. */
   degraded: boolean
-  /** The line the user reads. */
   text: string
 }
 
 /**
- * Seconds left on the server's window, from the deadline the server stated.
+ * 服务端窗口上还剩多少秒，由服务端给出的截止时刻算出。
  *
- * The deadline is the only truth about when a refresh may happen again, and every
- * outcome carries it, so the wait is derived from it in all of them — a duration
- * invented on this side would be a second opinion about the server's own window.
+ * 那个截止时刻是「何时可以再次刷新」唯一的事实，且每个结局都带着它，所以等待一律由它得出 ——
+ * 在这一侧凭空造的时长是对服务端自己窗口的第二种意见。
  */
 export function refreshWaitSeconds(nextAllowedAt: number | null, now: number): number {
   if (nextAllowedAt === null) return 0
@@ -105,21 +94,14 @@ export function refreshWaitSeconds(nextAllowedAt: number | null, now: number): n
 }
 
 /**
- * The instant the stated window opens, as the later of the two clocks stating it.
+ * 所述窗口打开的时刻，取陈述它的两个时钟里较晚的那个。
  *
- * `nextAllowedAt` is the server's own instant, and comparing it against this
- * device's clock is the one comparison a skew can ruin: a press landing in the
- * window's last round trip computes 0 seconds left for a window that is genuinely
- * shut, and a device whose clock runs ahead computes 0 for the whole of it. The
- * wait is then stated as nothing at all, on a control whose whole job is to state
- * it.
+ * `nextAllowedAt` 是服务端自己的时刻，拿它与本机时钟相比是唯一会被时钟偏差毁掉的比较；
+ * `retryAfterSeconds` 是同一个截止时刻在来源处量成的时长，两个时钟之差进不去它，把它从
+ * 答案到达时起计时，就为等待托底。
  *
- * `retryAfterSeconds` is that same deadline expressed as a duration measured at
- * the source, so the difference between the two clocks does not enter it; aged
- * from the instant the answer arrived, it floors the wait. Both describe one
- * window, so the later of them is that window — and a refusal therefore always
- * has a wait to state. The duration rides with the deadline in one answer, so a
- * result carrying neither leaves both absent together.
+ * 两者说的是同一个窗口，所以较晚的那个就是那个窗口 —— 于是拒绝总有一个等待可说。时长与截止
+ * 时刻同在一个答案里，因此两者都缺的结果会让两者一起缺席。
  */
 export function refreshWaitUntilOf(params: {
   nextAllowedAt: number | null
@@ -134,17 +116,14 @@ export function refreshWaitUntilOf(params: {
 }
 
 /**
- * The reading a refresh answer describes.
+ * 一次刷新应答所描述的读数。
  *
- * The instant is the answer's own `lastUpdatedAt`, never the clock: the clock
- * would be true of every answer, including the ones that obtained nothing. The
- * kind comes from whichever line reports that instant, and a refusal reports no
- * line at all — so the kind recorded with the same instant earlier still stands,
- * because an instant identifies a reading and this one has not changed.
+ * 时刻用应答自己的 `lastUpdatedAt`，绝不用本机时钟：本机时钟对每个应答都成立，包括什么都
+ * 没取到的那些。种类取自报告了那个时刻的那一行，而一次拒绝不报告任何行 —— 于是先前记在同一
+ * 时刻上的种类仍然成立，因为时刻标识着一次读数，而这一次没有变。
  *
- * Several lines sharing the newest instant with different kinds are not one
- * reading, so the instant is reported and no mark is: one word would be false
- * about part of it. An answer that obtained nothing clears the reading.
+ * 若干行共享最新时刻却种类各异，那就不是一次读数：报出时刻、不给标记，一个词会对它的一部分
+ * 说假话。什么都没取到的应答清掉读数。
  */
 export function refreshReadingOf(
   result: Pick<RefreshLiveResult, 'lastUpdatedAt' | 'lines'>,
@@ -165,7 +144,7 @@ export function refreshReadingOf(
     : { at, dataSource: null, isDegraded: null }
 }
 
-/** 「HH:MM:SS」 in the reader's own zone — an instant, never a duration. */
+/** 「HH:MM:SS」，读表人自己的时区 —— 一个时刻，绝不是时长。 */
 function clockTimeOf(at: number): string {
   const d = new Date(at)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -173,31 +152,26 @@ function clockTimeOf(at: number): string {
 }
 
 /**
- * Whether a tick still has a window to count.
+ * 一次 tick 是否还有窗口可数。
  *
- * Only a window the server has shut is worth counting, so a tick arriving with no
- * deadline — or with the deadline already reached — has nothing to do, which is
- * also the caller's signal to stop ticking. That is what keeps this from becoming
- * an always-on clock: outside a window a press just spent, it has no work.
+ * 只有服务端已经关上的窗口值得数，所以一次没有截止时刻（或截止时刻已到）的 tick 无事可做，
+ * 这也正是调用方停下 tick 的信号 —— 在刚花掉的窗口之外，它没有活干，于是不会变成一个常开的
+ * 时钟。
  */
 export function refreshCountdownOpen(nextAllowedAt: number | null, now: number): boolean {
   return nextAllowedAt !== null && now < nextAllowedAt
 }
 
 /**
- * The freshness line: what the control reports about the reading it holds.
+ * 新鲜度那一行：控件对它持有的读数报告什么。
  *
- * A reading that was never obtained reports no time at all. The clock is not a
- * reading, and printing it would dress an empty answer as a fresh one.
+ * 从未取到的读数不报任何时间 —— 本机时钟不是读数，印出来会把一个空答案装扮成新鲜的。
  *
- * A reading that WAS obtained reports the instant it was obtained together with
- * the kind of value it is, so a generated reading (the timetable engine's trains)
- * never reads as an observed one, and a reading whose source is unstated carries
- * no mark rather than borrowing the flattering one.
+ * 取到的读数报出取到它的时刻，连同它是哪一类值，使一次生成的读数永远不会读成一次观测到的
+ * 读数；来源未声明的读数不带标记，而不是去借那个好听的。
  *
- * 仅供参考 is not a kind word but the caution a fallback source earns. It rides
- * beside the mark because the two answer different questions: F4's mark says what
- * kind of number this is, and this says whether to lean on it.
+ * 「仅供参考」不是一个种类词，而是回退来源挣来的提醒。它与标记并排，因为两者答的是不同的
+ * 问题：标记说这是哪一类数字，它说这个能不能靠。
  */
 export function refreshFreshnessOf(reading: RefreshReading | null): RefreshFreshness {
   if (!reading) {
@@ -213,53 +187,35 @@ export function refreshFreshnessOf(reading: RefreshReading | null): RefreshFresh
 }
 
 /**
- * The state line, in the two parts a screen renders it from.
+ * 状态那一行，按界面渲染它所需的两段。
  *
- * `announcement` is the state itself and never carries the seconds: a live region
- * whose text changes every second announces a thirteen-second refusal thirteen
- * times. `detail` is that countdown, already worded, so the seconds ride OUTSIDE
- * the live region while still reading as one line. Both come from here rather
- * than from a screen, so neither screen words a state of its own.
+ * `announcement` 是状态本身，永不携带秒数：文本每秒都变的 live region 会把一次十三秒的
+ * 拒绝播报十三遍。`detail` 是那串倒计时、已经措辞好，使秒数留在 live region 之外，却仍读作
+ * 一行。两者都出在这里而不是某个界面，于是没有哪个界面自己去措辞一个状态。
  */
 export interface RefreshStatusText {
-  /** The coarse state, whole and without the seconds. */
   announcement: string
-  /** The rest of the line — the seconds left on the window, or empty. */
   detail: string
 }
 
 /**
- * The one line the control states about the last attempt.
+ * 控件就上一次尝试所说的那一行。
  *
- * Three outcomes must be visible and no two of them may read alike: a refusal
- * with the wait left on the window, an upstream that answered nothing, and a
- * request that never reached the server. The last two ARE the app's 「connection
- * is down」 report — it belongs on this control, where the user is looking, and
- * not in a console.
+ * 三个结局必须都看得见，且任两个读起来不能一样：窗口上还剩等待的拒绝、来源什么都没答、请求
+ * 没有到达服务端。后两个就是本应用对「连接断了」的报告 —— 它属于这个控件、属于用户正在看的
+ * 地方，而不属于控制台。
  *
- * A refusal is never silent. The seconds it states are floored by the duration
- * the server sent (`refreshWaitUntilOf`), so a window the local clock cannot see
- * is still a window the user is told about; when an answer refuses the press and
- * states no window at all, the refusal says so rather than vanishing. It stops
- * being reported the moment its window opens, which the countdown ends by
- * dropping the refusal (`refreshTick`) — the deadline has passed, and leaving it
- * up would describe a window that is no longer shut.
+ * 拒绝从不沉默。它说出的秒数被服务端送来的时长托底（`refreshWaitUntilOf`），所以本机时钟
+ * 看不见的窗口仍是一个会被告知的窗口；当应答拒绝了这次按压却根本没有窗口，拒绝就照实说，而
+ * 不是消失。窗口一开它就不再被报告，倒计时靠丢掉这次拒绝来结束它（`refreshTick`）。
  *
- * `wanted` against `covered` keeps a capped refresh honest. The endpoint bounds
- * how many lines one attempt may name, so a screen reading more than that is
- * refreshed for its leading rows only, and saying so is the difference between a
- * partial refresh and a false claim of a complete one.
+ * `wanted` 对 `covered` 使一次被截断的刷新保持诚实：端点限定了单次尝试能点名的线路条数，
+ * 所以读得更多的界面只刷新了它最前面的几行，说出来就是「一次部分刷新」与「谎称一次完整刷新」
+ * 的分别。
  *
- * `targetsRead` is the list's own state, not the screen's. An empty `wanted` has
- * two causes — the list ANSWERED and named no line to re-read, or nobody read the
- * list at all — and they are different facts: the first is what the control holds
- * for the user, the second is a claim about rows nobody obtained. `read-state.ts`
- * records the same distinction for the followed-lines list, so the screen that
- * made the read says which of the two it is in; a `false` here states nothing.
- * The sentence itself names the LIST (「暂无正在读取车况的线路」) rather than the
- * screen: 上班/下班 mode renders a card per followed line whether or not any of
- * them has an arrival row to re-read, and 「屏幕上…空」 would then be false about a
- * screen the store cannot see.
+ * `targetsRead` 是列表自己的状态，不是界面的：空的 `wanted` 既可能是列表答了却没点名任何
+ * 可重读的线路，也可能是没人读过这个列表 —— 后者是关于没人取得过的行的主张。`false` 在这里
+ * 什么都不陈述。
  */
 export function refreshStatusTextOf(params: {
   inFlight: boolean
@@ -267,11 +223,11 @@ export function refreshStatusTextOf(params: {
   waitSeconds: number
   wanted: number
   covered: number
-  /** Whether the list the targets are drawn from has actually been read. */
+  /** 这些目标所依据的列表是否真的被读过。 */
   targetsRead: boolean
 }): RefreshStatusText | null {
   if (params.inFlight) return { announcement: '正在刷新…', detail: '' }
-  // Nothing in the list to re-read: the control says so rather than sitting dead.
+  // 列表里没有可重读的东西：控件照实说，而不是干占位置。
   if (params.outcome === null && params.wanted === 0) {
     return params.targetsRead
       ? { announcement: '暂无正在读取车况的线路', detail: '' }
@@ -300,14 +256,10 @@ export function refreshStatusTextOf(params: {
 }
 
 /**
- * Final tiebreak of both orderings: the creation instant, ascending.
+ * 两种排序的最终决胜：创建时刻，升序。
  *
- * ISO-8601 strings compare lexicographically in chronological order, so no date
- * parsing is needed. The tiebreak is only as good as the field: an undated row
- * keys to '', which sorts before every real instant where PostgreSQL's `ASC`
- * puts NULLs last, and two undated rows tie back into the array's incoming
- * pin-first order. That gap is a deploy where the browser leads the API — the
- * column is NOT NULL and both server branches emit it.
+ * ISO-8601 字符串按字典序即时间序，所以不需要解析日期。决胜只与字段一样好：没有日期的行键
+ * 到 ''，排在每个真实时刻之前，而 PostgreSQL 的 `ASC` 把 NULL 放在最后。
  */
 function compareCreatedAt(a: UserFavoriteLine, b: UserFavoriteLine): number {
   const left = a.createdAt ?? ''
@@ -316,14 +268,12 @@ function compareCreatedAt(a: UserFavoriteLine, b: UserFavoriteLine): number {
 }
 
 /**
- * The home list's one ordering: the pin wins, then the stored position, then the
- * creation instant. Mirrors the server's `ORDER BY is_pinned DESC, display_order
- * ASC, created_at ASC` keyword for keyword, so an optimistic write places a card
- * exactly where the next fetch would.
+ * 首页列表的唯一顺序：置顶胜出，然后是存储位置，最后是创建时刻。与服务端的
+ * `ORDER BY is_pinned DESC, display_order ASC, created_at ASC` 逐关键字一致，使一次乐观
+ * 写入把卡片放在下一次拉取会放的地方。
  *
- * The pin is a state laid OVER this order, never a position inside it: nothing
- * here rewrites `displayOrder`, so un-pinning drops the row back into its own
- * slot instead of re-sorting it to the front.
+ * 置顶是铺在这个顺序「之上」的一种状态，绝不是顺序里的一个位置：这里不重写 `displayOrder`，
+ * 所以取消置顶会把该行放回它自己的格子，而不是重排到最前面。
  */
 function orderFavorites(rows: UserFavoriteLine[]): UserFavoriteLine[] {
   return [...rows].sort((a, b) =>
@@ -333,20 +283,14 @@ function orderFavorites(rows: UserFavoriteLine[]): UserFavoriteLine[] {
 }
 
 /**
- * The stored order: the position decides, then the creation instant. The pin is
- * not a keyword here at all.
+ * 存储顺序：位置决定，然后是创建时刻。置顶在这里根本不是关键字。
  *
- * Deliberately separate from `orderFavorites` — the two answer different
- * questions. This one is the order the user edited and the settings screen
- * shows; that one is how the home list presents it. Deriving the settings list
- * from the store array instead would show the pin's overlay as if it were a
- * position.
+ * 刻意与 `orderFavorites` 分开 —— 两者答的是不同的问题。这个是用户编辑过、设置页显示的顺序；
+ * 那个是首页列表呈现它的方式。由 store 数组推出设置页的列表，会把置顶的覆盖层显示成位置。
  *
- * `(displayOrder ASC, createdAt ASC)` is exactly the pin-independent tail of the
- * server's `ORDER BY`. Both keywords are needed: positions are not unique (a
- * re-follow can reuse one), and without the instant a tie would inherit the
- * INPUT order — the pin-first array the server hands over — so a pin would
- * decide a position in a pure order editor.
+ * `(displayOrder ASC, createdAt ASC)` 恰是服务端 `ORDER BY` 与置顶无关的那一段尾巴。两个
+ * 关键字都必要：位置并不唯一（重新关注会复用一个），而没有时刻时并列会继承输入顺序 —— 即
+ * 服务端交来的置顶优先数组 —— 于是在一个纯粹的顺序编辑器里，置顶会决定一个位置。
  */
 function orderByPosition(rows: UserFavoriteLine[]): UserFavoriteLine[] {
   return [...rows].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)
@@ -354,17 +298,13 @@ function orderByPosition(rows: UserFavoriteLine[]): UserFavoriteLine[] {
 }
 
 /**
- * Move one row and stamp a contiguous run of positions (0..n-1) over the WHOLE
- * list — the pinned row included, because a pin is a state laid over the order
- * and never an exemption from it.
+ * 移动一行，并给整个列表盖上连续的位置（0..n-1）—— 被置顶的行也在内，因为置顶是铺在顺序上
+ * 的状态，绝不是对它的豁免。
  *
- * `from` and `to` index the list as it stood BEFORE the move, which is what a
- * drag reports: `to` is the slot of the row the moved row takes, and the rows
- * between shift along. Every row comes back as a new object with only its
- * position rewritten; the pin and the rest ride along untouched.
+ * `from` 与 `to` 索引的是移动之前的列表，这也正是一次拖拽所报告的：`to` 是被移动行占据
+ * 的格子，中间的行随之顺移。每行都以新对象返回，只重写它的位置；置顶与其余内容原样随行。
  *
- * An index outside the list returns a copy as it was, so a bad call can never
- * renumber rows that are already stored where they belong.
+ * 越界的索引返回原样的副本，所以一次坏调用绝不会给已经存对位置的行重新编号。
  */
 export function reorder(
   favorites: UserFavoriteLine[],
@@ -387,90 +327,72 @@ export const useTransitStore = defineStore('transit', () => {
   const favorites = shallowRef<UserFavoriteLine[]>([])
   const wsConnected = shallowRef(false)
   const isLoading = shallowRef(false)
-  /** True while a station tap triggers a live-status refetch. */
   const isRefreshingLive = shallowRef(false)
   /**
-   * Which of the two absences the last line read ended in, or null when the line loaded.
-   *
-   * A NAMED STATE, not the server's own error string: the page that shows this is the one
-   * that words it (`line-load-state.ts`), because a raw payload string rendered as a
-   * heading is how 「Line not found」 reached a zh-CN screen — and because 「no such line」
-   * and 「the load failed」 are two facts, one of which does not deserve a retry.
-   */
+ * 上一次线路读取落在两种缺席中的哪一种，或在线路加载成功时为 null。
+ *
+ * 一个具名状态，不是服务端自己的错误串：显示它的那个页面才是措辞它的地方
+ * （`line-load-state.ts`）—— 而且「没有这条线路」与「这次加载失败了」是两个事实，其中只有
+ * 一个配得上重试。
+ */
   const loadFailure = shallowRef<LineLoadState | null>(null)
   /**
-   * Server-side simulation switch (`TRANSIT_SIMULATION`). When true the board
-   * renders generated vehicles, so every view must label them as such.
-   */
+ * 服务端模拟开关（`TRANSIT_SIMULATION`）。为真时牌子上渲染的是生成的车，所以每个界面都
+ * 必须把它标注出来。
+ */
   const simulationEnabled = shallowRef(false)
   /**
-   * F10's recorded commute chains, in the order the server stores them
-   * (`display_order ASC, created_at ASC`). Read and written from 设置's chain
-   * editor; the chain page reads its conclusions from its own endpoint, so this
-   * list is the RECORDS rather than any answer drawn from them.
-   */
+ * F10 记录的链路，按服务端存储它们的顺序（`display_order ASC, created_at ASC`）。设置页的
+ * 链路编辑器读写；链路页的结论来自它自己的端点，所以这份列表是记录本身，而不是从记录得出的
+ * 任何答案。
+ */
   const commuteChains = shallowRef<CommuteChain[]>([])
 
-  /** True while a manual refresh request is open. */
   const refreshInFlight = shallowRef(false)
-  /** How the last manual refresh ended, or null before one has been made. */
   const refreshOutcome = shallowRef<RefreshOutcome | null>(null)
-  /** The deadline the server stated for the next allowed refresh. */
   const refreshNextAllowedAt = shallowRef<number | null>(null)
-  /** The wait the server stated with that deadline, in the seconds it stated. */
   const refreshRetryAfterSeconds = shallowRef<number | null>(null)
-  /** The instant that answer arrived on this device, which ages the wait above. */
   const refreshAnsweredAt = shallowRef<number | null>(null)
-  /** The reading the last manual refresh obtained, with the kind of value it is. */
   const refreshReading = shallowRef<RefreshReading | null>(null)
-  /** The clock the countdown is rendered against. */
   const refreshNow = shallowRef(Date.now())
 
   /**
-   * When the stated window opens — the later of the server's deadline and the
-   * duration it sent, so a clock that disagrees with the server cannot turn a shut
-   * window into no wait at all.
-   */
+ * 所述窗口打开的时刻 —— 服务端的截止时刻与它送来的时长里较晚的那个，使一个与服务端不一致的
+ * 时钟不能把一个关着的窗口变成「无需等待」。
+ */
   const refreshWaitUntil = computed(() => refreshWaitUntilOf({
     nextAllowedAt: refreshNextAllowedAt.value,
     retryAfterSeconds: refreshRetryAfterSeconds.value,
     answeredAt: refreshAnsweredAt.value,
   }))
 
-  /** Seconds left on that window: the one number both screens count down. */
   const refreshWaitSecondsLeft = computed(() =>
     refreshWaitSeconds(refreshWaitUntil.value, refreshNow.value))
 
   /**
-   * Moves the hand of the countdown, and nothing else.
-   *
-   * Not a data timer: it fetches nothing, it runs only while a window the user
-   * just spent is counting down, and it stops itself the moment that window
-   * opens — so it can never become the always-on tick the product excludes.
-   */
+ * 只推动倒计时的那根指针，别的什么都不做。
+ *
+ * 不是数据定时器：它不取任何东西，只在用户刚花掉的那个窗口倒计时期间运行，并在窗口打开的那
+ * 一刻停掉自己 —— 所以它永远不会变成产品排除的那种常开 tick。
+ */
   const refreshTick = useIntervalFn(() => {
     const now = Date.now()
-    // The hand moves on every tick, so the wait never freezes on a stale second.
+    // 每次 tick 都推动指针，等待不会冻在一个过期的秒数上。
     refreshNow.value = now
     if (refreshCountdownOpen(refreshWaitUntil.value, now)) return
-    // Nothing left to count: the window is open, so the ticker stops rather than
-    // idling until the next press restarts it. A refusal is only ever reported
-    // while a window is shut, so this is what ends it — a reading is not, because
-    // 「已刷新」 describes data the screen still holds.
+    // 没有可数的了：窗口已开，所以 ticker 停下，而不是空转到下一次按压重启它。拒绝只在窗口
+    // 关着时报告，所以是这里结束它 —— 读数结束不了，因为「已刷新」说的是界面仍持有的数据。
     refreshTick.pause()
     if (refreshOutcome.value === 'throttled') refreshOutcome.value = null
   }, 1000, { immediate: false })
 
   /**
-   * Point the countdown at the answer this press just received, and count only
-   * while the window it stated is still shut.
-   *
-   * The hand moves whether or not there is a window left to count. A refusal that
-   * arrives after the deadline it carries has already passed — a press in the
-   * window's last round trip — would otherwise be counted from whatever instant
-   * the previous countdown stopped at, or from this store's first paint: a second
-   * clock that the user's press did not set.
-   */
+ * 把倒计时对准这次按压刚收到的应答，并且只在它所述窗口仍关着时才数。
+ *
+ * 不管还有没有窗口可数，指针都要动：一个在它所带截止时刻已过之后才到的拒绝 —— 也就是落在
+ * 窗口最后一趟往返里的按压 —— 否则会从上一个倒计时停下的时刻、或本 store 首次绘制起算，那
+ * 是一个用户的按压没有设定的第二个时钟。
+ */
   function resumeRefreshTick(): void {
     const now = Date.now()
     refreshNow.value = now
@@ -478,17 +400,15 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * The manual refresh (F11). Both entries call this one action: the home screen
-   * names every line its cards are reading, the line page names the one it shows.
-   *
-   * Resolves to how THIS call ended, or null when it made no request at all —
-   * one was already open, or the screen named no line to re-read.
-   *
-   * The window is the server's, so a refused press is reported like any other
-   * answer instead of being prevented here. No reading reaches this side without
-   * the endpoint's own account of it: the instant and the kind both come from the
-   * response, and nothing is stamped with the clock on arrival.
-   */
+ * 手动刷新（F11）。两个入口都调用这一个 action：首页点名它每张卡片正在读的线路，线路页点名
+ * 它显示的那一条。
+ *
+ * 解析为「这一次调用」是怎么结束的，或在一次请求都没发出时为 null —— 已经有一次在进行，或
+ * 界面没有点名任何可重读的线路。
+ *
+ * 窗口是服务端的，所以一次被拒的按压像其他答案一样被报告，而不是在这里被拦下。没有读数会不
+ * 经端点自己的说明就到达这一侧：时刻与种类都来自应答，到达时什么都不盖本机时钟的戳。
+ */
   async function refreshLive(targets: RefreshLiveTarget[]): Promise<RefreshOutcome | null> {
     if (refreshInFlight.value) return null
     if (targets.length === 0) return null
@@ -511,8 +431,7 @@ export const useTransitStore = defineStore('transit', () => {
       refreshOutcome.value = json.success ? 'ok' : res.status === 429 ? 'throttled' : 'unavailable'
     }
     catch {
-      // Nothing was read and nothing is known about the window: the control says
-      // the connection is down rather than reporting a state it cannot see.
+      // 什么都没读到，窗口也无从得知：控件报连接断开，而不是报一个它看不见的状态。
       refreshOutcome.value = 'offline'
     }
     finally {
@@ -522,14 +441,11 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Every followed line in STORED order — one list shared by all cities, with
-   * the pin deliberately not applied to it.
-   *
-   * This is the order the settings screen shows and edits. The store's
-   * `favorites` array carries the home list's presentation instead (pin first),
-   * so a screen that rendered that array would read a pin overlay as a
-   * position and could disagree with what a drag is about to write.
-   */
+ * 每一条关注线路，按存储顺序 —— 一份所有城市共用的列表，置顶刻意不施加于它。
+ *
+ * 这是设置页显示与编辑的顺序。store 的 `favorites` 数组携带的是首页列表的呈现（置顶在前），
+ * 渲染那个数组的界面会把置顶的覆盖层读成位置，并与一次拖拽即将写入的东西不一致。
+ */
   const favoriteOrder = computed(() => orderByPosition(favorites.value))
 
   async function fetchRuntimeFlags(): Promise<void> {
@@ -541,12 +457,11 @@ export const useTransitStore = defineStore('transit', () => {
       }
     }
     catch {
-      // Leave the flag off: a failed probe must not claim live data is simulated.
+      // 让标志保持关闭：一次失败的探测不能声称实时数据是模拟的。
     }
   }
 
   let socket: WebSocket | null = null
-  /** Line+direction currently subscribed, so a switch can unsubscribe cleanly. */
   let activeSubLineId: string | null = null
   let activeSubDirection: number | null = null
   let reconnectTimer: any = null
@@ -565,10 +480,9 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Read the stored favourites into the store. Resolves true only when the
-   * server actually handed back a list, so a caller that must not lose the list
-   * it already holds can tell a real answer from a failed probe.
-   */
+ * 把存储的关注线路读进 store。只有服务端确实交回了一个列表时才解析为 true，使一个不能丢掉
+ * 手上列表的调用方能分辨真答案与一次失败的探测。
+ */
   async function loadFavorites(): Promise<boolean> {
     try {
       const res = await fetch('/api/transit/favorites')
@@ -579,23 +493,19 @@ export const useTransitStore = defineStore('transit', () => {
       }
     }
     catch {
-      // Fall through: there is no list to trust.
+      // 落空：没有可信任的列表。
     }
     return false
   }
 
   /**
-   * Read the stored favourites, answering whether the server actually handed back a list.
-   *
-   * The array still ends up empty when the read fails — that is what an unreadable list
-   * leaves behind — but the FAILURE is now returned as well as recorded: 设置's index row
-   * states this domain's current count as a fact, and a count taken from an unreadable
-   * list would be a number nobody obtained. `fetchCommuteChains` already answers this way,
-   * so the two reads a settings index needs report themselves alike.
-   *
-   * Nothing else about the read changed: a caller that ignores the answer (`header-nav`,
-   * on a city switch) sees exactly the list it saw before.
-   */
+ * 读取存储的关注线路，并回答服务端是否确实交回了一个列表。
+ *
+ * 读取失败时数组依然是空的 —— 一份读不到的列表留下的就是这个 —— 但这次失败除了被记下也被
+ * 返回了：设置页的索引行把本域的当前条数当事实陈述，而取自一份读不到的列表的条数会是没人取得
+ * 过的数字。`fetchCommuteChains` 已经是这样回答的，于是设置页索引需要的两次读取自我报告的
+ * 方式一致。
+ */
   async function fetchFavorites(): Promise<boolean> {
     const answered = await loadFavorites()
     if (!answered) {
@@ -605,9 +515,8 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Search returns one entry per ROUTE with both directions attached — the user
-   * follows a route, not a direction.
-   */
+ * 搜索按「线路」返回条目，两个方向都挂在上面 —— 用户关注的是线路，不是一个方向。
+ */
   async function searchLines(keyword: string, cityCode: string = '027'): Promise<LineGroup[]> {
     try {
       const qs = new URLSearchParams({ keyword, cityCode })
@@ -621,18 +530,14 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Clear the line-detail view's data. Called when LineDetailView unmounts, so
-   * view-scoped state does not outlive the view (the root cause of briefly
-   * seeing the previous line when opening a different one from home).
-   *
-   * isLoading is left true on purpose: the next time the view mounts, its first
-   * paint reads detail=null + isLoading=true and shows the loading state, rather
-   * than flashing the "line not found" error branch before loadLine() resolves.
-   *
-   * Switching up/down direction does NOT unmount the view (same route record, so
-   * Vue Router reuses the instance), which is exactly why this stays out of that
-   * transition and its smooth, stable behaviour is untouched.
-   */
+ * 清掉线路详情界面的数据。
+ *
+ * isLoading 刻意留为 true：界面下次挂载时，首次绘制读到 detail=null + isLoading=true 而显示
+ * 加载态，而不是在 loadLine() 完成前闪一下「线路不存在」那个分支。
+ *
+ * 切换上/下行不会卸载界面（同一个路由记录，Vue Router 沿用实例），这正是这段代码不进那次
+ * 转换的原因。
+ */
   function resetLineData(): void {
     currentLineDetail.value = null
     currentLiveStatus.value = null
@@ -641,14 +546,12 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Read back the live status of the line currently on screen.
-   *
-   * A READ, not a refresh entry: it asks for what the server already holds, and
-   * spends no upstream call of its own when the cache is warm. It is what follows
-   * a manual refresh (the endpoint re-reads upstream, this shows the result) and
-   * what a station tap triggers — refetching the static detail too would rebuild
-   * the board and disturb the map they are looking at.
-   */
+ * 重新读取当前在屏线路的实时状态。
+ *
+ * 一次读取，不是一个刷新入口：它要的是服务端已经持有的东西，缓存尚温时不花自己的调用。它跟
+ * 随着一次手动刷新（端点重读来源，这里显示结果），也是点按一站所触发的东西 —— 连静态详情一
+ * 起重取会重建报站板，扰动用户正在看的那张图。
+ */
   async function reloadLiveStatus(): Promise<void> {
     const detail = currentLineDetail.value
     if (!detail) return
@@ -660,13 +563,13 @@ export const useTransitStore = defineStore('transit', () => {
       })
       const res = await fetch(`/api/transit/lines/${encodeURIComponent(detail.lineId)}/live?${qs.toString()}`)
       const json = await res.json()
-      // Keep the existing data on a failed refresh rather than blanking the view.
+      // 刷新失败时保留现有数据，而不是把界面清空。
       if (json.success && json.data) {
         currentLiveStatus.value = json.data
       }
     }
     catch {
-      // Ignore: WS pushes will keep the view fresh anyway.
+      // 忽略：WS 推送本来就会让界面保持新鲜。
     }
     finally {
       isRefreshingLive.value = false
@@ -682,12 +585,9 @@ export const useTransitStore = defineStore('transit', () => {
       const query = qs.toString()
 
       const readLive = async (url: string) => (await fetch(url)).json()
-      // The detail read's HTTP STATUS is kept, not just its body: it is the only thing
-      // that tells a line that does not exist (404, the route's own refusal) from a read
-      // that failed and may succeed later. The body's `error` string used to be rendered
-      // as the page's heading, which is how an English 「Line not found」 reached a zh-CN
-      // screen — so the status is what travels, and the wording comes from
-      // `@/line-load-state`.
+      // 详情读取的 HTTP 状态被保留下来，而不只是它的正文：它是唯一能把「线路不存在」（404，
+      // 路由自己的拒绝）与「一次失败、可能稍后成功的读取」分开的东西。所以随行的是状态，
+      // 措辞来自 `@/line-load-state`。
       const readDetail = async () => {
         const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${query}`)
         return { status: res.status, body: await res.json() as { success?: boolean, data?: unknown } }
@@ -701,9 +601,8 @@ export const useTransitStore = defineStore('transit', () => {
         currentLineDetail.value = detailRes.value.body.data as typeof currentLineDetail.value
       }
       else {
-        // No detail came back: either the line does not exist or the read failed. The
-        // two are different facts and the page words them apart, so which one it is
-        // travels as a state rather than as one sentence covering both.
+        // 没有详情回来：要么线路不存在，要么读取失败。这是两个事实，页面把它们分开措辞，所以是哪
+        // 一种以状态随行，而不是用一句话盖住两者。
         currentLineDetail.value = null
         currentLiveStatus.value = null
         loadFailure.value = detailRes.status === 'fulfilled'
@@ -746,16 +645,15 @@ export const useTransitStore = defineStore('transit', () => {
           if (msg.type !== 'line_update') return
           const detail = currentLineDetail.value
           if (!detail) return
-          // Match lineId AND direction: a subway line serves both directions
-          // under one lineId, so matching lineId alone could paint the opposite
-          // direction's vehicles onto the current view.
+          // 同时匹配 lineId 与 direction：一条地铁线在一个 lineId 下服务两个方向，只匹配 lineId
+          // 会把反方向的车画到当前界面上。
           if (msg.lineId !== detail.lineId) return
           const msgDir = typeof msg.direction === 'number' ? msg.direction : detail.direction
           if (msgDir !== detail.direction) return
           currentLiveStatus.value = msg.status
         }
         catch {
-          // Ignore malformed WS frame
+          // 忽略畸形的 WS 帧。
         }
       }
 
@@ -771,7 +669,7 @@ export const useTransitStore = defineStore('transit', () => {
       }
     }
     catch {
-      // WS error
+      // WS 错误。
     }
   }
 
@@ -782,8 +680,7 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   function subscribeWs(lineId: string, direction: number = 0, cityCode?: string): void {
-    // Leaving a different line/direction: stop its server-side polling so we do
-    // not keep pushing updates for a view the user already left.
+    // 离开另一条线路/另一个方向：停掉它在服务端的轮询，免得继续为一个用户已经离开的界面推更新。
     if (activeSubLineId !== null && activeSubDirection !== null) {
       const changedLine = activeSubLineId !== lineId
       const changedDir = activeSubDirection !== direction
@@ -805,15 +702,13 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Follow a route, and answer whether THIS call is what followed it.
-   *
-   * `false` means the route was already followed: the server answered
-   * `alreadyFollowed` with the row that holds it (the two directions of one route
-   * are one favourite, so a second follow is not a new card and must never be
-   * reported as one). The row is still reconciled in place — that is how the
-   * screen's own 「已关注」 label becomes correct — but nothing is appended and no
-   * success is claimed.
-   */
+ * 关注一条线路，并回答「这一次调用」是不是关注它的那一次。
+ *
+ * `false` 意为该线路已被关注：服务端以 `alreadyFollowed` 连同持有它的那一行作答（同一条
+ * 线路的两个方向是一个关注，所以第二次关注不是一张新卡片，也绝不能被报成一张）。那一行仍会
+ * 被就地调谐 —— 界面上自己的「已关注」标签就是这样变正确的 —— 但不追加任何东西，也不声称
+ * 成功。
+ */
   async function addFavorite(item: {
     lineId: string
     lineName: string
@@ -821,9 +716,8 @@ export const useTransitStore = defineStore('transit', () => {
     reverseLineId?: string
     cityCode?: string
   }): Promise<boolean> {
-    // The next slot is one past the highest position held — NOT past the row
-    // count: positions stop being dense once a row is unfollowed, so the count
-    // would reissue a position another row still holds and tie the two.
+    // 下一个空位是「持有的最高位置」再往前一个，而不是「行数」再往前一个：一旦有行被取消关注，
+    // 位置就不再连续，用行数会重发一个别的行还占着的位置，把两者并列。
     const nextPosition = favorites.value
       .reduce((max, f) => Math.max(max, f.displayOrder ?? 0), -1) + 1
     const res = await fetch('/api/transit/favorites', {
@@ -841,10 +735,8 @@ export const useTransitStore = defineStore('transit', () => {
     })
     const json = await res.json()
 
-    // The server merges a re-followed route into the existing row, so replace it
-    // in place instead of appending a duplicate card. Reassign the array:
-    // `favorites` is a shallowRef, so mutating an element or pushing in place
-    // would not trigger any subscriber.
+    // 服务端把重新关注的线路并进已有的行，所以就地替换而不是追加一张重复的卡片。重新赋值数组：
+    // `favorites` 是 shallowRef，改元素或就地 push 不会触发任何订阅者。
     const reconcile = (saved: UserFavoriteLine): void => {
       const idx = favorites.value.findIndex(f => f.id === saved.id)
       favorites.value = idx >= 0
@@ -853,9 +745,8 @@ export const useTransitStore = defineStore('transit', () => {
     }
 
     if (json.alreadyFollowed) {
-      // A refusal that is not a failure: the line IS followed, by the row the
-      // server names. Without `data` there is nothing to reconcile, so the
-      // outcome stays unknown rather than being assumed either way.
+      // 一次不是失败的拒绝：该线路确实被关注了，被服务端点名的那一行关注着它。没有 `data` 就
+      // 没有可调谐的东西，于是结局保持未知，而不是往哪边假设。
       if (json.data) {
         reconcile(json.data as UserFavoriteLine)
         return false
@@ -869,18 +760,20 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Patch one commute slot (morning/evening) of a favourite.
-   *
-   * `undefined` leaves a field untouched, `null` clears it — the server maps the
-   * same distinction onto its SQL. A slot carries both its direction and its
-   * board stop; callers that set a stop while a direction is on screen (the route
-   * detail popover) write both at once, so a stop never exists without the
-   * direction that gives it its stop numbering.
-   */
+ * 修改一个关注的一个通勤口（早/晚）。
+ *
+ * `undefined` 不动某个字段，`null` 清掉它 —— 服务端把同一个区分映射到它的 SQL 上。一个口
+ * 同时携带它的方向与它的上车点；在某个方向在屏时设置上车点的调用方（线路详情弹层）一次写两
+ * 者，于是一个上车点永远不会没有给它站序的那个方向。
+ *
+ * 上车点以 (站名, 站序) 这一「对」写入 —— 服务端拒绝落单的一半，因为光有站名定位不回某个方向
+ * 的站表（同名站可以站在不止一个站序上）。清除时两半一起送 null，行就不能在清掉的名字旁边留
+ * 一个孤儿站序。
+ */
   async function updateCommuteSlot(
     favoriteId: string,
     purpose: 'morning' | 'evening',
-    patch: { direction?: number | null, stopName?: string | null },
+    patch: { direction?: number | null, stop?: { name: string, order: number } | null },
   ): Promise<void> {
     const target = favorites.value.find(f => f.id === favoriteId)
     if (!target) return
@@ -890,9 +783,12 @@ export const useTransitStore = defineStore('transit', () => {
       const key = purpose === 'morning' ? 'morningDirection' : 'eveningDirection'
       body[key] = patch.direction
     }
-    if (patch.stopName !== undefined) {
-      const key = purpose === 'morning' ? 'morningStopName' : 'eveningStopName'
-      body[key] = patch.stopName
+    if (patch.stop !== undefined) {
+      const nameKey = purpose === 'morning' ? 'morningStopName' : 'eveningStopName'
+      const orderKey = purpose === 'morning' ? 'morningStopOrder' : 'eveningStopOrder'
+      // 两半一起走，清除时也一样：那两列是一个站的同一身份，只写其中一个正是这段代码关掉的缺陷。
+      body[nameKey] = patch.stop === null ? null : patch.stop.name
+      body[orderKey] = patch.stop === null ? null : patch.stop.order
     }
     if (Object.keys(body).length === 0) return
 
@@ -906,35 +802,45 @@ export const useTransitStore = defineStore('transit', () => {
       throw new Error(json.error || '上车点保存失败')
     }
     const saved: UserFavoriteLine = json.data
-    // Reassign rather than mutate in place: `favorites` is a shallowRef.
+    // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
     favorites.value = favorites.value.map(f => (f.id === saved.id ? saved : f))
   }
 
-  /** Set or clear just the stop of a commute slot (direction left as-is). */
+  /**
+ * 只设置或清除一个通勤口的上车点（方向原样）。
+ *
+ * 值是选择器自己的形状：一个站名与它的站序，或 null 表示清除。没有站序的选择在这里就被拒绝，
+ * 而不是送出去：在那个方向上同名站不止一个时，一个站名什么都定位不了，服务端也会（理应）拒绝
+ * 这次写入 —— 与其把 400 往返进面板，不如先说明原因。
+ */
   async function setBoardStop(
     favoriteId: string,
     purpose: 'morning' | 'evening',
-    stationName: string | null,
+    stop: { name: string, order: number | null } | null,
   ): Promise<void> {
-    await updateCommuteSlot(favoriteId, purpose, { stopName: stationName })
+    if (stop === null) {
+      await updateCommuteSlot(favoriteId, purpose, { stop: null })
+      return
+    }
+    const { name, order } = stop
+    if (order === null) {
+      throw new Error('该站名在本方向有多个同名站，无法确定是哪一站，请选择一个具体的站点')
+    }
+    await updateCommuteSlot(favoriteId, purpose, { stop: { name, order } })
   }
 
   /**
-   * Pin one route to the top of the home list, or un-pin it — the single action
-   * the home screen's entry point, marker and cancel control all ride on.
-   *
-   * Optimistic: the card is where the tap says it is before the write settles,
-   * and the previous list is restored verbatim when the write fails, with the
-   * server's own message rethrown so the surface can show the reason.
-   *
-   * Only one route may be pinned (a partial unique index on the column), so a
-   * pin clears the previous one in the same pass — the same single-pin
-   * transaction the server runs. Un-pinning touches nothing but the flag, which
-   * is what lands the row back on its own `displayOrder`.
-   */
+ * 把一条线路钉到首页列表顶部，或取消钉住 —— 首页的入口、标记与取消控件都搭在这一个动作上。
+ *
+ * 乐观：写入落定之前卡片已在点按所说的位置，写入失败时原样恢复先前的列表，并原样重抛服务端
+ * 自己的消息，让界面能说明原因。
+ *
+ * 只允许一条线路被钉住（该列上的部分唯一索引），所以一次钉住在同一趟里清掉上一条 —— 与服务端
+ * 跑的是同一个单钉事务。取消钉住只动那个标志，这也正是让该行落回它自己 `displayOrder` 的原因。
+ */
   async function togglePin(favoriteId: string): Promise<void> {
     const target = favorites.value.find(f => f.id === favoriteId)
-    // An id we do not hold is a no-op: never PATCH a row the list cannot show.
+    // 我们没持有的 id 是空操作：绝不 PATCH 一个列表显示不出来的行。
     if (!target) return
 
     const pinned = !target.isPinned
@@ -954,7 +860,7 @@ export const useTransitStore = defineStore('transit', () => {
         throw new Error(json.error || '置顶设置失败')
       }
       const saved: UserFavoriteLine = json.data
-      // Reassign rather than mutate in place: `favorites` is a shallowRef.
+      // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
       favorites.value = orderFavorites(favorites.value.map(f => (f.id === saved.id
         ? saved
         : (pinned ? { ...f, isPinned: false } : f))))
@@ -966,29 +872,22 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Persist a drop: `movedId` takes the slot `anchorId` holds.
-   *
-   * Both are named — not indexed — because the order is ONE list over every
-   * followed line of every city. A screen that shows a single city reports a
-   * drop between two rows it can see, and resolving those two against the whole
-   * list is what leaves the rows it does not show in their relative places
-   * instead of overwriting them with a city-local numbering.
-   *
-   * One PATCH per row whose position actually changed, all in flight together;
-   * a row already stored where it belongs is not re-sent.
-   *
-   * The batch is settled rather than raced, and a failure reconciles with the
-   * server instead of restoring the snapshot: the per-row PATCHes are NOT atomic
-   * server-side, so the first rejection can leave sibling rows already written.
-   * The snapshot would then report an order the server does not hold — the
-   * restore would itself be the bug. Re-reading the stored order makes what the
-   * user sees what is stored; the snapshot is only the fallback for a re-read
-   * that yields no list. Either way the server's reason is rethrown.
-   *
-   * What stays behind is ordered for the home list (pin first, positions then
-   * creation instants deciding the rest); `favoriteOrder` reports the positions
-   * and instants on their own.
-   */
+ * 持久化一次拖放：`movedId` 占据 `anchorId` 所在的格子。
+ *
+ * 两者用名字而非下标，因为顺序是一份横跨每个城市每条关注线路的「一份」列表。只显示一个城市的
+ * 界面报告的是它看得见的两行之间的一次拖放，而把这两行对着整份列表解析，正是让它看不见的行保
+ * 持相对位置、而不是被一个城市内编号覆盖的原因。
+ *
+ * 位置真的变了的行各来一个 PATCH，全部同时在途；已经存对位置的行不重发。
+ *
+ * 这一批是「落定」而不是「赛跑」，失败时与服务端对账而不是恢复快照：逐行的 PATCH 在服务端不是
+ * 原子的，所以第一次拒绝可能已经让相邻行写进去了。那时快照会报出一个服务端并不持有的顺序 ——
+ * 恢复本身就是那个缺陷。重读存储顺序使「看到的」就是「存着的」；快照只是一个重读也没拿到列表
+ * 时的兜底。两条路都原样重抛服务端的原因。
+ *
+ * 留在身后的东西按首页列表排序（置顶在前，其余由位置与创建时刻决定）；`favoriteOrder` 则单独
+ * 报告位置与时刻。
+ */
   async function moveFavorite(movedId: string, anchorId: string): Promise<void> {
     const ordered = orderByPosition(favorites.value)
     const from = ordered.findIndex(f => f.id === movedId)
@@ -998,7 +897,7 @@ export const useTransitStore = defineStore('transit', () => {
     const next = reorder(ordered, from, to)
     const was = new Map(ordered.map(f => [f.id, f.displayOrder ?? 0]))
     const changed = next.filter(f => f.id !== undefined && was.get(f.id) !== f.displayOrder)
-    // Every row already carries the position it is landing on: nothing to write.
+    // 每一行都已经带着它要落到的位置：没有要写的。
     if (changed.length === 0) return
 
     const previous = favorites.value
@@ -1026,7 +925,7 @@ export const useTransitStore = defineStore('transit', () => {
       const saved = new Map(settled.flatMap(result => (result.status === 'fulfilled'
         ? [[result.value.id as string, result.value] as const]
         : [])))
-      // Reassign rather than mutate in place: `favorites` is a shallowRef.
+      // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
       favorites.value = orderFavorites(favorites.value.map(f => (f.id ? saved.get(f.id) ?? f : f)))
     }
     catch (err) {
@@ -1058,13 +957,12 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * F10's chain records (see `GET /api/transit/commute-chains`).
-   *
-   * Resolves true only when the server actually handed back a list, so a caller can
-   * tell a real (possibly empty) answer from a failed probe — 设置's card shows
-   * 「读取失败」 for the latter and 「还没有录入」 for the former, and the two must not
-   * be collapsed into one.
-   */
+ * F10 的链路记录（见 `GET /api/transit/commute-chains`）。
+ *
+ * 只有服务端确实交回了一个列表时才解析为 true，使调用方能分辨一个真（可能为空的）答案与一次
+ * 失败的探测 —— 设置页的卡片对后者显示「读取失败」、对前者显示「还没有录入」，两者不能并成
+ * 一个。
+ */
   async function fetchCommuteChains(): Promise<boolean> {
     try {
       const qs = new URLSearchParams({ userId: DEFAULT_USER_ID })
@@ -1076,28 +974,26 @@ export const useTransitStore = defineStore('transit', () => {
       }
     }
     catch {
-      // Fall through: there is no list to trust.
+      // 落空：没有可信任的列表。
     }
     return false
   }
 
   /**
-   * Write one chain — a create when no id is given, an edit otherwise.
-   *
-   * `legs` is written as one value, exactly as the request carries it: a chain IS its
-   * legs, so replacing them replaces its substance. The array's own order is the
-   * sequence — `seq` is the server's, written from the order it receives, and the
-   * editor never sends one.
-   *
-   * The refusal is the server's own message, rethrown rather than replaced: a 400
-   * from this contract names the rule it failed (F10's 「服务端拒绝时如实报错」).
-   */
+ * 写一条链路 —— 没给 id 是新建，否则是编辑。
+ *
+ * `legs` 作为一个值写入，与请求携带它的方式完全一致：一条链路就是它的几段，所以替换它们就是
+ * 替换它的实质。数组自己的顺序就是次序 —— `seq` 是服务端的，从它收到的顺序写出，编辑器从不
+ * 发送它。
+ *
+ * 拒绝是服务端自己的消息，原样重抛而不是替换掉：这份契约的 400 会点名它没过的规则。
+ */
   async function saveCommuteChain(
     id: string | null,
     write: CommuteChainWrite,
   ): Promise<CommuteChain> {
-    // A new chain takes the next slot past the highest position held — never past the
-    // row count, which would reissue a position a removed row's successor still holds.
+    // 新建的链路取「持有的最高位置」再往前一个，绝不是「行数」再往前一个 —— 后者会重发一个被删行
+    // 的后继还占着的位置。
     const body = id === null
       ? { ...write, userId: DEFAULT_USER_ID, displayOrder: commuteChains.value.reduce((max, chain) => Math.max(max, chain.displayOrder ?? 0), -1) + 1 }
       : write
@@ -1114,7 +1010,7 @@ export const useTransitStore = defineStore('transit', () => {
       throw new Error(json.error || '链路保存失败')
     }
     const saved = json.data as CommuteChain
-    // Reassign rather than mutate in place: `commuteChains` is a shallowRef.
+    // 重新赋值而不是就地修改：`commuteChains` 是 shallowRef。
     const index = commuteChains.value.findIndex(chain => chain.id === saved.id)
     commuteChains.value = index >= 0
       ? commuteChains.value.map((chain, at) => (at === index ? saved : chain))
@@ -1123,12 +1019,11 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
-   * Remove one chain record.
-   *
-   * Deliberately not optimistic: the row is one of a handful, the request is a single
-   * round trip, and a removed-then-restored row would flash the chain page's only
-   * source of truth about what is recorded.
-   */
+ * 删掉一条链路记录。
+ *
+ * 刻意不做乐观更新：这一行是少数几行之一，请求只有一趟往返，而一次「删了又恢复」的行会闪一下
+ * 链路页唯一的事实来源。
+ */
   async function removeCommuteChain(id: string): Promise<void> {
     const res = await fetch(`/api/transit/commute-chains/${encodeURIComponent(id)}`, { method: 'DELETE' })
     const json = await res.json()

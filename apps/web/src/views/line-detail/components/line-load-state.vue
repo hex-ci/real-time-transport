@@ -5,13 +5,11 @@ import { lineLoadNoticeOf, type LineLoadState } from '@/line-load-state'
 const props = defineProps<{
   isLoading: boolean
   /**
-   * Which absence the last read ended in, or null when it has not ended in one.
+   * 上一次读取结束于哪一种缺失；没有结束于缺失时为 null。
    *
-   * A named state from the store, never a message: the two absences are two facts and
-   * this component states each of them from `@/line-load-state`, so the heading can
-   * never be a string the response carried. An absent state with nothing loaded falls
-   * back to the load that failed — the honest one of the two, because it is the one a
-   * second attempt can change.
+   * 取自 store 的具名状态，绝不是一段消息：两个缺失是两个事实，本组件从 @/line-load-state 各自
+   * 陈述，故标题绝不可能是响应携带的字符串。有缺失状态却没有加载到任何东西时退回「加载失败」——
+   * 两者中诚实的那一个，因为它是第二次尝试能改变的那个。
    */
   failure: LineLoadState | null
 }>()

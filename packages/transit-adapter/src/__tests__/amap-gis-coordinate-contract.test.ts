@@ -2,22 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AmapGisService, wgs84ToGcj02 } from '../index.js'
 
 /**
- * `AmapGisService`'s coordinate contract: every public method takes GCJ-02 — the
- * app's normalized system, which is what Amap's REST API speaks — and sends
- * exactly the coordinates it was given, converting nothing.
+ * `AmapGisService` 的坐标契约：每个公开方法接收 GCJ-02 —— 应用的归一化
+ * 坐标系，也正是高德 REST API 使用的坐标系 —— 并且原样发出收到的坐标，
+ * 不做任何转换。
  *
- * That is a load-bearing split. The conversion lives at the HTTP boundary
- * (`apps/server/src/app.ts`), which is the one place a raw WGS-84 device fix
- * enters the server. A destination here is a STATION coordinate, already GCJ-02,
- * so converting it again moves the walking target ~500 m away and turns a
- * catch-the-bus verdict into its opposite.
+ * 这是一个承重的分工：转换在 HTTP 边界（`apps/server/src/app.ts`）完成，
+ * 那是原始 WGS-84 设备定位进入服务端的唯一入口。这里的终点是站点坐标，
+ * 已经是 GCJ-02，再转一次会把步行目标挪开，并把赶车结论翻成相反的。
  */
 
-/** GCJ-02 fixtures: a user anchor, and a station coordinate as the app holds it. */
 const ANCHOR = { lng: 116.403640, lat: 39.910710 }
 const STATION = { lng: 116.392540, lat: 39.924299 }
 
-/** Counted stand-in for the Amap upstream: no test here can reach the network. */
+/** 计数版的高德上游替身：本文件任何测试都不触网。 */
 function stubUpstream(): string[] {
   const urls: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -38,12 +35,11 @@ function stubUpstream(): string[] {
   return urls
 }
 
-/** How a coordinate pair is formatted on the wire. */
 function wire(point: { lng: number, lat: number }): string {
   return `${point.lng.toFixed(6)},${point.lat.toFixed(6)}`
 }
 
-/** The pair a second (wrong) conversion would produce. */
+/** 第二次（错误的）转换会产生的坐标对。 */
 function doubleConverted(point: { lng: number, lat: number }): string {
   const [gcjLng, gcjLat] = wgs84ToGcj02(point.lng, point.lat)
   return `${gcjLng.toFixed(6)},${gcjLat.toFixed(6)}`

@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import LineMiniCard from './line-mini-card.vue'
 import type { NearbyLocationState } from '../nearby-notice'
-import type { ArrivalsFeed, MiniCardConfig, OverviewMode } from '../types'
+import type { ArrivalsRead, MiniCardConfig, OverviewMode } from '../types'
 
 defineProps<{
   cards: MiniCardConfig[]
   mode: OverviewMode
-  /** Arrivals keyed by `${lineId}_${direction}`, merged into each row. */
-  arrivals: Record<string, ArrivalsFeed | null>
+  arrivals: Record<string, ArrivalsRead>
   /**
-   * Whether the app has a position, as the location store reports it. A page-level
-   * fact — one per screen, not one per card — forwarded to every card because a
-   * nearby card's empty state is worded by WHY it has no platform.
+   * 应用是否有位置，按位置 store 报告的方式。这是页面级事实 —— 每屏一个，不是每卡一个 ——
+   * 转发给每张卡片，因为附近卡片的空状态是按它「为什么」没有站台来措辞的。
    */
   nearbyLocation: NearbyLocationState
 }>()
@@ -24,13 +22,10 @@ defineEmits<{
 </script>
 
 <template>
-  <!-- Fluid responsive grid from 1 col on mobile to 4 cols on ultrawide.
-       Gap follows the page rhythm (space-y) so card-to-card matches nav-to-hero. -->
+  <!-- 流式响应网格：手机 1 列到超宽 4 列。间距跟随页面节奏（space-y），使卡片之间与导航到主区之间一致。 -->
   <div class="grid grid-cols-1 gap-2.5 sm:gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-    <!-- Keyed on the favourite's own id, not its index: pinning reorders this
-         list at runtime, and an index in the key would unmount/re-mount every
-         shifted card. `mode` stays as a discriminator; detailLineId is the
-         fallback when a card has no favourite behind it. -->
+    <!-- 用关注行自己的 id 做 key，不用下标：置顶会在运行时重排这个列表，用下标会让每张被挪动
+        的卡片卸载再挂载。`mode` 作为区分符留下；卡片背后没有关注行时用 detailLineId 兜底。 -->
     <LineMiniCard
       v-for="line in cards"
       :key="`${line.favoriteId ?? line.detailLineId}_${mode}`"
@@ -40,7 +35,7 @@ defineEmits<{
       :stop-distance-meters="line.stopDistanceMeters"
       :rows="line.rows.map(r => ({
         ...r,
-        arrivals: arrivals[`${r.lineId}_${r.direction}`] ?? null,
+        arrivals: arrivals[`${r.lineId}_${r.direction}`] ?? { state: 'reading' },
       }))"
       :leg-state="line.legState"
       :nearby-location="nearbyLocation"

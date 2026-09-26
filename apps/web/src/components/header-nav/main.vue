@@ -17,20 +17,17 @@ const mobileMenuOpen = shallowRef(false)
 
 const navItems = [
   { to: '/', label: '关注线路', icon: Bus },
-  // The transfer chain's own page, level with the home tab: it serves the moment
-  // before leaving home, which is the one thing a followed-lines list cannot answer.
+  // 换乘链路与首页同级：它服务出门前那一刻。
   { to: '/commute-chain', label: '换乘链路', icon: Waypoints },
   { to: '/platform', label: '站台大屏', icon: Clock },
   { to: '/settings', label: '设置', icon: Settings },
 ]
 
-// Auto-close mobile menu on route change
 watch(() => route.fullPath, () => {
   mobileMenuOpen.value = false
 })
 
 function onCityChange(): void {
-  // City switched: refresh favorites for the new city and go home
   void transitStore.fetchFavorites()
   if (router.currentRoute.value.name !== 'overview') {
     void router.push('/')
@@ -40,14 +37,12 @@ function onCityChange(): void {
 
 <template>
   <header class="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 pt-safe backdrop-blur-xl">
-    <!-- Simulation strips inside the sticky header: always on screen on every
-         page, and they keep the header's positioning context for the mobile menu.
-         Data simulation (amber) and GPS override (sky) stay visually distinct. -->
+    <!-- 模拟横幅挂在 sticky header 内：每页常驻，并为移动菜单保留定位上下文；两者颜色刻意区分。 -->
     <SimulationBanner />
     <GpsSimulationBanner />
-    <!-- lg:py-2.5 offsets the taller text-base nav pills so the sticky header keeps its original height -->
+    <!-- lg:py-2.5 抵消更高的 text-base 导航项，使 sticky header 保持原高度 -->
     <div class="flex w-full items-center justify-between px-safe-offset-3 py-1.5 sm:px-safe-offset-6 lg:px-safe-offset-8 xl:px-safe-offset-10 2xl:px-safe-offset-12 sm:py-3 lg:py-2.5">
-      <!-- Brand -->
+      <!-- 品牌 -->
       <RouterLink to="/" class="flex shrink-0 items-center gap-2.5 transition hover:opacity-90">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]">
           <span class="text-sm font-black">RT</span>
@@ -59,7 +54,7 @@ function onCityChange(): void {
         </div>
       </RouterLink>
 
-      <!-- Desktop Nav Items: hidden on mobile, visible on tablet/desktop (md:) -->
+      <!-- 桌面导航项：移动端隐藏，md: 起显示 -->
       <nav class="hidden md:flex items-center gap-2">
         <RouterLink
           v-for="item in navItems"
@@ -72,7 +67,7 @@ function onCityChange(): void {
         </RouterLink>
       </nav>
 
-      <!-- Right Controls: WS Status (desktop), City Switcher, Mobile Hamburger -->
+      <!-- 右侧控件：连接状态（桌面）、城市切换、移动端汉堡 -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-3">
         <div class="hidden lg:flex items-center gap-2 text-xs">
           <span
@@ -86,7 +81,7 @@ function onCityChange(): void {
 
         <CitySwitcher @change="onCityChange" />
 
-        <!-- Mobile Hamburger Toggle: exact 40x40 (h-10 w-10), matching CitySwitcher's 40px height -->
+        <!-- 移动端汉堡按钮：精确 40×40（h-10 w-10），与 CitySwitcher 的 40px 高度对齐 -->
         <button
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:hidden"
           :class="mobileMenuOpen ? 'border-cyan-500/50 text-cyan-400 bg-slate-800' : ''"
@@ -99,7 +94,7 @@ function onCityChange(): void {
       </div>
     </div>
 
-    <!-- Mobile Floating Navigation Panel: absolute overlay, NEVER pushes page content down -->
+    <!-- 移动端浮动导航面板：绝对定位浮层，绝不把页面内容往下推 -->
     <Transition
       enter-active-class="transition duration-200 ease-out"
       enter-from-class="opacity-0 -translate-y-2"
@@ -129,7 +124,7 @@ function onCityChange(): void {
           </RouterLink>
         </nav>
 
-        <!-- Live WS Status in Mobile Menu -->
+        <!-- 移动菜单里的实时连接状态 -->
         <div class="mt-3 flex items-center justify-between border-t border-slate-800/80 px-1 pt-2.5 text-xs text-slate-400">
           <span class="flex items-center gap-1.5">
             <span
@@ -146,7 +141,7 @@ function onCityChange(): void {
     </Transition>
   </header>
 
-  <!-- Mobile Backdrop Overlay: closes menu on tap outside -->
+  <!-- 移动端背景遮罩：点击外部关闭菜单 -->
   <Transition
     enter-active-class="transition duration-200 ease-out"
     enter-from-class="opacity-0"

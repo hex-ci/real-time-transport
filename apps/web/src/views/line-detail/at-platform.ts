@@ -1,15 +1,9 @@
 /**
- * F-A: the one wording for 「the vehicle is at this platform」.
+ * 「车辆正在本站」唯一的措辞。
  *
- * Three branches of this page state that same fact about the same vehicle — the
- * arrivals answer's first row, and the two live-board fallbacks in the window
- * before that answer lands. It is a statement about WHERE a vehicle is, not a
- * number: the panel renders it with no mark and no minute, which is the whole
- * point of the state (a minute beside it would be this app's arithmetic dressed
- * as the source's observation).
- *
- * One constant rather than three literals, so the wording can be asserted
- * without a DOM (this app has no jsdom harness) and so the three branches cannot
- * drift into three different sentences for one fact.
+ * 本页三个分支陈述同一个事实：到站答案的首行，以及该答案落地前窗口内的两个 live 回退。
+ * 它是关于车在哪里的陈述，不是数字：面板对它不给标记也不给分钟——旁边的分钟会把本应用的算术
+ * 扮成来源的观测。
+ * 一个常量而非三处字面量，故三个分支不会为一个事实漂成三句话。
  */
 export const AT_PLATFORM_ETA_TEXT = '车辆正在本站 (即将发车)'

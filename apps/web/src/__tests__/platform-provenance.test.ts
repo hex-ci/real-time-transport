@@ -4,16 +4,13 @@ import { platformRowProvenanceOf } from '../views/platform/provenance'
 import { provenanceLabelOf } from '../provenance-copy'
 
 /**
- * F4 on the platform board: one mark per ROW.
+ * 站台屏上的 F4：每**行**一个标记。
  *
- * The board is the mixed-list case the spec calls out. It shows a row per
- * followed line/direction, so one glance can hold rows of different kinds of
- * number at once — a real vehicle's own travel time, a generated train's, and a
- * row nobody could classify. Two rules are load-bearing: those rows must be
- * tellable apart, and a row whose producer stated nothing must NOT read as 实时.
+ * 站台屏是规格点名的混合列表情形：每关注线路/方向一行，一眼之内可同时存在不同种类的数字——
+ * 真实车辆自己的行程时间、生成列车的时间、以及没人能分类的行。两条规则承重：这些行必须可区分，
+ * 且生产者未陈述任何内容的行绝不可读成「实时」。
  *
- * The wording itself is `provenance-copy.ts`'s job and is tested there; this file
- * tests which KIND each row gets.
+ * 措辞本身归 `provenance-copy.ts` 并在那里测试；本文件测每行得到哪种**类型**。
  */
 
 const UNKNOWN = 'some_future_source' as DataSourceType
@@ -26,16 +23,14 @@ describe('a platform row states the kind of number it carries', () => {
   })
 
   it('marks a generated train 排班推演, however the minute reached the board', () => {
-    // The timetable engine puts a travel time on each of its trains, so this row
-    // arrives looking like any other live one — the vehicle decides, not the
-    // branch the minute was read in.
+    // 时刻表引擎给它的每趟列车放一个行程时间，故该行到达时看起来与其他实时行无异，
+    // 由车辆决定而非读取分钟的所在分支。
     expect(platformRowProvenanceOf({ dataSource: 'subway_schedule', hasMinute: true }))
       .toBe('schedule_simulation')
   })
 
   it('states nothing for a source this build does not know', () => {
-    // The zero-fabrication rule at its sharpest: a brand-new feed answers null,
-    // so the row keeps its minute and shows no mark — never the flattering word.
+    // 零捏造规则最锐利处：全新 feed 答 null，故该行保留分钟且不显示标记——绝不用好看的那个词。
     const unknown = platformRowProvenanceOf({ dataSource: UNKNOWN, hasMinute: true })
     expect(unknown).toBeNull()
     expect(provenanceLabelOf(unknown)).toBeNull()
@@ -43,8 +38,7 @@ describe('a platform row states the kind of number it carries', () => {
   })
 
   it('states nothing for a row that has no minute to classify', () => {
-    // No vehicle in range: the row reports a service fact instead and there is no
-    // number for a kind to belong to. A failed request is the same case.
+    // 范围内无车：该行改为陈述服务事实，没有数字可供某类型归属。请求失败同理。
     for (const dataSource of ['chelaile', 'apizero', 'subway_schedule', UNKNOWN, null, undefined] as const) {
       expect(platformRowProvenanceOf({ dataSource, hasMinute: false })).toBeNull()
     }

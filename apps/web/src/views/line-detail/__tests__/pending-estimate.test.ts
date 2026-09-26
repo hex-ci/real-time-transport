@@ -8,60 +8,47 @@ import {
 } from '../pending-estimate'
 
 /**
- * F-E: the page's own pending-window estimate must be the SERVER's arithmetic.
+ * F-E：页面自己的「等待窗口」估时必须是**服务端**的算术。
  *
- * The line page prices a minute for itself in the window before the arrivals
- * answer lands (and when it never does), from the same vehicle the live board
- * describes. TWO models used to exist on both sides. One of them — the
- * position/dwell estimate (`remainingMeters / speed + (stopsAway - 1) * 30`) — is
- * gone from both, because the server no longer states that minute at all: it
- * extrapolated a snapshot speed and a nominal dwell across every remaining stop,
- * and its error had no fixed sign (~12 min mean, 28 min worst). A client copy of a
- * number the server refuses to state is worse than dead code; it is a second
- * surface contradicting the first.
+ * 线路页面在到站应答落地前（以及永不到来时）为同一个车辆自己估价一个分钟。曾两侧各存在两套模型；
+ * 其中位置/驻站估时（`remainingMeters / speed + (stopsAway - 1) * 30`）已从两侧移除，因为服务端
+ * 不再陈述那个分钟。客户端复制一个服务端拒绝陈述的数字，比死代码更糟——它是与第一个表面矛盾的第二个表面。
  *
- * What remains is the subway model, and it is shared EXACTLY. Both sides once had
- * it, but the client was missing the server's `Math.max(30, …)` floor — the two
- * stated different numbers for the same vehicle in the same instant, and only the
- * rounding to whole minutes hid it. That is why the pin is on SECONDS: a 5-second
- * raw estimate has to come out as the floor, not as 5.
+ * 剩下的是地铁模型，且被**完全**共享：两侧曾都有它，但客户端缺服务端的 `Math.max(30, …)` 下限，
+ * 于是同一时刻同一车辆给出不同的数，只因取整到分钟才没暴露。故这里钉的是**秒**：
+ * 5 秒的原始估时必须输出为下限，而不是 5。
  *
- * The numbers asserted here are `vehicleArrivals`'s own (135 s/station), so a
- * change on either side of the wire fails here.
+ * 此处断言的数字取自 `vehicleArrivals` 自身（135 s/站），故线上任一侧改动都会在此失败。
  */
 
 describe('the estimated seconds are floored, as the server floors them', () => {
   it('floors the subway model instead of stating the raw 14 seconds', () => {
-    // One stop away with 0.9 of the hop made: 0.1 × 135 = 13.5 → 14 raw.
+    // 距一站且已走 0.9 程：0.1 × 135 = 13.5 → 原始 14。
     expect(estimateSubwayArrivalSeconds(1, 0.9)).toBe(ARRIVAL_ESTIMATE_FLOOR_SECONDS)
     expect(estimateSubwayArrivalSeconds(1, 0.9)).not.toBe(14)
   })
 
   it('states the model\'s own seconds above the floor, unchanged', () => {
-    // Three full hops: 405 s — the server's number, passed through.
+    // 三整程：405 s——服务端的数字，原样通过。
     expect(estimateSubwayArrivalSeconds(3, 0)).toBe(405)
   })
 })
 
 /**
- * And the wiring: the page must COMPUTE through this module rather than keep a
- * second copy of the arithmetic inline (the copy is how the floor went missing,
- * and the wiring is the half a logic-only test cannot see).
+ * 以及接线：页面必须经由本模块**计算**，而不是内联保留第二份算术
+ * （副本正是下限丢失的原因，也是纯逻辑测试看不到的一半）。
  */
 describe('the line page prices only the model the server still states', () => {
   const view = readFileSync(fileURLToPath(new URL('../index.vue', import.meta.url)), 'utf8')
 
   it('imports the subway estimate from the module instead of inlining the arithmetic', () => {
     expect(view).toContain('estimateSubwayArrivalSeconds')
-    // Regression: the inlined copy that lacked the floor.
+    // 回归：曾缺少下限的内联副本。
     expect(view).not.toContain('(stops - progress) * 135')
   })
 
   it('exports no position/dwell estimate at all', () => {
-    // The bus minute this page used to price for itself was the server's own
-    // extrapolation, and the server states it nowhere now. The page's half of that
-    // rule — the absence it states instead — is pinned in
-    // `src/__tests__/absent-arrival-minute-display.test.ts`.
+    // 本页曾自己估价的车辆分钟是服务端自己的外推，而服务端现在无处陈述它。
     expect(Object.keys(pendingEstimate)).not.toContain('estimatePositionArrivalSeconds')
   })
 })

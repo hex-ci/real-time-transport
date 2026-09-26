@@ -3,26 +3,18 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The type-check scope of this package, held against the config that defines it.
+ * 本包的类型检查范围，对着定义它的配置守住。
  *
- * `tsconfig.app.json` excludes this package's test files — every `__tests__`
- * directory under `src/` — so `vue-tsc --build` never type-checks them. That
- * exclusion is deliberate and stays: a test is transformed and run by Vitest,
- * against the types the runner gives it, not by the app build. What can be lost
- * without a word is the REASON — an exclusion carrying none reads as an oversight,
- * and the next reader re-includes the tests, reddens a build nobody changed, and
- * takes the exclusion out again. So the config must say so in place, and say it as
- * a standing constraint rather than as history.
+ * `tsconfig.app.json` 排除本包的测试文件——`src/` 下每个 `__tests__` 目录——故 `vue-tsc --build`
+ * 从不类型检查它们。该排除是刻意的并保持：测试由 Vitest 按其运行器给出的类型转换与运行，不由应用构建。
+ * 可能无声丢失的是**理由**——不带理由的排除读起来像疏漏，下一位读者会重新纳入测试、弄红一个没人改过的构建、
+ * 再把排除拿掉。故配置必须在原处说明，且作为常驻约束而非历史陈述。
  *
- * These are structural checks — a presence and a wording check on a config line,
- * the only thing that can be said about a setting no runtime reads. They are
- * deliberately loose about the phrasing and tight about the facts: the tests are
- * still excluded, the file states that this is deliberate, it says what that costs
- * (those files go unchecked), and it does not describe itself as a temporary state
- * or a to-do.
+ * 这些是结构性检查——对一行配置的存在性与措辞检查，对一个没有运行时会读取的设置所能说的全部。
+ * 它们刻意放松于措辞、严格于事实：测试仍被排除，文件声明这是刻意的，它说明代价（那些文件不被检查），
+ * 且它不把自己描述成临时状态或待办。
  *
- * This file lives outside `src/` for the same reason `installability.test.ts`
- * does: it verifies a package-config surface, not a module.
+ * 本文件位于 `src/` 之外，理由与 `installability.test.ts` 相同：它验证包配置表面而非模块。
  */
 
 const tsconfig = readFileSync(
@@ -30,7 +22,7 @@ const tsconfig = readFileSync(
   'utf8',
 )
 
-/** Every `//` comment line in the config, joined — the prose the file carries. */
+/** 配置里每一行 `//` 注释，拼接起来——该文件所携带的叙述。 */
 function statedReason(source: string): string {
   return source
     .split('\n')
@@ -41,9 +33,8 @@ function statedReason(source: string): string {
 
 describe('test files stay out of the app type check, and the config says so', () => {
   it('still excludes this package\'s test files', () => {
-    // The decision under test is about a deliberate exclusion, so the exclusion
-    // itself is pinned: a file with the right comment and no exclude key would
-    // pass a prose-only check while type-checking something nobody wants checked.
+    // 被测决定关乎一次刻意的排除，故排除本身也被钉住：有正确注释却没有 exclude 键的文件会通过
+    // 纯叙述检查，却类型检查了没人想检查的东西。
     expect(tsconfig).toContain('src/**/__tests__/*')
   })
 
@@ -59,8 +50,7 @@ describe('test files stay out of the app type check, and the config says so', ()
 
   it('does not describe the exclusion as history or as an unfinished job', () => {
     const stated = statedReason(tsconfig)
-    // A 待办 or a 「暂时」 invites exactly the re-inclusion this comment exists to
-    // prevent, so the file may not read as either.
+    // 待办或「暂时」正好会招来这条注释存在所要防止的重新纳入，故该文件不得读起来像两者中的任何一个。
     expect(stated, 'the config words the exclusion as temporary')
       .not.toMatch(/temporar|for now|for the moment/i)
     expect(stated, 'the config words the exclusion as an unfinished job')
@@ -68,10 +58,8 @@ describe('test files stay out of the app type check, and the config says so', ()
   })
 
   it('says the excluded tests are not type-checked, so nobody assumes they are', () => {
-    // The second fact, in the same place: excluded means the type checker never
-    // reads them. The wording is free; the claim is not — a comment that says the
-    // opposite, or leaves the reader to assume the opposite, is the
-    // misunderstanding this pin exists to catch.
+    // 第二个事实，同一处：被排除意味着类型检查器从不读它们。措辞自由，但这个断言不自由——
+    // 说反话或让读者默认反话的注释，正是本钉所存在的要抓住的误解。
     expect(statedReason(tsconfig), 'the config does not say the excluded tests go unchecked')
       .toMatch(/(never|not|isn't|aren't)\s*(type-?check|checked)/i)
   })

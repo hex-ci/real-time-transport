@@ -4,31 +4,16 @@ import type { DataProvenance } from '@real-time-transport/shared'
 import type { ChainReadingView } from './types'
 
 /**
- * F4 on the chain page: one mark for the chain, or one per leg.
+ * 链路页上的 F4：链路陈述一个标记，或每段各陈述一个。
  *
- * A chain's answer is never one number from one source. Each leg's alight minute
- * belongs to its own vehicle, so a bus leg can be 实时 while a subway leg is
- * 排班推演 — and the engine already decided that per leg (`listProvenanceOf`), the
- * same way a card's arrival list does. Where the kinds agree the chain states that
- * ONE word and no leg repeats it; where they disagree the engine answers null for
- * the chain, because one word would then be false about part of it, and every leg
- * states its own.
- *
- * That fallback is the whole point: a leg's minute may never borrow the chain's
- * word for a number some other leg produced, and a kind nobody classified is
- * stated as no mark rather than rounded up to the flattering one. The KINDS come
- * from `@real-time-transport/shared`, the WORDS from `@/provenance-copy`, and the
- * instant from the store's own freshness line — so this page owns no second
- * provenance vocabulary and no second clock.
+ * 链路的答案从不是一个来源的一个数字：每段的下车分钟属于它自己的车辆，公交段可以是实时而地铁段是排班推演，
+ * 引擎已按段决定。各段的种类一致时链路陈述那一个词且各段不重复；不一致时引擎对链路答 null
+ * （一个词会对其中一部分为假），于是每段各述其类——一段的分钟绝不借用链路为别的段产出的数字所用的词。
+ * 种类来自 shared，词来自 `@/provenance-copy`，时刻来自 store 自己的新鲜度行，
+ * 故本页没有第二套来源词汇，也没有第二个时钟。
  */
 
-/** The mark one leg's row states: its own kind, or nothing when the chain is
- * already saying the one word.
- *
- * It takes the KIND rather than the leg, because that is all the decision needs
- * and the row's own model already carries it — a leg's minute may no more borrow
- * the chain's word through this function than through the component that calls it.
- */
+/** 一段的行陈述的标记：它自己的种类，或链路已在说那个词时为 null。 */
 export function legMarkOf(
   provenance: DataProvenance,
   chainProvenance: DataProvenance | null,
@@ -38,20 +23,15 @@ export function legMarkOf(
 }
 
 /**
- * The reading line: when the reading behind this answer was obtained, and the kind
- * of number the answer is.
+ * 读取行：这个答案背后的读取是何时取得的，以及它是哪种数字。
  *
- * The instant is worded by F11's own freshness line (`refreshFreshnessOf`), so the
- * chain page and the refresh control cannot print one instant two ways. The KIND is
- * not that function's answer: it derives the kind from a line's `dataSource`, while
- * a chain's mark is the engine's own per-leg kinds. And a reading that was never
- * obtained has no line at all — the clock is not a reading, and stamping one would
- * dress an empty answer as a fresh one.
+ * 时刻由 F11 自己的新鲜度行措辞，故链路页与刷新控件不会把一个时刻印成两种样子。
+ * 从未取得的读取没有这一行：时钟不是读取。
  */
 export function chainReadingOf(params: {
-  /** The engine's `lastUpdatedAt`, or a refusal's `updatedAt` when it was read. */
+  /** 引擎的 `lastUpdatedAt`；拒绝则取它被读取时的 `updatedAt`。 */
   lastUpdatedAt: number | null
-  /** The engine's own chain-level provenance — null when the legs disagree. */
+  /** 引擎自己的链路级来源；各段不一致时为 null。 */
   provenance: DataProvenance | null | undefined
 }): ChainReadingView | null {
   if (params.lastUpdatedAt === null) return null

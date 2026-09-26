@@ -1,20 +1,16 @@
 <script setup lang="ts">
 /**
- * One ride leg's fields: the line it rides, the station boarded at and the station
- * alighted at, and the extra minutes the connection into it costs.
+ * 一段乘车段的字段：乘坐的线路、上车站、下车站，以及接驳进这一段所花的额外分钟。
  *
- * Two facts this component owns and the rules module cannot see:
+ * 两件本组件拥有、规则模块看不到的事实：
  *
- * - a station is a PAIR — its name and its order in the chosen line's list — so a
- *   choice through the picker sets both, and switching line drops the orders while
- *   keeping the names. An order locates a stop inside ONE line's numbering (a bus
- *   route's two directions are two line ids; a subway numbers the same station
- *   oppositely per direction), so an order that survived a line switch would write a
- *   station the new line does not have at that number. The name stays so the user can
- *   still see what they had picked, and the save refuses until it is picked again;
- * - 「未设置」 is not 0. The minutes field is empty when the draft holds null and reads
- *   0 when it holds 0, because 「没配」 and 「确实没有额外时间」 are different facts the
- *   deduction layer treats differently.
+ * - 一个站是**一对**——站名与它在所选线路列表里的站序——故经选择器的一次选择同时设定两者，
+ *   而换线路会丢掉站序、保留站名。站序在**一条**线路的编号里定位一个站（公交线路的两个方向
+ *   是两个线路 id；地铁按方向对同一站反向编号），故换线路后幸存的站序会写入一个新线路
+ *   在该编号上并不持有的站。站名留下，好让用户仍看得见他挑过什么，而保存会一直拒绝，
+ *   直到重新挑定；
+ * - 「未设置」不是 0。草稿持有 null 时分钟字段为空、持有 0 时读作 0，因为「没配」与
+ *   「确实没有额外时间」是推导层区别对待的两个不同事实。
  */
 import { computed, shallowRef } from 'vue'
 import { Trash2 } from '@lucide/vue'
@@ -32,11 +28,11 @@ import type { ChainLineOption, StationChoice } from '../types'
 
 const props = defineProps<{
   leg: ChainLegDraft
-  /** Every line+direction the editor offers. */
+  /** 编辑器提供的每条线路+方向。 */
   lines: ChainLineOption[]
-  /** This leg's position in the chain. */
+  /** 本段在链路中的位置。 */
   index: number
-  /** False for the only leg: a chain with no ride leg carries no conclusion. */
+  /** 唯一一段时为 false：没有乘车段的链路给不出任何结论。 */
   removable: boolean
 }>()
 
@@ -47,26 +43,25 @@ const emit = defineEmits<{
 
 const option = computed(() => optionOfLeg(props.leg, props.lines))
 
-/** The stops this leg's line offers, and whether they are there to pick from at all. */
+/** 本段线路提供的站点，以及它们是否可供挑选。 */
 const stations = computed<Station[]>(() => option.value?.stations ?? [])
 const pickable = computed(() => Boolean(option.value) && stations.value.length > 0
   && option.value!.stops === 'ready')
 
-/** Why the stops cannot be picked from, in the words of the state actually reached. */
+/** 站点为何不可挑选，用实际到达的那种状态的话。 */
 const listSentence = computed(() => (pickable.value || !option.value
   ? null
   : stopsStateSentence(option.value!)))
 
 /**
- * Whether the stations on screen were just cleared by a line change.
+ * 屏上这些站点是否刚被一次换线路清空。
  *
- * The user's picks are theirs, so their disappearance is stated rather than silent —
- * and a stop order locates a stop inside ONE line's numbering, so the pair cannot
- * simply travel to the new line.
+ * 用户的挑选是他的，故它们的消失要被陈述而非无声——而站序在**一条**线路的编号里定位一个站，
+ * 故这一对无法平移到新线路上。
  */
 const clearedByLineChange = shallowRef(false)
 
-/** One end of the leg as the picker's own value: the PAIR it holds, or null when unset. */
+/** 段的一端作为选择器自己的值：它持有的**那一对**；未设置时为 null。 */
 function choiceOf(name: string | null, order: number | null): StationChoice | null {
   return name === null ? null : { name, order }
 }
@@ -75,13 +70,11 @@ const boardChoice = computed(() => choiceOf(props.leg.boardStationName, props.le
 const alightChoice = computed(() => choiceOf(props.leg.alightStationName, props.leg.alightStationOrder))
 
 /**
- * A station choice arrives as the PAIR the user clicked — name AND order together — and
- * is written as that same pair.
+ * 站的选择以用户点击的**那一对**到达——站名与站序一起——并照同一对写入。
  *
- * Nothing is resolved from the name here: 线上同名站不止一个 (PRD), so a `find(name)`
- * against this leg's list would record the FIRST 「东大桥」 no matter which one was
- * picked — and the trigger would show that same wrong pair, so the record and the screen
- * would agree on a station nobody chose.
+ * 此处绝不从站名解析：线上同名站不止一个，故对着本段列表做 `find(name)` 会记录**首个**
+ * 「东大桥」，无论挑的是哪一个——而且触发器会显示同样错误的那一对，
+ * 于是记录与屏幕会在一个没人选过的站上达成一致。
  */
 function onStation(which: 'board' | 'alight', choice: StationChoice | null): void {
   const patch = which === 'board'
@@ -92,14 +85,12 @@ function onStation(which: 'board' | 'alight', choice: StationChoice | null): voi
 }
 
 /**
- * Switching line clears this leg's stations.
+ * 换线路会清空本段的站点。
  *
- * An order locates a stop in ONE line's numbering (a bus route's two directions are two
- * line ids; a subway numbers the same station oppositely per direction), so carrying it
- * across would record a stop the new line does not have at that number — and for a
- * subway it would silently flip the leg's direction. The stations are therefore
- * cleared as a pair, which is the honest reading of 「站名与站序要同时选定」, and the
- * clearing is stated so nothing vanishes without a word.
+ * 站序在**一条**线路的编号里定位一个站（公交线路的两个方向是两个线路 id；地铁按方向对
+ * 同一站反向编号），故把它带过去会记录新线路在该编号上并不持有的站——对地铁还会静默翻转
+ * 本段方向。故站点作为一对被清空，这是「站名与站序要同时选定」的诚实读法，
+ * 且清空被陈述，好让没有东西无声消失。
  */
 function onLineChange(event: Event): void {
   const value = (event.target as HTMLSelectElement).value
@@ -116,12 +107,11 @@ function onLineChange(event: Event): void {
 }
 
 /**
- * The extra minutes, as typed.
+ * 额外分钟，按输入的原样。
  *
- * An empty field is 「未设置」 and stays null; a typed 0 is a configured 「no extra time
- * at all」 and stays 0. Anything that is not a whole non-negative number is not a
- * value this field can hold, so the draft keeps what it had rather than reading a
- * typo as 「未设置」.
+ * 空字段是「未设置」并保持 null；输入的 0 是已配置的「完全没有额外时间」并保持 0。
+ * 不是非负整数的任何内容都不是本字段能持有的值，故草稿保持原值，
+ * 而不是把一个错字读成「未设置」。
  */
 function onExtraInput(event: Event): void {
   const raw = (event.target as HTMLInputElement).value.trim()
@@ -138,18 +128,15 @@ const extraValue = computed(() => (props.leg.transferExtraMinutes === null
   ? ''
   : String(props.leg.transferExtraMinutes)))
 
-/** The words the remove control shows — and therefore the words its name must contain. */
+/** 移除控件显示的文字——因此也是它的名字必须包含的文字。 */
 const REMOVE_VISIBLE_LABEL = '删除该段'
 
 /**
- * The remove control's accessible name and tooltip: the VISIBLE label first, then the leg
- * it removes or the reason it cannot be removed.
+ * 移除控件的可访问名与提示：**可见**标签在前，随后是它移除的段或它不能移除的原因。
  *
- * WCAG 2.5.3 (Label in Name, Level A): the accessible name must contain the visible label,
- * because a name is what a voice-control user's spoken words are matched against — a name
- * that wholly replaced 「删除该段」 with 「删除第 1 段」 would leave the control unaddressable
- * by the text printed on it. The position (or the reason) is kept as the parenthetical,
- * so nothing this control already explained is lost.
+ * 名字必须包含可见标签，因为语音控制用户念出的词正是与名字匹配的：一个用「删除第 1 段」
+ * 完全替换掉「删除该段」的名字，会让该控件无法用印在它上面的文字寻址。
+ * 位置（或原因）作为括号内容保留，故本控件已经说明过的东西一样不少。
  */
 const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
   ? legPositionText(props.index)
@@ -160,11 +147,9 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
   <div :data-chain-leg="index" class="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950 p-3">
     <div class="flex items-center justify-between gap-2">
       <span class="text-xs font-medium text-slate-300">{{ legPositionText(index) }}</span>
-      <!-- The last leg cannot be removed: 「一段车都没有的链路给不出任何结论」，and the
-           way to drop the whole chain is the row's own 删除. A disabled control still
-           owes its reason, which is the title and the label here — and the label keeps
-           the visible 「删除该段」 inside it, so the words on the control are the words
-           that address it (WCAG 2.5.3). -->
+      <!-- 最后一段不可移除：一段车都没有的链路给不出任何结论，而丢掉整条链路的方式是
+           该行自己的 删除。禁用的控件仍欠它的原因，那就是此处的 title 与标签——而标签把
+           可见的「删除该段」留在其中，故控件上的字就是能寻址它的字。 -->
       <button
         type="button"
         class="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs text-slate-300 transition hover:border-rose-500/40 hover:text-rose-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
@@ -180,9 +165,8 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
 
     <label class="block">
       <span class="text-xs text-slate-400">线路与方向</span>
-      <!-- A native select, not a hand-rolled picker: the choice is a bounded list of
-           the user's own followed routes, and the platform header already uses one
-           for its bounded choice. It also keeps the OS's own picker on a phone. -->
+      <!-- 原生 select，不是手搓选择器：这个选择是一份有界的、用户自己已关注线路的列表，
+           而站台屏的表头也已经为它那个有界选择用了 select。手机上也保留系统自己的选择器。 -->
       <select
         :value="leg.lineKey ?? ''"
         class="mt-1 min-h-[44px] w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-slate-100 outline-none focus:border-cyan-500 lg:text-sm"
@@ -195,10 +179,9 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
           {{ lineOptionLabel(item) }}
         </option>
       </select>
-      <!-- Where the line is CHOSEN, the source of the list is stated — not only where it
-           binds. This list is the followed routes (see `ChainLineOption`), so an
-           unfollowed line is simply not among the options, and without this sentence
-           nothing on screen would say why it is missing. -->
+      <!-- 在**选择**线路之处就陈述列表的来源，而不是只在它绑住手之处。这份列表是已关注的
+           线路，故未关注的线路干脆不在选项里，而没有这句话，
+           屏上就没有东西说明它为何缺席。 -->
       <span class="mt-1 block text-xs text-slate-400">
         列表来自你关注的线路：没关注的线路要先关注，才能在这里选它的站序
       </span>
@@ -232,8 +215,8 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
     <p v-if="clearedByLineChange" class="text-xs text-slate-400">
       更换线路后已清空这一段的上车站与下车站，请重新选择
     </p>
-    <!-- With no line to choose from at all, the form above has already named that
-         cause: repeating an instruction here would be one the user cannot follow. -->
+    <!-- 完全没有线路可选时，上面的表单已经点名了那个成因：
+         在此重复一条用户无法照做的指示。 -->
     <p v-else-if="!option && lines.length > 0" class="text-xs text-slate-400">
       请先选择线路与方向，再从它的站序里选上车站与下车站
     </p>

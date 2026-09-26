@@ -5,41 +5,33 @@ import { buildApp } from '../app.js'
 import { isUniqueViolation } from '../db/client.js'
 
 /**
- * 「只允许关注一条」: a line is followed ONCE per user, and a second follow says so.
+ * 「只允许关注一条」：一条线路每个用户只关注一次，第二次关注会说清这件事。
  *
- * Two directions of one route are ONE favourite — the row already carries
- * `morningDirection` / `eveningDirection` and a `reverseLineId` — so the opposite
- * direction must not become a second row. This file holds the three facts that
- * make that true, each with the case that used to break it:
+ * 一条线路的两个方向是一个关注 —— 行里已经有 `morningDirection` / `eveningDirection` 与
+ * `reverseLineId` —— 所以反方向不许变成第二行。本文件钉住让它成立的三件事：
  *
- *  - a direct duplicate is REFUSED (409, 「已关注」) and the row count stays 1;
- *  - the opposite direction is refused too, INCLUDING while the stored
- *    `reverseLineId` is still NULL — the real window, since that column is filled
- *    by the GET /favorites self-heal and by nothing else. The fixture line answers
- *    its own opposite direction upstream, which is the only thing the guard can
- *    read inside the window;
- *  - a genuinely different line still follows, so the refusal is not a blanket one.
+ *  - 直接的重复被拒绝（409，「已关注」），行数保持 1；
+ *  - 反方向也被拒绝，包括存下的 `reverseLineId` 还是 NULL 的那段窗口 —— 那一列只由
+ *    GET /favorites 的自愈写入，别的都不写，所以这个窗口是真的；夹具线路自己会答出它的
+ *    反方向，那是守卫在这段窗口里唯一能读到的东西；
+ *  - 真正不同的线路仍然能关注，所以这个拒绝不是一刀切。
  *
- * The database's own statement of the rule (migration 008's unique index) is read
- * as SQL text at the bottom: this suite has no PostgreSQL, so the index's EFFECT
- * cannot be exercised here — running the migration is the owner's step, and the
- * file says which command.
+ * 数据库自己对这条规则的陈述（008 的唯一索引）在文件末尾按 SQL 文本读：本套件没有
+ * PostgreSQL，索引的效果在这里验不了 —— 跑迁移是应用者的那一步，文件里写了该跑哪条命令。
  */
 
 const USER = 'default_user'
-/** 52路's two directions, as the upstream names them: a distinct lineId each. */
+/** 52路 的两个方向，按上游的命名：各是一个独立的 lineId。 */
 const UP = '010-52-0'
 const DOWN = '010-52-1'
-/** A genuinely different line, for the positive control. */
+/** 一条真正不同的线路，用作正对照。 */
 const OTHER = '010-300-0'
 
 /**
- * A Chelaile line-detail envelope.
+ * 一个 Chelaile 线路详情外壳。
  *
- * `otherlines` is where a `reverseLineId` comes from (the provider reads
- * `otherlines[0].lineId`), so this is the fixture that makes the opposite
- * direction RESOLVABLE — which is what the guard has to do by itself while the
- * stored column is still empty.
+ * `otherlines` 是 `reverseLineId` 的来源（provider 读 `otherlines[0].lineId`），所以这个
+ * 夹具让反方向可解析 —— 那正是存下的列还空着时守卫必须自己做到的事。
  */
 function lineDetailEnvelope(otherDirectionLineId?: string) {
   return {
@@ -61,12 +53,10 @@ function lineDetailEnvelope(otherDirectionLineId?: string) {
 }
 
 /**
- * The only upstream this file allows: the line-detail endpoint, answering the
- * opposite direction of `primary` and nothing else.
+ * 本文件唯一允许的上游：线路详情端点，只答 `primary` 的反方向。
  *
- * Every other call throws, because a test that spends real quota is not a test.
- * The returned array records what was asked, which is how the NULL-reverse window
- * below is held to be real rather than assumed.
+ * 其他任何调用都会抛错，因为花掉真实配额的测试不算测试。返回的数组记录被问过什么，所以
+ * 下面那段 NULL-reverse 窗口是真的，而不是假设的。
  */
 function stubUpstream(primary: string, otherDirectionLineId: string): string[] {
   const calls: string[] = []
@@ -93,7 +83,7 @@ const follow = (app: Awaited<ReturnType<typeof buildApp>>, payload: Record<strin
 const followUp = (app: Awaited<ReturnType<typeof buildApp>>, lineId: string) =>
   follow(app, { userId: USER, cityCode: '027', lineId, lineName: '52路' })
 
-/** The stored rows, as the settings screen reads them (this GET also self-heals). */
+/** 存下来的行，按设置页读到的样子（这个 GET 也会自愈）。 */
 async function stored(app: Awaited<ReturnType<typeof buildApp>>): Promise<any[]> {
   const res = await app.inject({ method: 'GET', url: `/api/transit/favorites?userId=${USER}` })
   return JSON.parse(res.body).data
@@ -111,9 +101,9 @@ describe('一条线路只允许关注一次：重复关注被拒绝，且如实�
 
     const again = await followUp(app, UP)
 
-    // A refusal, not a success: the caller asked for a follow and this request did
-    // not perform one, so nothing may read as a new card. The row still comes back
-    // — it is what the screen shows as followed — under the label 「已关注」.
+    // 这是拒绝，不是成功：调用方要求一次关注，而这个请求并没有做到，
+    // 所以什么都不能读成一张新卡片。那一行照旧返回 ——
+    // 屏幕就是把它显示为已关注 —— 标签是「已关注」。
     expect(again.statusCode).toBe(409)
     const body = JSON.parse(again.body)
     expect(body.success).toBe(false)
@@ -130,10 +120,10 @@ describe('一条线路只允许关注一次：重复关注被拒绝，且如实�
     const calls = stubUpstream(UP, DOWN)
     const app = await buildApp()
 
-    // The window, built rather than assumed: this client states no reverse
-    // direction, and the row is created by a request that had no existing row to
-    // resolve — so the upstream was never asked and the stored `reverse_line_id`
-    // holds nothing. (A row only ever gets one from the self-heal below.)
+    // 这段窗口是造出来的，不是假设的：这个客户端没有声明反方向，
+    // 而这一行由一次当时没有既存行可解析的请求创建 ——
+    // 所以上游从未被问过，存下的 `reverse_line_id` 里什么都没有。
+    // （一行只能靠下面的自愈拿到它。）
     await followUp(app, UP)
     expect(calls, 'the first follow resolved something: the window is not what this test claims')
       .toHaveLength(0)
@@ -145,15 +135,15 @@ describe('一条线路只允许关注一次：重复关注被拒绝，且如实�
     expect(body.alreadyFollowed).toBe(true)
     expect(body.error).toBe('已关注')
 
-    // The refusal had to resolve the route's other direction upstream: the stored
-    // column said nothing, so this is the guard doing the work, not a column read.
+    // 这次拒绝必须去上游解析该线路的另一方向：存下的
+    // 列为空，所以是守卫在做这件事，而不是读列。
     expect(calls.length).toBeGreaterThan(0)
 
     const rows = await stored(app)
     expect(rows, 'the opposite direction became a second favourite').toHaveLength(1)
     expect(rows[0]!.lineId).toBe(UP)
-    // And the row now names the direction it was missing, so the next look needs
-    // no resolution at all.
+    // 而这一行现在点名了它缺的那个方向，所以下一次查看
+    // 完全不需要解析。
     expect(rows[0]!.reverseLineId).toBe(DOWN)
 
     await app.close()
@@ -205,9 +195,9 @@ describe('一条线路只允许关注一次：重复关注被拒绝，且如实�
     const app = await buildApp()
 
     await followUp(app, UP)
-    // The unique index is on (user_id, city_code, line_id): a line read in another
-    // city is a different route, and the guard must use the same key as the index
-    // or the two would disagree about what a duplicate is.
+    // 唯一索引在 (user_id, city_code, line_id) 上：在另一座城市里读到的
+    // 线路是另一条路由，而守卫必须与索引用同一个键，
+    // 否则两者对「什么是重复」的看法会不一致。
     const elsewhere = await follow(app, {
       userId: USER,
       cityCode: '028',
@@ -227,10 +217,6 @@ describe('迁移 008：数据库自己的那份规则', () => {
   const MIGRATIONS = fileURLToPath(new URL('../../../../migrations', import.meta.url))
   const FILE = '008_unique-favorite-per-line.sql'
 
-  /**
-   * The forward half of a migration, exactly as the runner reads it: the section
-   * above the `-- migrate:down` marker (`stripDownSection` in db/migrate.ts).
-   */
   function forward(sql: string): string {
     return (sql.split('-- migrate:down')[0] ?? '').replace(/\s+/g, ' ').trim()
   }
@@ -238,12 +224,6 @@ describe('迁移 008：数据库自己的那份规则', () => {
   const sql = readFileSync(`${MIGRATIONS}/${FILE}`, 'utf-8')
 
   it('它自己那一号还在文件集里，并且排在它之前的所有迁移之后', () => {
-    // This test used to assert that 008 was the LAST migration, which was true when
-    // it was written and is a claim about the file SET rather than about this
-    // migration. 009 is newer, so what 008 still owns is its own number and its
-    // place in the order (the runner applies by filename); 「最新的那一条」 now
-    // belongs to the migration that is actually newest, and 009's own suite holds
-    // that half.
     const files = readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()
     expect(files).toContain(FILE)
     expect(files.indexOf(FILE)).toBeGreaterThan(files.indexOf('007_commute_chains.sql'))
@@ -256,9 +236,9 @@ describe('迁移 008：数据库自己的那份规则', () => {
   })
 
   it('只增不删：正向段里没有任何破坏性语句', () => {
-    // The runner's own definition of a data-losing statement (db/migrate.ts), read
-    // on the forward half: adding an index to a table with real rows must not
-    // touch a single row.
+    // 运行器自己对「丢数据的语句」的定义（db/migrate.ts），
+    // 读在前向段上：给有真实行的表加索引
+    // 不许碰任何一行。
     const destructive = forward(sql).match(/\b(DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM)\b/gi)
     expect(destructive, `the forward section loses data: ${destructive?.join(', ')}`).toBeNull()
   })
@@ -268,9 +248,9 @@ describe('迁移 008：数据库自己的那份规则', () => {
     const raised = body.indexOf('RAISE EXCEPTION')
     const indexed = body.indexOf('CREATE UNIQUE INDEX')
 
-    // Legible refusal instead of PostgreSQL's own 23505 message: the raise names
-    // the offending (user, city, line) and the command to run afterwards, and it
-    // runs BEFORE the index so that is the error a duplicate produces.
+    // 给出可读的拒绝，而不是 PostgreSQL 自己的 23505 消息：raise 点名
+    // 冒犯的 (user, city, line) 与之后该跑的命令，并且它
+    // 跑在索引之前，所以重复产生的就是那个错误。
     expect(raised).toBeGreaterThan(-1)
     expect(raised).toBeLessThan(indexed)
     expect(body).toContain('HAVING count(*) > 1')
@@ -287,11 +267,10 @@ describe('迁移 008：数据库自己的那份规则', () => {
 
 describe('兜底：唯一索引的拒绝不会被读成「数据库不可用」', () => {
   /**
-   * The predicate, not the branch: `addFavorite` falls back to the in-memory store
-   * when the pool throws, and a REFUSED INSERT must not take that path — the
-   * caller would get a row this process invented while the stored row stayed as it
-   * was. Exercising the branch itself needs a PostgreSQL refusal, which this suite
-   * never has (no connection string, by design — see `databaseUrlFor`).
+   * 钉的是判定，不是那个分支：池抛错时 `addFavorite` 会退回内存存储，而被拒绝的 INSERT
+   * 绝不能走那条路 —— 否则调用方会拿到本进程凭空造出来的一行，而存下的那行还是原样。真正
+   * 跑那个分支需要一次 PostgreSQL 的拒绝，本套件永远没有（按设计没有连接串，见
+   * `databaseUrlFor`）。
    */
   it('认得出 pg 的 23505，且不把别的失败当成它', () => {
     expect(isUniqueViolation({ code: '23505' })).toBe(true)

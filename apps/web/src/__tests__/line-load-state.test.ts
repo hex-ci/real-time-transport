@@ -6,21 +6,16 @@ import { useTransitStore } from '@/stores/transit.store'
 import { lineLoadNoticeOf, lineLoadStateOf } from '@/line-load-state'
 
 /**
- * 线路不存在 and 加载失败 are two facts, and the page stated one sentence for both.
+ * 「线路不存在」与「加载失败」是两个事实，页面却给了同一句话。
  *
- * A line id that does not exist rendered the server's own `error` string as its
- * heading — 「Line not found」, English, in an app with no i18n and no other Latin
- * string — above 「未能加载该线路数据，请稍后重试或检查线路号」. That sentence promised a
- * retry that cannot help a nonexistent line, and asked the user to check a 线路号 that
- * came from the route rather than from a form.
+ * 不存在的线路 id 曾把服务端自己的 `error` 串渲染成标题（英文，在一个无 i18n 的应用里），
+ * 并承诺了「重试」——而对不存在的线路，重试毫无帮助。
  *
- * Three things are pinned here: the status that tells the two apart, the copy each
- * state is worded with, and the wiring that actually reaches them — the store's own
- * `loadLine` against a stubbed response, so a heading that came from the payload
- * again would be caught here rather than in the browser.
+ * 这里钉三件事：区分两者的状态、每个状态的措辞，以及真正到达它们的接线——store 自己的
+ * `loadLine` 对桩响应，使「标题又来自载荷」能在这里而非浏览器里被抓到。
  */
 
-/** A response envelope shaped like the routes' own. */
+/** 形如各路由自身的响应信封。 */
 function answered(status: number, body: unknown) {
   return { status, json: async () => body }
 }
@@ -33,7 +28,7 @@ const DETAIL_BODY = {
   stops: [{ id: 's1', name: '东大桥', order: 1, interchanges: [] }],
 }
 
-/** Answer every transit read this page makes, with the detail's own status. */
+/** 应答本页发出的每次 transit 读取，状态取自 detail 自身的状态。 */
 function stubReads(detail: () => unknown): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
@@ -53,8 +48,7 @@ afterEach(() => {
 
 describe('the status, not the payload, says which absence this is', () => {
   it('reads 404 as 「no such line」 and everything else as a failed load', () => {
-    // 404 is the detail route's own refusal — "Line not found" is its body, and it is
-    // the only status that means the line is not there.
+    // 404 是 detail 路由自己的拒绝，且是唯一表示线路不在的状态。
     expect(lineLoadStateOf(404)).toBe('not-found')
     for (const status of [400, 500, 502, 503, 200]) {
       expect(lineLoadStateOf(status), `status ${status}`).toBe('unavailable')
@@ -67,7 +61,7 @@ describe('each absence states only its own truth', () => {
     const missing = lineLoadNoticeOf('not-found')
     const failed = lineLoadNoticeOf('unavailable')
 
-    // The failed load may succeed later; the missing line will not appear.
+    // 加载失败以后可能成功；缺失的线路不会出现。
     expect(failed.detail).toContain('重试')
     expect(missing.detail, 'a line that does not exist cannot be retried into existing').not.toContain('重试')
     expect(missing.detail).not.toContain('稍后')
@@ -75,8 +69,8 @@ describe('each absence states only its own truth', () => {
   })
 
   it('names the checkable action for the missing line and the wait for the failure', () => {
-    // The missing line's user is at the end of a wrong address: the action is to pick
-    // the line again, not to check a 线路号 that came from the route itself.
+    // 缺失线路的用户处在错误地址的尽头：动作是重新选线路，
+    // 而不是检查一个来自路由自身的线路号。
     expect(lineLoadNoticeOf('not-found').detail).toContain('没有找到这个线路号')
     expect(lineLoadNoticeOf('unavailable').detail).toContain('请稍后重试')
   })
@@ -86,7 +80,7 @@ describe('each absence states only its own truth', () => {
       const notice = lineLoadNoticeOf(state)
       expect(notice.title, `${state}'s heading carries a Latin letter`).not.toMatch(/[A-Za-z]/)
       expect(notice.detail, `${state}'s sentence carries a Latin letter`).not.toMatch(/[A-Za-z]/)
-      // …and the heading is not the endpoint's own error body.
+      // ……且标题不是端点自己的错误正文。
       expect(notice.title).not.toBe('Line not found')
     }
   })
@@ -99,13 +93,10 @@ describe('the component states the copy, never a string from a payload', () => {
   )
 
   it('renders the notice module, and holds no raw error field to render instead', () => {
-    // The heading used to be whatever the response said: `{{ loadError || '线路不存在或数据源暂不可用' }}`,
-    // which is how 「Line not found」 reached a zh-CN screen. A component that kept an
-    // error string as a prop would let the next server-side wording do it again.
+    // 标题不得取自响应内容：组件若留着错误串 prop，下一次服务端措辞会重演旧问题。
     expect(component).toContain('lineLoadNoticeOf')
     expect(component).not.toContain('loadError')
-    // The sentence for the failed load lives in the module too, so the two states can
-    // not drift apart in the component's own markup.
+    // 加载失败的句子也在模块里，使两个状态不会在组件自己的标记里漂移。
     expect(component).not.toContain('未能加载该线路数据')
   })
 })
@@ -119,7 +110,7 @@ describe('the store reaches those two states from the response status', () => {
 
     expect(store.loadFailure).toBe('not-found')
     expect(store.currentLineDetail).toBeNull()
-    // The raw body never travels as the heading.
+    // 原始正文绝不作为标题传递。
     expect(lineLoadNoticeOf(store.loadFailure!).title).not.toContain('Line not found')
   })
 

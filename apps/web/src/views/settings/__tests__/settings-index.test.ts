@@ -11,32 +11,27 @@ import {
 import SettingsIndex from '../index.vue'
 
 /**
- * 设置's INDEX, held by BEHAVIOUR.
+ * `设置` 的**索引页**，由**行为**守住。
  *
- * 设置 became an index plus four sub-pages (`/settings/lines`, `/schedule`, `/anchors`,
- * `/chains`), and this file holds the half that is the index's own: four rows, each a
- * whole-row link, each stating that DOMAIN's current state as a fact — and stating
- * NOTHING when that state could not be read. The page is mounted through
- * `settings-harness.ts` (Vue's runtime-core into plain objects, no jsdom) and driven the
- * way a browser drives it, so what is asserted is what the row actually says.
+ * `设置` 变成索引加四个子页面（`/settings/lines`、`/schedule`、`/anchors`、`/chains`），本文件守住
+ * 属于索引自己的那一半：四行，每行整行是链接，各行以事实陈述**本域**当前状态——而在该状态读不到时
+ * 什么都不陈述。页面经 `settings-harness.ts` 挂载（Vue 的 runtime-core 渲染为普通对象，无 jsdom）
+ * 并按浏览器驱动它的方式驱动，故被断言的是该行实际说了什么。
  *
- * The two honesty traps this file exists for are §4.1's own: a read that FAILED must not
- * be re-worded as a default (the collapsed 通勤时段 summary used to keep `06:30–11:30`
- * when `GET /api/transit/settings` threw) and must not be re-worded as an empty list
- * (`fetchFavorites` used to answer a failed read with `[]`, so 「4 条」 could not tell
- * 「一条都没有」 from 「没读到」). Both are pinned below with the read that fails.
+ * 本文件存在的两个诚实性坑是 §4.1 自己的：**失败**的读取不得被改写成默认值（`GET /api/transit/settings`
+ * 抛出时，折叠的通勤时段摘要曾保留 `06:30–11:30`），也不得被改写成空列表（`fetchFavorites` 曾对失败的
+ * 读取答 `[]`，故「4 条」分不清「一条都没有」与「没读到」）。两者都在下方与失败读取一起钉住。
  *
- * A row's LINK is asserted through `RouterLinkStub`: what a test can hold is the
- * destination the page chose, not whether the router then lights the nav item — the lit
- * state of the top nav is the controller's browser pass, and the route-table rule that
- * makes it possible (children of `/settings`, never siblings) is asserted structurally.
+ * 行的**链接**经 `RouterLinkStub` 断言：测试能持有的是页面选择的目标，而非路由随后是否点亮导航项
+ * ——顶部导航的点亮状态是控制器的浏览器侧；使其成为可能的路由表规则（`/settings` 的子路由，绝不是平级）
+ * 按结构断言。
  */
 
 function read(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 }
 
-/** The file with its explanatory prose removed, so code is what is asserted. */
+/** 去掉说明性文字的文件，故被断言的是代码。 */
 function codeOf(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -44,7 +39,7 @@ function codeOf(source: string): string {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 }
 
-/** The four stored times the settings row hands back by default. */
+/** 设置行默认交回的四个存储时刻。 */
 const HOURS = {
   morningStart: '06:30',
   morningEnd: '11:30',
@@ -52,10 +47,10 @@ const HOURS = {
   eveningEnd: '22:00',
 }
 
-/** The collapsed summary's own wording, character for character: `06:30–11:30 · 17:00–22:00`. */
+/** 折叠摘要自己的措辞，逐字：`06:30–11:30 · 17:00–22:00`。 */
 const HOURS_SUMMARY = '06:30–11:30 · 17:00–22:00'
 
-/** Two followed lines of the active city (027), so the count row has a count to state. */
+/** 当前城市（027）的两条关注线路，使计数行有数可陈。 */
 function favourites(count: number): Record<string, unknown>[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `fav-${index + 1}`,
@@ -68,43 +63,38 @@ function favourites(count: number): Record<string, unknown>[] {
   }))
 }
 
-/** One stored chain, so the chain row has a count to state. */
+/** 一条已存链路，使链路行有数可陈。 */
 function chain(): Record<string, unknown> {
   return { id: 'chain-1', userId: 'default_user', name: '早上上班', originAnchor: 'home', purpose: 'morning', displayOrder: 0, legs: [] }
 }
 
-/** What an endpoint does in a test: answer, refuse, hand back an empty list, or (settings
- * only) answer that no row is stored at all. */
+/** 端点在测试里的行为：作答、拒绝、交回空列表，或（仅设置）答根本没有任何行。 */
 type Answer = 'ok' | 'fail' | 'empty'
 
-/** What the settings read answers. `unset` is the state a never-saved user gets. */
+/** 设置读取所答。`unset` 是从未保存过的用户得到的状态。 */
 type SettingsAnswer = Answer | 'unset' | 'unchosen' | 'no-state'
 
 interface IndexRoutes {
   favourites?: Answer
   settings?: SettingsAnswer
   chains?: Answer
-  /** The coordinates the settings row carries: 家 only, unless overridden. */
+  /** 设置行携带的坐标：默认只有「家」，除非被覆盖。 */
   anchors?: Record<string, unknown>
   /**
-   * The followed lines the read answers with, when a test needs a shape of its own than the
-   * one `favourites(count)` builds — e.g. lines from MORE THAN ONE city, which is the shape
-   * that tells a count over the city on screen from a count over every stored row.
+   * 读取所答的关注线路，用于测试需要 `favourites(count)` 之外的形状时——例如来自**不止一个城市**的线路，
+   * 那是区分「屏幕所在城市的计数」与「所有存储行的计数」的形状。
    */
   favouriteLines?: Record<string, unknown>[]
 }
 
 /**
- * The three reads the index makes, with whichever of them a test wants to fail.
+ * 索引发出的三次读取，测试想让哪一个失败就哪一个失败。
  *
- * `favourites`/`settings`/`chains` are the whole surface of this page: a row that made a
- * fourth read, or read one of these twice to dodge a failure, would show up as a request
- * no route here answers.
+ * `favourites`/`settings`/`chains` 就是本页的全部表面：发出第四次读取、或为躲避失败把其中之一读两次的行，
+ * 会表现为此处没有路由应答的一个请求。
  *
- * The settings answer carries `settingsState`, exactly as the endpoint does: a row with
- * times and a read that found NO row are different answers, and the state is what says
- * which one this is. `no-state` is the malformed shape — a row without the word — which
- * must not be read as the user's configuration.
+ * 设置答案携带 `settingsState`，与端点完全一致：有时刻的行与发现**没有**行的读取是不同的答案，而状态说明
+ * 这是哪一个。`no-state` 是畸形形状——没有该词的行——不得被读成用户的配置。
  */
 function routes(options: IndexRoutes = {}): Route[] {
   const answered = <T>(answer: Answer | undefined, value: T, fallback: T): unknown =>
@@ -116,8 +106,8 @@ function routes(options: IndexRoutes = {}): Route[] {
       if (options.settings === 'fail') return { success: false, error: '读取失败' }
       if (options.settings === 'unset') return { success: true, settingsState: 'unset', data: null }
       if (options.settings === 'no-state') return { success: true, data: { ...HOURS } }
-      // The row exists (it may carry anchors) and its four times were NEVER chosen: every
-      // one of them is null on the wire (`settingsState: 'stored'`, not 'unset').
+      // 该行存在（可能携带锚点）且其四个时刻**从未**选择过：线上四个都是 null
+      // （`settingsState: 'stored'`，不是 'unset'）。
       if (options.settings === 'unchosen') {
         return {
           success: true,
@@ -141,7 +131,7 @@ function routes(options: IndexRoutes = {}): Route[] {
   ]
 }
 
-/** Mount the index with its routes and let every read answer. */
+/** 挂载索引及其路由，让每次读取都作答。 */
 async function mountIndex(options: IndexRoutes = {}): Promise<MountedHost> {
   const host = await mountComponent(SettingsIndex, {
     routes: routes(options),
@@ -152,12 +142,12 @@ async function mountIndex(options: IndexRoutes = {}): Promise<MountedHost> {
 }
 
 afterEach(async () => {
-  // Let any scheduled timer fire while the harness's stubs are still in place.
+  // 让任何已排定的定时器在装置的桩件仍就位时触发。
   await new Promise(resolve => setTimeout(resolve, 0))
   vi.unstubAllGlobals()
 })
 
-/** Every row of the index, as the link it is: where it goes and what it says. */
+/** 索引的每一行，作为它所是的链接：去哪、说什么。 */
 function rows(host: MountedHost): Array<{ href: string, text: string }> {
   return host.nodes(item => item.tag === 'a').map(item => ({
     href: String(item.props.href),
@@ -165,7 +155,7 @@ function rows(host: MountedHost): Array<{ href: string, text: string }> {
   }))
 }
 
-/** One row by destination, or a thrown error naming what was looked for. */
+/** 按目标取一行，或一个点名所寻之物的抛错。 */
 function row(host: MountedHost, href: string): { href: string, text: string } {
   const found = rows(host).find(item => item.href === href)
   if (!found) throw new Error(`the index rendered no row pointing at ${href}`)
@@ -202,8 +192,8 @@ describe('设置索引是一张四行的清单，每行是一个整行的链接'
       const links = host.nodes(node => node.tag === 'a' && isInside(item, node))
       expect(links, 'each row is one link').toHaveLength(1)
     }
-    // The whole visible text of a row is inside its link: nothing about a row is stated
-    // beside it, where a screen reader reading links alone would never reach it.
+    // 行的全部可见文本都在其链接内：行的一切都不在它旁边陈述，
+    // 否则只读链接的屏幕阅读器永远到不了。
     for (const item of items) {
       const inside = host.textOf(host.nodes(node => node.tag === 'a' && isInside(item, node))[0]!)
       expect(host.textOf(item)).toBe(inside)
@@ -230,11 +220,9 @@ describe('每行的摘要只陈述该域现在的事实', () => {
   })
 
   it('条数是「当前城市」的条数：另一个城市的关注线路不算进这一行', async () => {
-    // The row describes the 关注线路 page, which manages the city on screen — so the fixture
-    // carries lines of TWO cities, and the two plausible definitions of the count disagree:
-    // the city on screen (027, two lines) versus every stored row (three). A fixture of one
-    // city cannot tell them apart, which is how this could be counted the wrong way with a
-    // green suite.
+    // 该行描述的是 关注线路 页，它管理屏幕所在的城市——故夹具携带**两个**城市的线路，而两种看似合理的
+    // 计数定义会分歧：屏幕所在城市（027，两条）对全部存储行（三条）。单城市的夹具分不清它们，
+    // 这正是可能以绿的套件算错的方式。
     const host = await mountIndex({
       favouriteLines: [
         { id: 'fav-1', userId: 'default_user', cityCode: '027', lineId: 'bus_027_1', lineName: '快线 1 路', preferredDirection: 0, displayOrder: 0 },
@@ -268,7 +256,7 @@ describe('每行的摘要只陈述该域现在的事实', () => {
   it('摘要里没有动作词：怎么去由链接承担，摘要只说事实', async () => {
     const host = await mountIndex()
 
-    // A filter over nothing passes for free: four rows, or this rule judged no row.
+    // 对空集的筛选会白通过：四行，或本规则没有评判任何行。
     expect(rows(host)).toHaveLength(4)
     for (const item of rows(host)) {
       for (const action of ['去配置', '去设置', '点击', '请设置']) {
@@ -307,9 +295,8 @@ describe('读不到就是读不到：不给默认值，也不给 0', () => {
   })
 
   it('时段没存过：这一行说「未设置」，同样不印 06:30–11:30', async () => {
-    // 未设置 is the OTHER fact, and it needs its own word: the endpoint answered — the
-    // read did not fail — and it found no row. It used to answer the built-in window
-    // here, which this row printed as the user's own hours.
+    // 「未设置」是另一个事实，需要自己的词：端点作答了——读取没有失败——而它没找到行。
+    // 它曾在此答内置窗口，本行把它印成用户自己的时刻。
     const host = await mountIndex({ settings: 'unset' })
 
     const text = row(host, '/settings/schedule').text
@@ -346,9 +333,8 @@ describe('读不到就是读不到：不给默认值，也不给 0', () => {
   })
 
   it('时段没存过：锚点那一行仍按每个锚点自己说，不跟着说「未读到」', async () => {
-    // No row means no stored anchor — a fact about the row, not a guess about it. The
-    // hours beside it are 「未设置」 for the same reason, and neither borrows the other's
-    // state.
+    // 没有行意味着没有已存锚点——这是关于该行的事实，不是对它的猜测。其旁的时段出于同一理由为
+    // 「未设置」，两者不互相借用状态。
     const host = await mountIndex({ settings: 'unset' })
 
     const text = row(host, '/settings/anchors').text
@@ -359,10 +345,8 @@ describe('读不到就是读不到：不给默认值，也不给 0', () => {
   })
 
   it('答了却没有状态：不当作读到的行，这一行说「未读到」', async () => {
-    // A row that arrives without `settingsState` is an answer this page cannot read: the
-    // state is the fact, and inferring it from a shape would let a body with the built-in
-    // hours decide it — the exact substitution being removed. Stated as unreadable rather
-    // than as 未设置, because nobody verified the row is absent.
+    // 到达时没有 `settingsState` 的行是本页读不了的答案：状态就是事实，从形状推断它会让带内置时刻的
+    // body 决定它——正是正在被移除的那种替代。陈述为不可读而非「未设置」，因为没人核实过该行缺席。
     const host = await mountIndex({ settings: 'no-state' })
 
     const text = row(host, '/settings/schedule').text
@@ -373,7 +357,7 @@ describe('读不到就是读不到：不给默认值，也不给 0', () => {
   })
 
   it('锚点读失败：这一行说「未读到」，不说「未设置」', async () => {
-    // 未设置 is a claim about the stored row; nobody read it.
+    // 「未设置」是关于存储行的断言；没人读过它。
     const host = await mountIndex({ settings: 'fail' })
 
     const text = row(host, '/settings/anchors').text
@@ -402,12 +386,10 @@ describe('读不到就是读不到：不给默认值，也不给 0', () => {
 
 describe('四个子页面是 /settings 的子路由（一条结构断言：导航项的亮灯靠它）', () => {
   it('children 挂在 /settings 上，四个域各是子路由的一条，而不是四条平级路径', () => {
-    // This is a STRUCTURAL assertion on registry data, and it is here because it is the
-    // one fact no rendered assertion in this repo can hold: vue-router's default active
-    // matching follows matched route RECORDS, so a link to `/settings` stays lit on
-    // `/settings/lines` only while the parent record is still matched — i.e. only while
-    // the four pages are CHILDREN. As four flat routes the top nav's 设置 item would go
-    // dark on every sub-page, and the visual lit state is the controller's browser pass.
+    // 这是对注册表数据的**结构**断言，它在此因为它是本仓库任何渲染断言都守不住的那个事实：
+    // vue-router 的默认激活匹配跟随已匹配的路由**记录**，故指向 `/settings` 的链接只有在父记录仍被匹配时
+    // ——即四个页面是**子路由**时——才在 `/settings/lines` 上保持点亮。作为四条平级路由时，顶部导航的
+    // 设置 项会在每个子页面上变暗，而视觉点亮状态是控制器的浏览器侧。
     const router = codeOf(read('../../../router/index.ts'))
 
     expect(router).toContain(`path: '/settings'`)
@@ -423,7 +405,7 @@ describe('四个子页面是 /settings 的子路由（一条结构断言：导�
   })
 })
 
-/** Whether a node sits inside the given subtree. */
+/** 某节点是否位于给定的子树内。 */
 function isInside(root: HostElement, node: HostElement): boolean {
   let current: HostElement | null = node
   while (current) {

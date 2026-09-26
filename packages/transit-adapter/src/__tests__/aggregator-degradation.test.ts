@@ -11,14 +11,11 @@ import type { ITransitProvider } from '../types.js'
 import type { DataSourceType, LineDetail, LiveLineStatus } from '@real-time-transport/shared'
 
 /**
- * What a provider says about ITS OWN answer.
+ * provider 说的是「它自己答案」的性质。
  *
- * The value carries no position and no rank: a provider that answered from the
- * only source capable of answering declares `false`, and a provider that
- * answered as a stand-in for another source declares `true`. The aggregator's
- * contract is to report this declaration — the flag feeds F4's provenance
- * decision and F10's reading-quality reason, so a value derived from list
- * position mislabels the reading the user is shown.
+ * 这个值不带位置也不带排名：唯一能作答的来源给出的答案是 `false`，
+ * 作为他源替代品作答的 provider 声明的才是 `true`。聚合层的契约就是
+ * 原样报告这条声明 —— 由列表位置推导会标错用户看到的读数。
  */
 function reading(params: { dataSource: DataSourceType, isDegraded: boolean }): LiveLineStatus {
   return {
@@ -31,7 +28,6 @@ function reading(params: { dataSource: DataSourceType, isDegraded: boolean }): L
   }
 }
 
-/** A provider that answers with a fixed reading, or declines with null. */
 class ScriptedProvider implements ITransitProvider {
   readonly name: DataSourceType
   private readonly answer: LiveLineStatus | null
@@ -59,9 +55,8 @@ class ScriptedProvider implements ITransitProvider {
 }
 
 /**
- * A subway detail whose service window covers the engine's whole normalized day
- * range, so the reading below exists whatever the wall clock says (the engine
- * maps 00:00–03:59 to +24h, so currentSecOfDay spans [14400, 100799]).
+ * 服务窗口覆盖引擎归一化后整个日范围的线路详情，使下面的读数与
+ * 真实时钟无关（引擎把 00:00–03:59 映射到 +24h）。
  */
 const SUBWAY_DETAIL: LineDetail = {
   lineId: 'subway_027_88',
@@ -88,13 +83,10 @@ const SUBWAY_DETAIL: LineDetail = {
 
 describe('TransitAggregator: degradation is the answering provider\'s own declaration', () => {
   it('does not mark a subway reading degraded just because a later provider answered it', async () => {
-    // A subway id is answered by the subway engine and by nothing else: the
-    // chelaile provider's own `getLiveStatus` declines every `subway_*` id
-    // outright, so the router in position 1 is the ONLY source that can answer
-    // this line. That makes its answer the primary one, and the engine declares
-    // it so (`isDegraded: false` on the status `UniversalSubwayEngine`'s
-    // `getLiveStatus` returns). Reporting `true` here is how a schedule-derived
-    // reading gets labelled 「备用来源」 in the chain.
+    // 地铁 id 只由地铁引擎回答：车来了自己的 `getLiveStatus` 直接拒绝
+    // 每一个 `subway_*` id，所以位置 1 的路由器是唯一能回答该线路的来源 ——
+    // 它是主来源而非替代品，引擎也如此声明。这里报 `true` 会把一条排班
+    // 推演的读数在链路里标成「备用来源」。
     const aggregator = new TransitAggregator([
       new ScriptedProvider('chelaile', null),
       new ScriptedProvider('subway_schedule', reading({ dataSource: 'subway_schedule', isDegraded: false })),
@@ -107,9 +99,8 @@ describe('TransitAggregator: degradation is the answering provider\'s own declar
   })
 
   it('reports the real provider chain\'s subway reading as not degraded', async () => {
-    // Same statement, through the wiring the server actually builds: chelaile,
-    // the subway router and apizero, with the engine driven by an injected
-    // detail resolver so no upstream is contacted.
+    // 同一句话，走服务端真正搭出来的接线：chelaile、地铁路由器与 apizero，
+    // 引擎由注入的详情 resolver 驱动，因此不触达任何上游。
     const engine = new UniversalSubwayEngine(new AmapGisService(''), undefined, async () => SUBWAY_DETAIL)
     const chelaile = new ChelaileProvider()
     const aggregator = new TransitAggregator([
@@ -125,11 +116,9 @@ describe('TransitAggregator: degradation is the answering provider\'s own declar
   })
 
   it('keeps a genuine fallback degraded when a later provider answers as a stand-in', async () => {
-    // apizero is a real fallback: it answers for a bus line only when chelaile
-    // throttled, and its own `getLiveStatus` declares that about itself
-    // (`isDegraded: true` on the status it returns). Deriving the flag from the
-    // declaration rather than the index must not lower it — that sentence is
-    // TRUE here.
+    // apizero 是真正的兜底：只在车来了被限流时替公交线路作答，并且它
+    // 自己的 `getLiveStatus` 就此声明（`isDegraded: true`）。按声明而不是
+    // 按下标取这个标志，不能把它降级 —— 这句话在这里是真的。
     const aggregator = new TransitAggregator([
       new ScriptedProvider('chelaile', null),
       new ScriptedProvider('apizero', reading({ dataSource: 'apizero', isDegraded: true })),
@@ -142,9 +131,8 @@ describe('TransitAggregator: degradation is the answering provider\'s own declar
   })
 
   it('reports a first-position provider\'s own degradation declaration unchanged', async () => {
-    // The other half of position-independence: a fallback answer that happens to
-    // sit first must still be reported as a fallback. Nothing about the list
-    // order may raise or lower this flag.
+    // 位置无关的另一半：恰好在第一位的兜底答案，仍必须被报成兜底。
+    // 列表顺序不能抬高或压低这个标志。
     const aggregator = new TransitAggregator([
       new ScriptedProvider('apizero', reading({ dataSource: 'apizero', isDegraded: true })),
     ])

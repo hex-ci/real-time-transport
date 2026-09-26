@@ -1,44 +1,24 @@
 import { DEFAULT_USER_ID } from '@real-time-transport/shared'
 
 /**
- * THE user id a request is about — one resolution, for every route that takes or
- * defaults one.
+ * 一次请求所针对的那个 user id —— 所有接收或默认 user id 的路由共用同一套解析。
  *
- * Before this, each route resolved its own user inline
- * (`(req.query as any)?.userId || 'default_user'`), and `PATCH /settings` resolved
- * none at all: it wrote the default id while its GET honoured `?userId=`, so a
- * write for one user was invisible to the read for that same user and the literal
- * was hand-copied in the routes, the db layer, the contract layer and the web
- * client. Read and write cannot disagree here because they call the same function.
+ * 读写共用同一个函数，因此不可能对同一个用户各说各话。id 走哪个位置由调用方的形状决定
+ * （读在 query string、写在 body），这里先读 query 再读 body；不接收 id 的路由解析为那唯一
+ * 一个默认值（`DEFAULT_USER_ID`，该字面量的唯一副本）。
  *
- * WHERE the id travels is the caller's shape, not a second contract: a read names
- * it in the query string, a write in the body (the two write schemas declare it).
- * This reads the query first and the body second, so a route never has to say which
- * one it is looking at — and a route that takes no id resolves to the one default
- * (`DEFAULT_USER_ID`, the only copy of that literal).
- *
- * A value that is NOT a non-empty string names no user: an empty `?userId=`, a
- * repeated parameter (which arrives as an array), or a non-string of any kind. It is
- * treated as 「没命名用户」 and resolves to the default, which is the row the app's
- * own client reads — the alternative, refusing the request, was not taken because
- * this app has no user system and no route here can leak anything a default read
- * would not already return. What must not happen is what used to: a route resolving
- * such a request to something that is not an id at all (an array) and asking the
- * store about it.
+ * 不是非空字符串的值不命名任何 user：空 `?userId=`、重复参数（以数组到达）、任何非字符串，
+ * 一律按「没命名用户」处理并解析为默认值。不得把一个不是 id 的值（数组）当成 id 去问存储。
  */
 export interface UserIdCarrier {
-  /** The query string, as a request carries it for a read. */
   query?: unknown
-  /** The parsed body, as a request carries it for a write. */
   body?: unknown
 }
 
-/** The id a request names, or the one default. */
 export function resolveUserId(request: UserIdCarrier = {}): string {
   return userIdIn(request.query) ?? userIdIn(request.body) ?? DEFAULT_USER_ID
 }
 
-/** The `userId` of a query object or a body, when it is one. */
 function userIdIn(source: unknown): string | null {
   if (typeof source !== 'object' || source === null) return null
   const value = (source as { userId?: unknown }).userId

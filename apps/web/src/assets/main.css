@@ -1,66 +1,32 @@
 @import "tailwindcss";
-/* Provides the enter/exit utilities (animate-in, fade-in-0, zoom-in-95, …) that the
-   overlays already reference, plus the accordion-down/up and collapsible-down/up
-   keyframes whose fallback chain includes `--reka-accordion-content-height` — the
-   exact variable reka-ui sets on disclosure content. Before this the referenced
-   utilities compiled to nothing, so every overlay appeared with no motion at all. */
 @import "tw-animate-css";
-/* iOS safe-area insets (env(safe-area-inset-*)) as Tailwind utilities for the
-   notch and home indicator. index.html already carries viewport-fit=cover,
-   without which every env() value resolves to 0. */
+/* 安全区 inset 工具；index.html 的 viewport-fit=cover 是 env() 不为 0 的前提。 */
 @import "tailwindcss-safe-area";
 
-/* Type scale, fixed in whole pixels.
-   Sizes do NOT scale with viewport width. A first attempt did exactly that and
-   broke the overview grid: at 1536px the grid goes from 3 columns to 4, so each
-   card narrows ~27% at the same moment the type jumped to its largest step, and
-   the "开往 …" heading — the only shrinkable element in the card header — started
-   clipping by 60px. Viewport-driven type and viewport-driven column counts fight
-   each other: a wider screen does not mean a wider box.
-
-   No mainstream design system scales UI type with the viewport either. apple.com
-   ships integer px (12/14/17/19/21/24/28/40/56) with no clamp() or vw, and keeps
-   body at 17px on every screen; Material 3 and USWDS likewise use fixed steps.
-   Large-screen legibility comes from layout and measure, not from inflating
-   glyphs.
-
-   So this is the stock Tailwind scale, restated explicitly for two reasons:
-   whole pixels keep glyph rasterisation on pixel boundaries (an odd size makes
-   CJK strokes straddle a pixel edge and go soft), and the unitless line-heights
-   replace Tailwind's rem pairs so leading tracks the glyph size.
-
-   Where a size is genuinely too small for its role, the fix is to move that
-   element up a step, not to inflate the whole scale. */
+/* 字号阶梯：固定 px，不随视口缩放。line-height 用无单位值，使行距跟随字号。 */
 @theme {
-  --text-xs: 0.75rem;      /* 12px */
+  --text-xs: 0.75rem;
   --text-xs--line-height: 1.33;
-  --text-sm: 0.875rem;     /* 14px */
+  --text-sm: 0.875rem;
   --text-sm--line-height: 1.43;
-  --text-base: 1rem;       /* 16px */
+  --text-base: 1rem;
   --text-base--line-height: 1.5;
-  --text-lg: 1.125rem;     /* 18px */
+  --text-lg: 1.125rem;
   --text-lg--line-height: 1.56;
-  --text-xl: 1.25rem;      /* 20px */
+  --text-xl: 1.25rem;
   --text-xl--line-height: 1.4;
-  --text-2xl: 1.5rem;      /* 24px */
+  --text-2xl: 1.5rem;
   --text-2xl--line-height: 1.33;
-  --text-3xl: 1.875rem;    /* 30px */
+  --text-3xl: 1.875rem;
   --text-3xl--line-height: 1.2;
 }
 
-/* The whole app is dark-only (see <html class="dark">), but without this the
-   browser still renders NATIVE widgets — the clock icon in <input type="time">,
-   scrollbars, form autofill, the caret — in their light-theme colours, which are
-   near-black on our dark surfaces. Declaring the scheme lets the browser draw
-   those parts in dark mode instead of us recolouring them with filters. */
+/* 全应用暗色；声明 color-scheme，让浏览器把原生控件（时间选择器图标、滚动条、自动填充、光标）画成深色。 */
 :root {
   color-scheme: dark;
 }
 
-/* Lock text size adjustment on mobile: prevents WebKit Font Boosting and
-   accidental zoom jumps on iOS / WeChat webview.
-   touch-action: manipulation disables double-tap to zoom while preserving
-   full pinch-to-zoom accessibility and pan/scroll. */
+/* 禁止移动端字号自动放大与双击缩放，保留双指缩放。 */
 html, body {
   -webkit-text-size-adjust: 100% !important;
   text-size-adjust: 100% !important;
@@ -92,7 +58,7 @@ html, body {
   }
 }
 
-/* Custom scrollbar */
+/* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -108,12 +74,7 @@ html, body {
   background: #06b6d4;
 }
 
-/* Respect the OS "reduce motion" preference (WCAG 2.3.3).
-   Collapse/disclosure animations in reka-ui are driven by CSS custom
-   properties, so zeroing the durations here disables them everywhere without
-   each component opting in. Kept as an !important override because the
-   component-level transitions are utility classes, which would otherwise win on
-   specificity. */
+/* 尊重系统「减少动态效果」。组件级过渡是工具类，故此处必须 !important 覆盖。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

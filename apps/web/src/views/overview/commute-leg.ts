@@ -1,85 +1,120 @@
-import { stopServedByDirection } from '@real-time-transport/shared/line-group'
+import { placeBoardStop, resolveBoardStopRef } from '@real-time-transport/shared/line-group'
+import type { BoardStopRef } from '@real-time-transport/shared/line-group'
 
 /**
- * Which commute leg a board stop and a direction belong to.
+ * 一块上车点与一个方向属于哪一段通勤。
  *
- * The two legs are stored independently: `morning` is the AM departure and
- * `evening` the PM one.
+ * 两段独立存储：`morning` 是早上那次，`evening` 是下午那次。
  */
 export type CommutePurpose = 'morning' | 'evening'
 
 /**
- * The facts one commute leg is read from, all of them the favourite's own.
+ * 读出一段通勤所需的事实，都是关注行自己的。
  *
- * None of the three may be replaced by "no row came back": an absent row is what
- * every state below looks like from the card.
+ * 三者中的任何一个都不能用「没有返回行」替代：行缺席正是下面每个状态从卡片看过去的样子。
  */
 export interface CommuteLegFacts {
   /**
-   * The direction this leg rides, from `morningDirection` / `eveningDirection` —
-   * via `effectiveCommuteDirection`, which resolves a route that has only one
-   * direction. Null while the user has never chosen one.
-   */
+ * 这一段乘坐的方向，来自 `morningDirection` / `eveningDirection` —— 经
+ * `effectiveCommuteDirection`（它解析只有单个方向的线路）。用户从未选过时为 null。
+ */
   direction: 0 | 1 | null
-  /** The leg's boarding stop, from `morningStopName` / `eveningStopName`. */
-  stopName: string | null
   /**
-   * The chosen direction's own stop list, or undefined while that direction's
-   * detail has not loaded. An EMPTY list is a third fact, not the same as an
-   * absent stop: the direction answered with no stops at all, so nothing about
-   * that stop can be read here.
-   */
-  stops: Array<{ name: string }> | undefined
+ * 一段的上车点，以它被存储的那个身份：站名「与」站序（`resolveBoardStopRef`）。光有站名
+ * 定位不了一个站 —— 同名站可以在一条线上站在两个站序上 —— 所以这里携带的是一对，不是名字。
+ */
+  stop: BoardStopRef | null
+  /**
+ * 所选方向自己的站表，或该方向详情尚未加载时为 undefined。空列表是第三种事实，与「上车点
+ * 缺席」不同：那个方向答了「一个站都没有」，于是关于那个上车点什么都读不出来。
+ */
+  stops: Array<{ name: string, order: number }> | undefined
 }
 
 /**
- * The states a commute leg can be in, as the home card has to state them.
+ * 一段通勤可能处在的状态，按首页卡片必须陈述它们的方式。
  *
- * Every one is a fact about what the user configured, and each has a different
- * thing to say — which is why the words live with the state rather than with the
- * card's row count.
+ * 每一个都是关于用户配置了什么的「事实」，而每个都有不同的东西要说 —— 所以措辞随状态走，
+ * 而不是随卡片的行数走。
  */
 export type CommuteLegState
-  /** Neither the direction nor the board stop has been chosen for this leg. */
   = | 'leg-unset'
-  /** A board stop is set for this leg, but no direction — so no stop can be read. */
+  /** 上车点设了、方向没设：于是读不了任何站。 */
     | 'direction-unset'
-  /** The direction is chosen, but the leg has no board stop. */
     | 'stop-unset'
-  /** Direction and stop are both set, and that direction calls at no stop at all. */
+  /** 方向与上车点都设了，而该方向一个站都不停。 */
     | 'stops-unavailable'
-  /** Direction and stop are both set, and that direction does not call at the stop. */
+  /** 方向与上车点都设了，而该方向不停这一站。 */
     | 'stop-unserved'
-  /** Both are set and the stop is on this direction: the leg can be read. */
+  /**
+ * 存储的站序不在这个方向的列表里 —— 站被重新编号了，或那个站没有了。
+ * 绝不能退回到站名：那会无声地挪动用户的上车站台。
+ */
+    | 'stop-stale'
+  /**
+ * 一行只留了站名，而在那个方向上该站名不止出现一次：用户指的是哪一个无法得知，所以这一段
+ * 读不出来。
+ */
+    | 'stop-ambiguous'
     | 'ready'
 
 /**
- * Which state this leg is in, or null while it cannot be established — the
- * direction's stop list has not loaded, so neither the stop nor the direction can
- * be judged against it.
+ * 这一段读出的上车点，以卡片与它请求到站数据所用的 (站名, 站序) 这一对 —— 存储的上车点在
+ * 所选方向里定位不到时为 null。
  *
- * The order is the settings screen's own: a direction is chosen before a stop
- * (a stop's number, and whether the direction even calls there, depends on the
- * direction), so a leg missing both reports the direction as the thing to pick.
+ * 这是卡片判定它是关于哪一个实体站的「唯一」地方，它拒绝两种错法：站名不止出现一次而没存
+ * 站序（无从得知），以及存的站序列表里已经没有（过期）。两者都答 null —— 绝不是该站名下的
+ * 第一站。用户选了第 36 站却拿到第 1 站的步行时间与到站分钟，就是这么来的。
  */
-export function commuteLegStateOf(facts: CommuteLegFacts): CommuteLegState | null {
-  if (facts.direction === null) {
-    return facts.stopName ? 'direction-unset' : 'leg-unset'
-  }
-  if (!facts.stopName) return 'stop-unset'
-  // Not loaded: the card is still loading, and a mismatch cannot be claimed from
-  // a list nobody has read.
-  if (!facts.stops) return null
-  if (facts.stops.length === 0) return 'stops-unavailable'
-  return stopServedByDirection({ stops: facts.stops }, facts.stopName) ? 'ready' : 'stop-unserved'
+export function commuteStopOf(
+  fav: {
+    morningStopName?: string
+    morningStopOrder?: number | null
+    eveningStopName?: string
+    eveningStopOrder?: number | null
+  },
+  purpose: CommutePurpose,
+  stops: ReadonlyArray<{ name: string, order: number }> | undefined,
+): { name: string, order: number } | null {
+  const placement = placeBoardStop(stops, resolveBoardStopRef(fav, purpose))
+  return placement.state === 'placed' ? { name: placement.name, order: placement.order } : null
 }
 
 /**
- * The state, as the line the card shows — or null when there is nothing to say.
+ * 这一段处在哪个状态，或者在建立不起来时为 null —— 该方向的站表还没加载，于是无论是那个
+ * 上车点还是那个方向，都还不能对着它判断。
  *
- * `「设置」` is named because that screen owns both of these fields; no state
- * promises a control the app does not have. The one notice without it is a
- * direction with no stop data at all, which no setting on any screen supplies.
+ * 顺序是设置页自己的顺序：先选方向再选上车点（一个站的编号、甚至该方向是否停靠，都取决于
+ * 方向），所以两者都缺的一段报告「方向」是要先选的东西。
+ */
+export function commuteLegStateOf(facts: CommuteLegFacts): CommuteLegState | null {
+  if (facts.direction === null) {
+    return facts.stop ? 'direction-unset' : 'leg-unset'
+  }
+  if (!facts.stop) return 'stop-unset'
+  // 未加载：卡片还在加载，而从一个没人读过的列表里说不出「不匹配」。
+  if (!facts.stops) return null
+  if (facts.stops.length === 0) return 'stops-unavailable'
+
+  const placement = placeBoardStop(facts.stops, facts.stop)
+  if (placement.state === 'placed') return 'ready'
+  if (placement.state === 'ambiguous') return 'stop-ambiguous'
+  if (placement.state === 'stale') return 'stop-stale'
+  if (placement.state === 'absent') return 'stop-unserved'
+  // 'unset' 到不了（上车点已设），'not-loaded' 也到不了（列表在这里是有值的）；一段谁都
+  // 判断不了的通勤什么都不说，而不是猜。
+  return null
+}
+
+/**
+ * 该状态作为卡片显示的那一行 —— 没有话说时为 null。
+ *
+ * 点名「设置」是因为那块界面拥有这两个字段；没有任何状态承诺一个应用没有的控件。唯一不带它的
+ * 是「该方向根本没有站点数据」，那是任何界面上的任何设置都供不出的。
+ *
+ * 关于读不出的上车点的两个状态，各自说出它是「哪一种」原因：「不在本方向停靠」对一个该方向
+ * 停了两次的站名是假话，「站序已变」对一个从未存过站序的行也是假话。错误的原因会送用户去修错
+ * 的东西。
  */
 export function commuteLegNoticeOf(
   state: CommuteLegState | null,
@@ -92,5 +127,7 @@ export function commuteLegNoticeOf(
   if (state === 'direction-unset') return `未设置${leg}方向 · 在「设置」中设置`
   if (state === 'stop-unset') return `未设置${leg}上车点 · 在「设置」中设置`
   if (state === 'stops-unavailable') return '本方向暂无站点数据，无法显示到站时间'
+  if (state === 'stop-ambiguous') return `${leg}上车点有两站同名 · 在「设置」中重选`
+  if (state === 'stop-stale') return `${leg}上车点站序已变 · 在「设置」中重选`
   return `${leg}上车点不在本方向停靠 · 在「设置」中重选`
 }

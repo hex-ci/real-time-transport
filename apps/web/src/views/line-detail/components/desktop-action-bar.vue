@@ -25,12 +25,9 @@ const emit = defineEmits<{
     </RouterLink>
 
     <div class="flex items-center gap-2">
-      <!-- Up/down direction switch, rendered as a real TAB BAR: a fixed
-           left/right slot per direction so only the highlight moves between
-           switches (never the labels). Swaps BOTH lineId and direction,
-           because bus routes use a distinct upstream lineId per direction
-           while subway reuses one. Only offered when the opposite way really
-           resolves — never a "reverse driving" toggle on the same data. -->
+      <!-- 上下行方向切换，渲染成真正的页签栏：每个方向固定一个槽位，故切换时只有高亮在移动。
+         同时替换 lineId 与 direction（公交每个方向是不同的线路 id，地铁复用同一个），
+         且只在反向真的能解析时提供。 -->
       <div
         v-if="canSwitchDirection"
         role="tablist"
@@ -52,8 +49,7 @@ const emit = defineEmits<{
         </button>
       </div>
 
-      <!-- Commute purpose badge: which leg this direction serves, read from the
-           user's stored choice. Hidden when they have not chosen. -->
+      <!-- 通勤目的徽标：这个方向服务哪一腿，取自使用者存下来的选择；未选过时隐藏。 -->
       <span
         v-if="activePurpose"
         class="hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium sm:inline-block"

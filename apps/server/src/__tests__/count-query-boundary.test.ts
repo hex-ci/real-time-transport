@@ -2,24 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 
 /**
- * G-D2 at the HTTP boundary: a `count` that is PRESENT but is not a row count is
- * refused, not silently turned into an empty board.
+ * G-D2 在 HTTP 边界：PRESENT 但不是行数的 `count` 被拒绝，而不是被悄悄变成一块空站牌。
  *
- * Measured live: `GET /lines/<id>/stations/公主坟/arrivals?count=abc` answered
- * **200 with 0 rows** at a moment when the same line's `/live` carried 11
- * vehicles. The mechanism is `Math.min(Number('abc'), 20)` — `NaN` — travelling
- * into `vehicleArrivals(...).slice(0, NaN)`, which is `[]`: a fabricated empty
- * state that reads exactly like 「这条线路此刻没有车」. Same family as the
- * `direction` and `order` boundaries this repo already refuses at the edge: the
- * value the answer carries must be the value the caller stated, or there must be
- * no answer.
+ * 与本仓库已在边界拒绝的 `direction` 和 `order` 同族：答案携带的值必须是调用方陈述的值，
+ * 否则就不该有答案。畸形的值会让 `Math.min(Number('abc'), 20)` —— 即 NaN —— 流进
+ * `vehicleArrivals(...).slice(0, NaN)`，也就是 `[]`：一个读起来正好像「这条线路此刻没有
+ * 车」的空状态。
  *
- * Both halves are pinned: a malformed value 400s naming the accepted form, and a
- * valid value still answers rows. The absent parameter is pinned too, because it
- * is the one case that is NOT a refusal — it keeps the default it has today.
+ * 两面都钉住：畸形值 400 并点名可接受的形式，合法值照旧答出行。缺参也钉住，因为它是唯一
+ * 不是拒绝的情形 —— 它保持今天的默认值。
  *
- * 甲路..辛路 and `line_027_1` are placeholders: no real route or upstream id
- * appears here, and no upstream is reachable — every read below is a stub.
+ * 甲路..辛路 与 `line_027_1` 都是占位：这里不出现任何真实线路或上游 id，也触不到任何上游
+ * —— 下面的每次读取都是替身。
  */
 
 afterEach(() => {
@@ -28,7 +22,7 @@ afterEach(() => {
 })
 
 const LINE_ID = 'line_027_1'
-/** The platform the readings below are about: the fourth stop of the fixture. */
+/** 下面这些读数关于的站台：夹具的第四站。 */
 const STATION = '丁路'
 const STATION_ORDER = 4
 
@@ -41,13 +35,10 @@ const STATIONS = ['甲路', '乙路', '丙路', '丁路', '戊路', '己路', '�
 }))
 
 /**
- * The upstream answer for this line: it exists, its stops are known, and EIGHT
- * vehicles are on their way to the fourth stop with stated travel times — so a
- * correct arrivals answer is a list of rows whose LENGTH is the `count` the caller
- * asked for (up to the eight that exist), and an empty list can only be a
- * fabrication. Eight, not one: with a single vehicle, `count=6` and `count=1` and an
- * absent count all answer the same one row, and no assertion over the rows could
- * tell the route's default from a value the caller stated.
+ * 这条线路的上游答案：线路存在、站点已知，八辆车正开向第四站并带陈述过的行程时间 —— 所以
+ * 正确的到达答案是一串行，其长度等于调用方要的 `count`（最多到存在的八辆），空列表只能是
+ * 编造。八辆而不是一辆：只有一辆车时 `count=6`、`count=1` 与缺参都答同样的一行，任何对行
+ * 的断言都分不出路由的默认值与调用方陈述的值。
  */
 function stubUpstream(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -74,13 +65,11 @@ function stubUpstream(): void {
   }))
 }
 
-/** The arrivals URL for this platform, with whatever query the test states. */
 function arrivalsUrl(query: string): string {
   return `/api/transit/lines/${LINE_ID}/stations/${encodeURIComponent(STATION)}/arrivals`
     + `?direction=0&cityCode=027&order=${STATION_ORDER}${query}`
 }
 
-/** The rows one arrivals answer carries. */
 function rowsOf(body: string): unknown[] {
   return (JSON.parse(body).data?.arrivals ?? []) as unknown[]
 }
@@ -92,8 +81,8 @@ describe('G-D2: a malformed count is refused at the boundary', () => {
     try {
       const res = await app.inject({ method: 'GET', url: arrivalsUrl('&count=6') })
       expect(res.statusCode, res.body).toBe(200)
-      // The fixture's own control: the line HAS a vehicle heading for this
-      // platform, so 0 rows on the next assertion can only come from the count.
+      // 夹具自己的对照：这条线路确实有车正开向这个
+      // 站台，所以下一条断言里的 0 行只可能来自 count。
       expect(rowsOf(res.body).length, res.body).toBeGreaterThan(0)
     }
     finally {
@@ -110,8 +99,8 @@ describe('G-D2: a malformed count is refused at the boundary', () => {
         expect(res.statusCode, `count=${JSON.stringify(raw)} was accepted`).toBe(400)
         const body = JSON.parse(res.body)
         expect(body.success, `count=${JSON.stringify(raw)}`).toBe(false)
-        // The refusal names the domain, so a caller can correct the request
-        // without reading the source.
+        // 拒绝点名了所在的域，调用方不必读源码
+        // 就能改对请求。
         expect(body.error, `count=${JSON.stringify(raw)}`).toContain('count')
         expect(body.error, `count=${JSON.stringify(raw)}`).toContain('20')
       }
@@ -126,8 +115,8 @@ describe('G-D2: a malformed count is refused at the boundary', () => {
     const app = await buildApp({})
     try {
       await app.inject({ method: 'GET', url: arrivalsUrl('&count=abc') })
-      // A request the boundary cannot mean must not spend upstream quota — nor be
-      // answered from a call made with NaN.
+      // 边界无法表达其含义的请求不得花掉上游配额 —— 也不能
+      // 用一次 NaN 调用去作答。
       expect(vi.mocked(fetch)).not.toHaveBeenCalled()
     }
     finally {
@@ -136,9 +125,9 @@ describe('G-D2: a malformed count is refused at the boundary', () => {
   })
 
   it('never answers 200 with an empty board for a malformed count', async () => {
-    // The defect's own shape: 200 + 0 rows while the line has a vehicle. Stated
-    // as its own case because a status-only assertion could be satisfied by a
-    // refusal that still answered a body.
+    // 线路有车时答 200 + 0 行是必须避免的形状。作为独立用例
+    // 陈述，因为只看状态的断言可以被一个仍然答了响应体的
+    // 拒绝满足。
     stubUpstream()
     const app = await buildApp({})
     try {
@@ -160,9 +149,9 @@ describe('G-D2: the domain itself, both halves', () => {
       try {
         const res = await app.inject({ method: 'GET', url: arrivalsUrl(`&count=${count}`) })
         expect(res.statusCode, `count=${count}`).toBe(200)
-        // Eight vehicles exist, so a count at or below eight is exactly that many
-        // rows: the value the caller stated is the length it gets, and a route that
-        // ignored `count` would answer eight for the one-row cases too.
+        // 存在八辆车，所以不超过八的 count 就是那么多行：
+        // 调用方陈述的值就是它拿到的长度，而忽略 `count` 的路由
+        // 在一行的那些情形下也会答八行。
         expect(rowsOf(res.body).length, `count=${count}`).toBe(Math.min(count, 8))
       }
       finally {
@@ -172,10 +161,10 @@ describe('G-D2: the domain itself, both halves', () => {
   })
 
   it('does not answer more rows than the upper bound allows', async () => {
-    // The bound the route already implied (`Math.min(..., 20)`), now stated
-    // rather than applied silently. One vehicle is all this fixture has, so the
-    // row count cannot distinguish the bounds — what is pinned is that the
-    // boundary refuses a value ABOVE the bound instead of quietly capping it.
+    // 路由本来就隐含的上界（`Math.min(..., 20)`），现在被说出来
+    // 而不是默默施加。这个夹具只有一辆车，所以行数分不出两个
+    // 上界 —— 钉住的是边界拒绝一个 ABOVE 上界的值，
+    // 而不是悄悄把它截断。
     stubUpstream()
     const app = await buildApp({})
     try {
@@ -188,18 +177,18 @@ describe('G-D2: the domain itself, both halves', () => {
   })
 
   it('keeps today\'s default when count is ABSENT', async () => {
-    // The one case that is not a refusal: no count stated, so the route's own
-    // default decides. Pinned by LENGTH against the eight vehicles the fixture
-    // carries, so a change to the default has to be stated here: six rows is what
-    // the route answers, and five or seven would be a different default.
+    // 唯一不是拒绝的情形：没有陈述 count，于是由路由自己的
+    // 默认值决定。用长度对着夹具携带的八辆车钉住，
+    // 所以默认值一旦改变必须在这里说明：路由答的是六行，
+    // 五行或七行就是另一个默认值。
     stubUpstream()
     const app = await buildApp({})
     try {
       const absent = await app.inject({ method: 'GET', url: arrivalsUrl('') })
       expect(absent.statusCode, absent.body).toBe(200)
       expect(rowsOf(absent.body).length, 'the absent-count default is no longer 6').toBe(6)
-      // Both reads come through the same build: the live cache may answer the
-      // second one, which is fine — the rows are the same reading either way.
+      // 两次读取走的是同一个构建：实时缓存可能答第二
+      // 次，这没问题 —— 两种情况下行都是同一个读数。
       const explicit = await app.inject({ method: 'GET', url: arrivalsUrl('&count=6') })
       expect(rowsOf(absent.body)).toEqual(rowsOf(explicit.body))
     }
@@ -211,11 +200,10 @@ describe('G-D2: the domain itself, both halves', () => {
 
 describe('G-D2: the same route\'s other parameters are held to the same rule', () => {
   it('refuses a malformed order instead of dropping it', async () => {
-    // `order` is the stop the reading is priced to, and this route used
-    // `Number(q.order)` — so `?order=abc` became NaN, failed the service's
-    // `typeof === 'number' && > 0` test, and was silently dropped: the caller
-    // asked about one platform and was answered about the whole line. The live
-    // route already refuses it (`targetOrderQueryOf`); this one now agrees.
+    // `order` 是读数所定价的站，这条路由过去用 `Number(q.order)` 读它：
+    // `?order=abc` 变成 NaN，没过服务的 `typeof === 'number' && > 0` 判断，
+    // 被悄悄丢掉 —— 调用方问的是一个站台，答的却是整条线路。
+    // 实时路由本来就拒绝它（`targetOrderQueryOf`）；这条现在也一致。
     for (const raw of ['abc', '0', '-1', '2.5']) {
       stubUpstream()
       const app = await buildApp({})

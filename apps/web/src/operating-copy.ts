@@ -1,27 +1,18 @@
 import type { OperatingStatus } from '@real-time-transport/shared'
 
 /**
- * F3: the operating fact, as the line a board shows.
+ * 运营状态，作为牌子上那行字。
  *
- * A board that has no vehicle to show has exactly one of four things to say, and
- * they are not interchangeable: service has not started yet, service has ended,
- * the line is running and nothing is in range, or the line's hours are unknown.
- * The server decides which one applies (from the line's own first/last departure
- * times); this module is where that state becomes the user's words, so the
- * wording is a tested fact rather than a template only a browser can check.
+ * 没有车可显示的牌子只有四句话可说，且互不通用：未到首班、已过末班、运营中但没有车在范围
+ * 内、运营时间未知。服务端决定是哪一个；这个模块把状态变成使用者读到的话，所以这句文案是
+ * 可断言的事实，而不是只有浏览器能检查的模板。
  *
- * The copy states the fact and stops. It names no data source, carries no
- * marketing register, and tells the user nothing to do.
- *
- * 「暂无来车」 survives only for the case it is literally the whole truth: no
- * status at all (the feed has not arrived), when nothing about the service day
- * is known. Everywhere the state is known, the state is what is shown.
+ * 只陈述事实，不指任何数据源，不告诉使用者该做什么。
  */
 
 /**
- * The state alone, for a badge: the short word a compact control has room for,
- * without the time it refers to. Same four states, same one-word-per-state rule,
- * so a badge and a full line can never disagree about which state this is.
+ * 只有状态，给紧凑控件用的短词 —— 不带它所指的时间。同样的四个状态、同样一字一状态，所以
+ * 角标与整行永远不可能对同一个状态各说一套。
  */
 export function operatingLabelOf(status: OperatingStatus | null | undefined): string {
   if (!status) return '暂无来车'
@@ -32,16 +23,11 @@ export function operatingLabelOf(status: OperatingStatus | null | undefined): st
 }
 
 /**
- * The live screen's badge, where a vehicle actually on the line can outrank the
- * schedule — but ONLY a real one.
+ * 实时页的角标：真正在线上跑的车可以压过排班，但只能是真实的车。
  *
- * `hasRealVehicle` is the payload's own declared source classified by
- * `vehicleProvenanceOf`, never a vehicle COUNT. A count cannot make that
- * distinction: the subway engine places its trains inside an internal simulation
- * window, so a line whose hours are unknown can have movement in the list while
- * the state answer on the same screen says 运营时间未知, and generated data must
- * never outrank a known unknown. With no real vehicle the badge is the state,
- * word for word.
+ * `hasRealVehicle` 是 payload 自己声明的来源经 `vehicleProvenanceOf` 分类的结果，绝不是
+ * 车辆的条数 —— 条数分不出这个区别，生成的数据也绝不能压过一个已知的未知。没有真实车辆时
+ * 角标就是状态本身，一字不改。
  */
 export function operatingBadgeOf(
   hasRealVehicle: boolean,
@@ -50,7 +36,7 @@ export function operatingBadgeOf(
   return hasRealVehicle ? '有车在途' : operatingLabelOf(status)
 }
 
-/** The fact as text, with the time it refers to when that time is known. */
+/** 事实本身，时间已知时带上它所指的时间。 */
 export function operatingTextOf(status: OperatingStatus | null | undefined): string {
   if (!status) return '暂无来车'
 
@@ -61,8 +47,7 @@ export function operatingTextOf(status: OperatingStatus | null | undefined): str
     return status.lastDeparture ? `已过末班 · 末班 ${status.lastDeparture}` : '已过末班'
   }
   if (status.state === 'operating') {
-    // Running, but no vehicle in range: the two halves are both facts, and the
-    // second is the one that used to be reported as if it were the whole story.
+    // 运营中但没有车在范围内：两截都是事实。
     return '运营中 · 暂无来车'
   }
   return '运营时间未知 · 暂无来车'

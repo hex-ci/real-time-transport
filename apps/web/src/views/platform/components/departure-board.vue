@@ -11,30 +11,23 @@ const props = defineProps<{
   items: DepartureItem[]
   loading: boolean
   /**
-   * The followed-lines read's own state, from the page that made it.
+   * 关注线路读取自己的状态，由发起该读取的页面给出。
    *
-   * The rows are built from the followed lines, so an empty board has three causes and this
-   * is what tells them apart — 「该站台暂无已关注线路途经」 is true of the ANSWERED empty list
-   * only. A read that failed leaves no station to show either, and saying the user follows
-   * nothing then is a claim about their stored rows that nobody obtained.
+   * 行由关注线路构造，故空屏有三个成因，本字段是区分它们的依据：「该站台暂无已关注线路途经」
+   * 只对「已作答的空列表」为真；读失败时同样没有可展示的站台，此时说用户什么都没关注，
+   * 是对其已存数据一个无人取得过的断言。
    */
   favoritesRead: ReadState
   /**
-   * True while a refresh is running over rows that stay on screen.
+   * 刷新正运行在留在屏上的行之上时为 true。
    *
-   * The non-destructive half of the loading flag: the rows are kept and the
-   * update is signalled here instead — the refresh control in its busy state,
-   * the same word (「正在刷新…」) the refresh family already words this state
-   * with. It never shows together with the loading body: the body appears
-   * exactly when there is nothing to keep.
+   * 它是 loading 的非破坏性一半：行被保留，改在控件上示意更新（刷新家族自己的措辞
+   * 「正在刷新…」）。它绝不与 loading 体同时出现——体恰在没有东西可留时出现。
    */
   refreshing?: boolean
   /**
-   * The freshness line for the read behind the rows on screen, as the page
-   * reports it — `null` while the board holds nothing a read produced. The
-   * instant is the response's own `updatedAt`, so this line keeps describing
-   * the read the VISIBLE rows came from through a refresh, a failure
-   * included: an update that died on the wire does not move it.
+   * 屏上这些行背后那次读取的新鲜度行，由页面报告——屏上没有读取产出的东西时为 `null`。
+   * 时刻取自响应自己的 `updatedAt`，故刷新甚至失败时，这一行仍描述**可见的行**来自哪次读取。
    */
   freshness?: { text: string } | null
 }>()
@@ -45,19 +38,15 @@ defineEmits<{
 }>()
 
 /**
- * Whether the last full read left every row with nothing to state — the shape a
- * refresh that failed end to end takes (each request died on the wire). The
- * freshness line then carries the failure beside the kept rows' own instant:
- * the rows stay, and what happened to them is stated where the user reads.
+ * 上一次完整读取是否让每一行都没有东西可陈述——端到端失败的刷新的形状。
+ * 此时新鲜度行把失败放在保留行自己的时刻旁：行留下，而它们遭遇了什么就在用户读到之处陈述。
  */
 const readFailed = computed(() =>
   props.items.length > 0 && props.items.every(item => item.unavailable))
 
 /**
- * What the freshness line states. A failed refresh keeps BOTH facts: the rows'
- * own instant stays on screen (it still describes the visible rows) and the
- * failure rides beside it in the refresh family's own wording (「刷新失败 ·
- * 未能取到最新数据」, from `transit.store`) — never instead of it.
+ * 新鲜度行陈述什么。刷新失败时两个事实都留：行自己的时刻留在屏上（它仍描述可见的行），
+ * 失败以刷新家族自己的措辞并排呈现——绝不取而代之。
  */
 const failureText = '刷新失败 · 未能取到最新数据'
 const freshnessText = computed(() => {
@@ -68,13 +57,10 @@ const freshnessText = computed(() => {
 })
 
 /**
- * F4: the kind of number this row's arrival minute is, worded in the one place
- * that words marks.
+ * 本行到站分钟是哪一类数字，措辞交给唯一给标记措辞的地方。
  *
- * Read from the row's own provenance, which the view decided from the source the
- * payload declared — the board shows a row per line, so it cannot state one kind
- * for the list. A row that stated nothing yields null and renders no mark: 「没有来源」
- * must never read as 实时.
+ * 读自本行自己的来源，由视图按载荷声明的来源决定——一块屏每行一条线路，故说不出一个
+ * 覆盖整张列表的类别。没有陈述的行返回 null 且不渲染任何标记：「没有来源」绝不能读成实时。
  */
 function markOf(item: DepartureItem): string | null {
   return provenanceLabelOf(item.provenance)
@@ -83,10 +69,8 @@ function markOf(item: DepartureItem): string | null {
 
 <template>
   <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-    <!-- The read behind the rows on screen, stated as the refresh family words it.
-         Rendered whenever there is one — a refresh running over kept rows does not
-         replace it (the instant still describes the visible rows), and a refresh
-         that failed states that here, in the family's own wording. -->
+    <!-- 屏上这些行背后那次读取，按刷新家族的措辞陈述。有就渲染——刷新运行在保留的行之上时
+         不替换它（时刻仍描述可见的行），刷新失败也在此陈述。 -->
     <div
       v-if="freshnessText"
       class="border-b border-slate-800/60 px-3 py-2 text-xs text-slate-400 lg:px-4 lg:text-base"
@@ -95,7 +79,7 @@ function markOf(item: DepartureItem): string | null {
       {{ freshnessText }}
     </div>
 
-    <!-- Desktop header: hidden on mobile, where the two-row card layout needs no headings -->
+    <!-- 桌面表头：移动端隐藏，两行卡片布局不需要表头 -->
     <div class="hidden grid-cols-12 border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider md:grid">
       <div class="col-span-3">线路 / 始发</div>
       <div class="col-span-4">开往方向</div>
@@ -103,16 +87,14 @@ function markOf(item: DepartureItem): string | null {
       <div class="col-span-2 text-right">车况</div>
     </div>
 
-    <!-- The loading body and the rows are now separate states, not v-if/v-else:
-         the body appears only when there is nothing on screen to keep, and rows
-         stay rendered straight through a refresh (signalled on the control). -->
+    <!-- loading 体与行是两个独立状态，不是 v-if/v-else：体只在屏上无物可留时出现，
+         而行在整次刷新中持续渲染（更新在控件上示意）。 -->
     <div v-if="loading && items.length === 0" class="p-8 text-center text-xs text-slate-400 lg:p-8.5 lg:text-base">
       正在加载车况数据...
     </div>
 
-    <!-- An empty board has THREE causes, and each is worded as itself: the read failed (say
-         so, and offer the read again), nothing has answered yet, or the list answered and no
-         followed line passes this platform. Only the last one is a fact about what is stored. -->
+    <!-- 空屏有三个成因，各自照原样措辞：读失败（说出来并给出重试）、尚无任何读取作答、
+         或列表已作答且没有关注线路经过本站台。只有最后一个是关于已存数据的事实。 -->
     <div
       v-else-if="items.length === 0 && favoritesRead === 'unreadable'"
       class="flex flex-wrap items-center justify-center gap-2 p-8 text-center lg:p-8.5"
@@ -146,7 +128,7 @@ function markOf(item: DepartureItem): string | null {
         :key="item.id"
         class="px-3 py-3 transition hover:bg-slate-900/50 md:grid md:grid-cols-12 md:items-center md:px-4 md:py-3.5"
       >
-        <!-- Row 1 (mobile): line badge + direction -->
+        <!-- 第 1 行（移动端）：线路徽标 + 方向 -->
         <div class="flex items-center gap-2.5 md:col-span-4 md:col-start-1 md:row-start-1">
           <span
             class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2 font-mono font-bold text-cyan-400 whitespace-nowrap"
@@ -157,50 +139,36 @@ function markOf(item: DepartureItem): string | null {
           <span class="min-w-0 truncate text-xs font-medium text-slate-200 lg:text-base">{{ item.terminal }}</span>
         </div>
 
-        <!-- Row 2 (mobile): ETA + status, right-aligned against row 1's badge column -->
+        <!-- 第 2 行（移动端）：到站与车况，与第 1 行的徽标列右对齐 -->
         <div class="mt-2 flex items-end justify-between md:col-span-6 md:col-start-7 md:row-start-1 md:mt-0 md:justify-end md:gap-4">
           <div class="font-mono">
             <template v-if="item.etaMinutes !== null">
               <span class="text-base font-bold text-cyan-400">{{ item.etaMinutes }}</span>
               <span class="text-xs text-slate-400"> 分钟</span>
-              <!-- F4: the kind of number the minute is, from this row's own
-                   provenance. A row that stated none renders no mark at all, so
-                   an unclassified minute never borrows the flattering word, and
-                   the mark stays quieter than the number it describes. -->
+              <!-- 分钟是哪一类数字，取自本行自己的来源。没有陈述的行不渲染任何标记，
+                   故未归类的分钟绝不借用好看的那个词。 -->
               <span v-if="markOf(item)" class="ml-1 text-xs font-normal text-slate-400"><span aria-hidden="true">·</span> {{ markOf(item) }}</span>
               <span v-if="item.stopsAway !== null" class="block text-xs text-slate-400">距 {{ item.stopsAway }} 站</span>
             </template>
-            <!-- F3: with no vehicle carrying an ETA, state the operating fact —
-                 service has ended, has not started, or is running with nothing
-                 in range. The pair that used to sit here claimed to cover both
-                 「waiting to depart」 and 「out of service」 at once, which is the
-                 conflation F3 removes. -->
+            <!-- 没有车带 ETA 时陈述运营事实：已收班、未开班，或运营中而范围内无车。 -->
             <template v-else-if="item.operatingText">
               <span class="text-xs font-normal text-slate-400">{{ item.operatingText }}</span>
             </template>
-            <!-- The request failed: this row has no vehicle and no service day to
-                 report. Keyed off the named state, never a rendered word — and the
-                 crowding chip says nothing about it, so the failure is stated once. -->
+            <!-- 请求失败：本行没有车、也没有运营日可报。以具名状态为键，绝不以渲染用词为键。 -->
             <template v-else-if="item.unavailable">
               <span class="text-xs font-normal text-slate-400">无法获取</span>
               <span class="block text-xs text-slate-400">数据暂不可用</span>
             </template>
             <template v-else>
-              <!-- Vehicle en route but upstream provides no ETA. The token comes
-                   from `@/arrival-copy`, the one place that words this state, so
-                   every surface that shows it shows the same sentence. -->
+              <!-- 车在途但数据源没给 ETA。该 token 来自 `@/arrival-copy`——唯一为这个状态
+                   措辞的地方，故每个展示它的界面展示同一句话。 -->
               <span class="text-xs font-normal text-slate-400">无法估算</span>
               <span class="block text-xs text-slate-400">{{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}</span>
             </template>
           </div>
 
-          <!-- The crowding chip is a verdict, in word and in colour: both come
-               from the level alone, never from whether a minute exists and never
-               from a failure the numbers column already states. A row can hold a
-               genuine verdict while its minute is uncomputable, so gating either
-               on the minute would grey — or mute — exactly the verdict that IS
-               known. An unknown level keeps the neutral chip, so neither the
-               colour nor the word claims a verdict. -->
+          <!-- 拥挤度芯片是判决，词与色都只来自等级：绝不来自分钟是否存在，
+               也绝不来自数字列已陈述的失败。 -->
           <span
             class="inline-block rounded px-1.5 py-0.5 text-xs font-medium"
             :class="congestionChipClass(item.congestion)"
@@ -210,11 +178,8 @@ function markOf(item: DepartureItem): string | null {
         </div>
       </div>
 
-      <!-- The refresh control, rendered only over rows it can re-read: a busy
-           refresh disables it and states the update with the family's own word
-           (「正在刷新…」) — the non-destructive signal, beside rows that stay.
-           It is disabled on the prop rather than hidden, so the control the user
-           pressed stays under their eyes while it works. -->
+      <!-- 刷新控件，只在它能重读的行之上渲染：忙时禁用，并以刷新家族自己的措辞
+           （「正在刷新…」）示意——非破坏性的信号，就在留下的行旁边。 -->
       <div class="flex justify-center border-t border-slate-800/60 p-2.5">
         <button
           type="button"

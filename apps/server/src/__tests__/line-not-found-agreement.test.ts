@@ -2,26 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 
 /**
- * G-D1 at the HTTP boundary: every route keyed by a line id states the SAME fact
- * about whether the upstream knows that line.
+ * G-D1 在 HTTP 边界：每条以线路 id 为键的路由，对「上游是否认识这条线路」说的是同一件事。
  *
- * Measured live against the running server: `GET /api/transit/lines/
- * NO_SUCH_LINE_999/live` answered **200** with
- * `{buses: [], dataSource: 'chelaile', isDegraded: false}` — byte-identical to a
- * real line with no vehicle in transit right now — while `GET /api/transit/lines/
- * NO_SUCH_LINE_999` answered **404**. One id, two opposite facts, and the wrong
- * one was the one a client could not tell from 「此刻没车」.
+ * 这里钉的是客户端看到的后果：查不到的 id 在四条以线路为键的路由上一致地 404，而正对照
+ * —— 一条真实存在、此刻没有车在途的线路 —— 照旧回 200 与空列表，因为一刀切的拒绝比缺陷
+ * 更糟。
  *
- * The miss is refused at the source (the provider's live read answers null for a
- * payload holding no record of the line — `line-record-identity.test.ts` in
- * `packages/transit-adapter`), so the boundary's existing 404 branch fires. What
- * is pinned HERE is the consequence a client sees: the four line-keyed routes
- * agree on 404, and the POSITIVE CONTROL — a real line with no vehicle in
- * transit — keeps answering 200 with an empty list, because a blanket refusal
- * would be worse than the defect.
- *
- * 甲路 / 乙路 and `line_027_1` are placeholders: no real route or upstream id
- * appears here, and no upstream is reachable — every read below is a stub.
+ * 甲路 / 乙路 与 `line_027_1` 都是占位：这里不出现任何真实线路或上游 id，也触不到任何
+ * 上游 —— 下面的每次读取都是替身。
  */
 
 afterEach(() => {
@@ -29,9 +17,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** A line id the upstream has no record of. */
 const GHOST_LINE = 'NO_SUCH_LINE_999'
-/** A line the upstream does know, with nothing in transit in this stub. */
+/** 上游确实认识、但在这个替身里没有车在途的一条线路。 */
 const REAL_LINE = 'line_027_1'
 const STATION = '甲路'
 
@@ -41,12 +28,10 @@ const STATIONS = [
 ]
 
 /**
- * The upstream's answer about whatever line is asked about.
+ * 上游对被问到的任何线路的回答。
  *
- * One payload for every id — the shape the endpoint really returns for an id it
- * has never heard of is an envelope with no `line`, no `stations` and no
- * `buses`; a line that exists answers with its stop list and, when nothing is
- * running, no vehicles.
+ * 所有 id 共用一个载荷 —— 对从未听说过的 id，端点真正返回的形状是一个既没有 `line`、
+ * 也没有 `stations` 和 `buses` 的外壳；存在的线路用站表作答，没有车在跑时则没有车辆。
  */
 function stubUpstream(payload: Record<string, unknown>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -60,16 +45,13 @@ function stubUpstream(payload: Record<string, unknown>): void {
   }))
 }
 
-/** The upstream has never heard of the id: no name, no stop list, no vehicle. */
 const NO_RECORD: Record<string, unknown> = {}
-/** A line that exists with nothing in transit right now. */
 const NO_VEHICLE: Record<string, unknown> = {
   line: { name: '甲路', direction: 0, firstTime: '05:00', lastTime: '23:00' },
   stations: STATIONS,
   buses: [],
 }
 
-/** Every route that takes a line id, as a caller reaches it. */
 function lineRoutes(lineId: string): Array<{ route: string, url: string }> {
   const id = encodeURIComponent(lineId)
   return [
@@ -94,8 +76,8 @@ describe('G-D1: a line id the upstream has no record of is refused on every line
         expect(res.statusCode, `${route} answered ${res.statusCode} for a line the upstream does not know`).toBe(404)
         const body = JSON.parse(res.body)
         expect(body.success, route).toBe(false)
-        // A refusal names the outcome rather than handing back a value that
-        // reads like a real answer.
+        // 拒绝要说清结果，而不是递回一个
+        // 读起来像真实答案的值。
         expect(typeof body.error, route).toBe('string')
         expect(body.error.length, route).toBeGreaterThan(0)
       }
@@ -106,14 +88,14 @@ describe('G-D1: a line id the upstream has no record of is refused on every line
   })
 
   it('answers the routes that can answer 200 for a real line with no vehicle', async () => {
-    // The positive control, route by route: the refusal above must be about the
-    // LINE, not about an empty list. `/live` is the one the defect was measured
-    // on; the detail is the route the live route must agree with.
+    // 逐路由的正对照：上面的拒绝必须是关于线路的，
+    // 而不是关于空列表的。`/live` 是那条
+    // 详情路由是实时路由必须与之一致。
     //
-    // Walk-decision is NOT in this list, and deliberately: it prices a walking
-    // route through Amap, and a build with no Amap key cannot answer it for any
-    // line — including a real one. Asserting 200 there would be asserting that a
-    // key is configured, which is not what this file is about.
+    // 步行决策故意不在这个列表里：它通过 Amap 为一段步行
+    // 路由定价，而没有 Amap key 的构建对任何线路都答不出来
+    // —— 包括真实线路。在那里断言 200 就等于断言
+    // key 已配置，那不是本文件要讲的事。
     for (const { route, url } of lineRoutes(REAL_LINE).filter(r => r.route !== 'walk decision')) {
       stubUpstream(NO_VEHICLE)
       const app = await buildApp({})
@@ -135,7 +117,7 @@ describe('G-D1: a line id the upstream has no record of is refused on every line
       expect(res.statusCode, res.body).toBe(200)
       const data = JSON.parse(res.body).data
       expect(data.buses).toEqual([])
-      // 此刻没车 is a state of a line that exists: the answer still names it.
+      // 「此刻没车」是一条存在的线路的状态：答案仍然点名它。
       expect(data.lineId).toBe(REAL_LINE)
       expect(data.isDegraded).toBe(false)
     }
@@ -145,9 +127,9 @@ describe('G-D1: a line id the upstream has no record of is refused on every line
   })
 
   it('refuses a ghost line id even in simulate mode, where an empty reading would be filled', async () => {
-    // A fabricated id must not become real by the simulation switch: the
-    // simulated generator resolves the line detail first and refuses to invent a
-    // line — see `TransitService.generateSimulatedLiveStatus`.
+    // 编出来的 id 不能靠模拟开关变成真的：
+    // 模拟生成器先解析线路详情，并拒绝凭空造一条
+    // 线路 —— 见 `TransitService.generateSimulatedLiveStatus`。
     vi.stubEnv('TRANSIT_SIMULATION', 'true')
     stubUpstream(NO_RECORD)
     const app = await buildApp({})

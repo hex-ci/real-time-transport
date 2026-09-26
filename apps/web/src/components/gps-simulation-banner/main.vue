@@ -6,7 +6,6 @@ import { useLocationStore } from '@/stores/location.store'
 
 const { isSimulated, userCoords } = storeToRefs(useLocationStore())
 
-/** Fixed position shown to four decimals — enough to recognise the spot. */
 const coordsLabel = computed(() => {
   const c = userCoords.value
   if (!c) return ''
@@ -15,11 +14,7 @@ const coordsLabel = computed(() => {
 </script>
 
 <template>
-  <!-- Development GPS override strip, mounted in the sticky header next to the
-       data-simulation strip. Deliberately distinct in colour and wording: the
-       vehicle data can be real while the position is not, and confusing the two
-       would make a correct board look wrong. Not dismissible for the same
-       reason — the nearby view's whole result depends on it. -->
+  <!-- 开发用 GPS 覆盖横幅：与车辆模拟横幅并列，颜色与措辞刻意区分（车辆数据可真、位置不可真）。同样不可关闭。 -->
   <div
     v-if="isSimulated"
     data-gps-simulation-banner

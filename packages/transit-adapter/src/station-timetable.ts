@@ -1,28 +1,18 @@
 /**
- * Station-level precise timetable overlay ("增强层").
+ * 站点级精确时刻表叠加层（「增强层」）。
  *
- * The UniversalSubwayEngine simulates whole-line train positions from origin
- * departures + headway rules. For a handful of high-frequency commuter stations
- * we also hold the OFFICIAL minute-level timetable (e.g. the station this repo
- * ships a published table for, scraped from bjsubway.com). When a query targets
- * such a station, we return the exact departure minutes instead of the simulated
- * estimate.
- *
- * Beijing Subway timetable selection rule (official practice):
- *   Mon-Fri -> workday table; Sat/Sun -> weekend table.
- *   A Saturday/Sunday that is a make-up workday STILL uses the weekend table
- *   (metro schedules follow weekend passenger flow), so selection is purely by
- *   day-of-week, NOT by statutory holiday status.
+ * 北京地铁的时刻表选择规则（官方做法）：
+ *   周一至周五 → 工作日表；周六 / 周日 → 双休表。
+ *   调休上班的周六/周日仍用双休表（地铁排班跟随周末客流），
+ *   所以选择只看星期几，不看法定节假日状态。
  */
 
 export interface DayTimetable {
-  /** first departure of the day, "H:MM" or "HH:MM" */
+  /** 当日首班，格式 "H:MM" 或 "HH:MM" */
   first: string
-  /** last departure of the day */
   last: string
-  /** free-text caveat, e.g. "晚间两班半程" */
   note: string
-  /** { hour (0-23, string key): [minute, ...] } departure minutes at this station */
+  /** { 小时（0-23，字符串键）: [分钟, ...] } 本站发车分钟 */
   departures: Record<string, number[]>
 }
 
@@ -38,25 +28,22 @@ export interface StationTimetable {
   cityCode: string
   stationName: string
   sourceNote: string
-  /** keyed by direction string ("0" / "1") */
+  /** 以方向字符串（"0" / "1"）为键 */
   directions: Record<string, DirectionTimetable>
 }
 
 export type DayType = 'workday' | 'weekend'
 
-/** Pick the timetable table by day-of-week (Beijing rule: weekend = Sat/Sun only). */
 export function dayTypeForDate(d: Date): DayType {
-  // getDay(): 0=Sun ... 6=Sat. Beijing uses weekend table for Sat & Sun.
   const day = d.getUTCDay()
   return day === 0 || day === 6 ? 'weekend' : 'workday'
 }
 
 export interface StationArrival {
-  /** departure time "HH:MM" (24h) */
+  /** 发车时刻 "HH:MM"（24 小时制） */
   time: string
-  /** seconds-of-day */
   secOfDay: number
-  /** seconds from `nowSecOfDay` (may be negative if just passed) */
+  /** 相对 `nowSecOfDay` 的秒数（刚发车时可为负） */
   etaSeconds: number
 }
 
@@ -73,17 +60,17 @@ export interface StationArrivalsResult {
 }
 
 /**
- * The operating date a Beijing timestamp belongs to: a metro operating day runs
- * from its first morning departure through the after-midnight tail, so 00:00-04:00
- * still belongs to the previous day and selects that day's table.
+ * 一个北京时间戳所属的运营日：地铁运营日
+ * 从当日早班首车延续到跨 0 点的尾班，所以
+ * 00:00-04:00 仍属于前一天，并选择前一天的运营表。
  */
 export function operatingDateOf(bjNow: Date): Date {
   return new Date(bjNow.getTime() - 4 * 3600 * 1000)
 }
 
 /**
- * Sorted seconds-of-day for one table. Entries before 04:00 are the previous
- * operating day's tail, shifted +24h so the timeline is continuous.
+ * 一张表的发车时刻（按秒排序）。04:00 之前的条目是前一运营日的尾巴，
+ * 统一 +24h，使时间轴连续。
  */
 export function operatingDaySeconds(day: DayTimetable): number[] {
   const out: number[] = []
@@ -97,9 +84,9 @@ export function operatingDaySeconds(day: DayTimetable): number[] {
 }
 
 /**
- * First departure of the service day, in seconds of day. After-midnight tail
- * entries (hour < 4) are excluded: they belong to the PREVIOUS operating day,
- * so the day's own service starts at its first morning train.
+ * 服务日的首班发车，按当日秒数。跨 0 点的尾班条目（hour < 4）
+ * 不计入：它们属于前一个运营日，所以本日的服务
+ * 从第一个早班开始。
  */
 function serviceStartSeconds(day: DayTimetable): number {
   let min = Infinity
@@ -112,24 +99,12 @@ function serviceStartSeconds(day: DayTimetable): number {
 }
 
 /**
- * The service window a table's OWN departures imply, in the table's own
- * 「H:MM」 style.
+ * 一张表自己的发车时刻所蕴含的服务窗口，用表内自己的
+ * 「H:MM」写法。
  *
- * A table declares a `first` / `last` beside its departure minutes, and the two
- * are transcribed from the same page — but they can disagree, and the shipped
- * 群芳 direction-1 table does: it declares `5:49 / 0:01` while its own departures
- * include `05:48` and `00:08 / 00:16`. When they disagree, the DEPARTURES are the
- * fact everything downstream is built from: the arrival rows are the departure
- * minutes, and the operating state is a statement about those same rows. Judging
- * the state by the declared summary instead made the board contradict itself —
- * `after_last` printed above a list of departures, `before_first` beside a
- * departure that had already gone.
- *
- * So the window is derived here, and the declared values are only the fallback
- * for a table whose departures cannot answer (no listed departure at all, or none
- * this app can place in a morning-to-tail day). Nothing is invented: a table with
- * consistent values returns exactly the hours it declares, and the transcribed
- * data is never rewritten.
+ * 声明的 `first` / `last` 只作为发车无法回答时的兜底：状态与到达行
+ * 读的是同一批发车，二者就不可能互相矛盾。不发明任何东西 ——
+ * 数值一致的表返回的正是它声明的时刻，转录数据永不改写。
  */
 export function serviceWindowOf(day: DayTimetable): { first: string, last: string } {
   const times = operatingDaySeconds(day)
@@ -143,24 +118,19 @@ export function serviceWindowOf(day: DayTimetable): { first: string, last: strin
   return { first: clockOf(firstSec), last: clockOf(lastSec) }
 }
 
-/** Seconds in a calendar day: the modulo `clockOf` reduces an operating-day second by. */
 const DAY_SECONDS = 24 * 3600
 
-/** Seconds of the operating day as the table's own 「H:MM」 (unpadded hour, as transcribed). */
+/** 运营日秒数还原为表内自己的 「H:MM」（小时不补零，与转录一致）。 */
 function clockOf(sec: number): string {
   const daySec = ((sec % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS
   return `${Math.floor(daySec / 3600)}:${String(Math.floor((daySec % 3600) / 60)).padStart(2, '0')}`
 }
 
 /**
- * Query the next `count` exact departures at a station at/after `nowSecOfDay`.
- *
- * Only the current operating day is considered, and only while it is actually
- * running. Once the last departure has gone — or before the first one — the
- * result is empty: the next train is on another operating day, and reporting it
- * as a few hundred minutes away reads as a live train when nothing is running.
- * The simulated engine already reports nothing outside its service window, so
- * both paths agree.
+ * 只考虑当前运营日，且只在其实际运营期间。
+ * 末班发出之后 —— 或首班之前 —— 结果为空：下一班属于另一个运营日，
+ * 把它报成几百分之后会被读作有车在跑，而实际什么都没在跑。
+ * 推演引擎在其服务窗口之外同样不报车，因此两条路径一致。
  */
 export function queryStationArrivals(
   timetable: StationTimetable,
@@ -180,7 +150,7 @@ export function queryStationArrivals(
   const window = serviceWindowOf(day)
   if (nowSecOfDay >= serviceStartSeconds(day)) {
     for (const sec of operatingDaySeconds(day)) {
-      // 30s grace keeps a departure that has just left the platform in the list.
+      // 30 秒宽限：刚离站的发车仍留在列表里。
       if (sec < nowSecOfDay - 30) continue
       arrivals.push(fmtSec(sec, nowSecOfDay))
       if (arrivals.length >= count) break
@@ -193,10 +163,9 @@ export function queryStationArrivals(
     direction,
     dayType,
     isExact: true,
-    // The window the DEPARTURES above imply, not the table's declared summary:
-    // the caller derives the operating state from these two fields, and a state
-    // read from a declaration that disagrees with the list states something the
-    // list beside it contradicts. See `serviceWindowOf`.
+    // 上面这批发车所蕴含的窗口，而不是表的声明摘要：
+    // 调用方由这两个字段推导运营状态，不能与列表自相矛盾。
+    // 见 `serviceWindowOf`。
     first: window.first,
     last: window.last,
     note: day.note,
@@ -213,7 +182,6 @@ function fmtSec(sec: number, nowSec: number): StationArrival {
   }
 }
 
-/** Convenience: seconds until the next exact departure, or null if none/unknown. */
 export function nextDepartureEtaSeconds(result: StationArrivalsResult | null): number | null {
   if (!result || result.arrivals.length === 0) return null
   const a = result.arrivals.find(x => x.etaSeconds > 0)

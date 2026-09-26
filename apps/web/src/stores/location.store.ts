@@ -5,15 +5,11 @@ import type { Station } from '@real-time-transport/shared'
 import { haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 
 /**
- * Development-only GPS override.
+ * 开发用的 GPS 覆写：`VITE_GPS_SIMULATION=true` 时把位置钉在固定坐标，以便不移动、不授权
+ * 就能验证位置相关的界面。
  *
- * `VITE_GPS_SIMULATION=true` pins the position to fixed coordinates so the
- * location-driven views (nearby mode, nearest-stop anchor, walk decisions) can
- * be exercised without physically moving or granting a browser permission.
- *
- * The coordinates are read inside a `import.meta.env.DEV` branch: Vite replaces
- * that flag with a literal at build time, so a production bundle drops the whole
- * block — including the numbers — instead of shipping a dormant override.
+ * 坐标在 `import.meta.env.DEV` 分支里读取：Vite 在构建期把该标志替换成字面量，生产包会整块
+ * 丢掉（含那两个数字），而不是带上一个休眠的覆写。
  */
 const SIMULATION_ENABLED = import.meta.env.DEV
   && import.meta.env.VITE_GPS_SIMULATION === 'true'
@@ -22,9 +18,8 @@ const SIMULATION_COORDS: { lat: number, lng: number } | null = (() => {
   if (!SIMULATION_ENABLED) return null
   const rawLat = import.meta.env.VITE_GPS_SIM_LAT
   const rawLng = import.meta.env.VITE_GPS_SIM_LNG
-  // An empty value is not a coordinate: `Number('')` is 0, so a missing half
-  // would otherwise read as a valid 0 and place the user at (lat, 0). Reject the
-  // blank before the numeric check, then require both halves to be finite.
+  // 空值不是坐标：`Number('')` 是 0，缺一半就会读成合法的 0 并把用户放到 (lat, 0)。
+  // 先拒空再做数值检查，并要求两半都是有限数。
   if (!rawLat?.trim() || !rawLng?.trim()) return null
   const lat = Number(rawLat)
   const lng = Number(rawLng)
@@ -33,11 +28,10 @@ const SIMULATION_COORDS: { lat: number, lng: number } | null = (() => {
 })()
 
 /**
- * A one-shot fix, exactly as the browser reported it.
+ * 一次性的定位，原样保留浏览器的报告。
  *
- * WGS-84, unconverted: the server's `/settings` PATCH owns the single
- * WGS-84 → GCJ-02 conversion, because a stored anchor becomes the origin of
- * every later walking route and a coordinate converted twice lands ~500 m away.
+ * WGS-84，不做转换：服务端的 `/settings` PATCH 是唯一的 WGS-84 → GCJ-02 转换点 ——
+ * 存下的锚点会成为之后每条步行路线的起点，转换两次会把坐标放到几百米之外。
  */
 export interface AnchorFix {
   lat: number
@@ -46,12 +40,10 @@ export interface AnchorFix {
 }
 
 /**
- * Copy for a failed one-shot grab, keyed by failure kind.
+ * 一次性抓取失败时的文案，按失败种类分。
  *
- * Each line names what the failure costs the user: without a position there is
- * no anchor, so the app cannot compute the walking time and therefore cannot
- * say when to leave. A bare 「定位失败」 reads as a hiccup and leaves the anchor
- * silently unset, which is the failure mode this copy exists to prevent.
+ * 每一行都说出这次失败让用户失去了什么：没有位置就没有锚点，算不出步行时间，也就说不出
+ * 什么时候出发。
  */
 export const ANCHOR_CAPTURE_ERRORS = {
   unsupported: '当前浏览器不支持定位，无法抓取位置锚点，因此算不出出门时间。请换用支持定位的浏览器后重试。',
@@ -62,12 +54,10 @@ export const ANCHOR_CAPTURE_ERRORS = {
 } as const
 
 /**
- * Read a browser position into the fix an anchor is stored from.
+ * 把浏览器的定位读成锚点存下的形状。
  *
- * `latitude`/`longitude` are passed through untouched — they are WGS-84 as the
- * device reports them, and the browser may not convert them. Accuracy is
- * carried when the device measured one and reported as absent when it did not:
- * never invented.
+ * `latitude`/`longitude` 原样通过：它们就是设备报告的 WGS-84，浏览器无权转换。精度只在设备
+ * 测到时携带，没测到就报为缺席 —— 绝不臆造。
  */
 export function anchorFixFromPosition(position: GeolocationPosition): AnchorFix {
   const { latitude, longitude, accuracy } = position.coords
@@ -78,7 +68,6 @@ export function anchorFixFromPosition(position: GeolocationPosition): AnchorFix 
   }
 }
 
-/** The copy for a failed grab, from the browser's own error code. */
 export function anchorCaptureMessage(error: { code?: number } | null | undefined): string {
   if (!error) return ANCHOR_CAPTURE_ERRORS.failed
   if (error.code === 1) return ANCHOR_CAPTURE_ERRORS.denied
@@ -88,33 +77,27 @@ export function anchorCaptureMessage(error: { code?: number } | null | undefined
 }
 
 /**
- * Reactive geolocation built on vueuse's `useGeolocation`, which wraps
- * `watchPosition` — a single fix goes stale as soon as the user walks to another
- * stop, so the nearest-stop computation must follow a live position stream.
+ * 建在 vueuse 的 `useGeolocation` 上的响应式定位，它包的是 `watchPosition`：一次定位在用户
+ * 走到下一站时就已经过期，所以最近站的计算必须跟着一条活的位置流走。
  */
 export const useLocationStore = defineStore('location', () => {
   const geo = useGeolocation({
     enableHighAccuracy: true,
     timeout: 15000,
     maximumAge: 30000,
-    // Do not prompt on store creation: permission is requested only once a view
-    // actually needs a position, or the user taps the locate button.
+    // 创建 store 时不弹权限：只有界面真的需要位置、或用户点了定位按钮才请求。
     immediate: false,
   })
 
-  /** Reactive browser permission state, so the UI can explain a denial. */
   const permissionState = usePermission('geolocation')
 
-  /** True once tracking has been requested and not yet stopped. */
   const tracking = shallowRef(false)
 
-  /** True while the fixed development position stands in for a real fix. */
   const isSimulated = computed(() => SIMULATION_COORDS !== null)
 
   /**
-   * The current fix, or null. `useGeolocation` seeds its coords with
-   * `POSITIVE_INFINITY` sentinels until the first position arrives — treating
-   * those as real would poison every haversine result with NaN.
+   * 当前定位，或 null。`useGeolocation` 在第一个位置到达前用 `POSITIVE_INFINITY` 哨兵值
+   * 填充坐标 —— 把它们当成真值会让每个 haversine 结果都变成 NaN。
    */
   const userCoords = computed<{ lat: number, lng: number } | null>(() => {
     if (SIMULATION_COORDS) return SIMULATION_COORDS
@@ -123,19 +106,17 @@ export const useLocationStore = defineStore('location', () => {
     return { lat: latitude, lng: longitude }
   })
 
-  /** Horizontal accuracy of the current fix in metres, when reported. */
   const accuracyM = computed<number | null>(() => {
-    // The fixed development position has no measured accuracy to report.
+    // 固定位置没有测得的精度可报。
     if (SIMULATION_COORDS) return null
     const acc = geo.coords.value.accuracy
     return Number.isFinite(acc) && acc > 0 ? Math.round(acc) : null
   })
 
-  /** Acquiring a position (tracking requested, no fix yet). */
   const isLocating = computed(() => tracking.value && userCoords.value === null)
 
   const locationError = computed<string | null>(() => {
-    // A fixed position cannot fail, so no permission or device error applies.
+    // 固定位置不会失败，权限与设备错误都不适用。
     if (SIMULATION_COORDS) return null
     if (!geo.isSupported.value) return '当前浏览器不支持定位'
     if (permissionState.value === 'denied') return '定位权限被拒绝，无法确定您的位置'
@@ -148,32 +129,24 @@ export const useLocationStore = defineStore('location', () => {
 
   const landmark = shallowRef('')
 
-  /** True while a one-shot anchor grab is in flight. */
   const isCapturingAnchor = shallowRef(false)
 
   /**
-   * Grab the CURRENT position once, for a stored anchor.
+   * 抓取「当前」位置一次，用于存下的锚点。
    *
-   * Deliberately not the store's `geo`/`watchPosition` pair: an anchor is a
-   * point chosen once, not a position that follows the user, and a live stream
-   * here would let a saved anchor drift as they walk. `getCurrentPosition`
-   * resolves a single fix and stops.
+   * 刻意不用本 store 的 `geo`/`watchPosition`：锚点是一次选定的点，不是跟着用户走的定位，
+   * 用活的位置流会让存下的锚点随着走动漂移。`getCurrentPosition` 只解出一次定位就停。
    *
-   * The fix leaves this function exactly as the browser reported it — WGS-84,
-   * unconverted. The server converts it once at the `/settings` PATCH boundary;
-   * converting here too would move the stored anchor ~500 m and invert the
-   * 出门结论 against its 3-minute wait tolerance.
+   * 定位值原样离开这个函数 —— WGS-84，未转换。
    */
   async function captureAnchorFix(): Promise<AnchorFix> {
     if (SIMULATION_COORDS) {
-      // The same fixed development position the live stream stands in with, so
-      // the picker is usable without physically moving. The page marks it.
+      // 与实时流所用的同一个固定位置，好让选择器不必真的移动就能用；页面会把它标出来。
       return { lat: SIMULATION_COORDS.lat, lng: SIMULATION_COORDS.lng, accuracyM: null }
     }
 
-    // Resolved at call time rather than through `geo`: this is the one-shot API
-    // and not the live stream, so it asks for the capability now and reports a
-    // browser that has none instead of leaving the button dead.
+    // 在调用时取能力而不是经 `geo`：这是一次性 API 而非活的定位流，所以要当场问，并把
+    // 「浏览器没有这个能力」报出来，而不是让按钮点了没反应。
     const geolocation = typeof navigator === 'undefined' ? undefined : navigator.geolocation
     if (!geolocation) {
       throw new Error(ANCHOR_CAPTURE_ERRORS.unsupported)
@@ -188,8 +161,7 @@ export const useLocationStore = defineStore('location', () => {
           {
             enableHighAccuracy: true,
             timeout: 15000,
-            // A stored anchor must be where the user stands NOW: a cached fix
-            // from another place is exactly the error this feature cannot take.
+            // 存下的锚点必须是用户此刻站的位置：别处的缓存定位正是这个功能承受不了的错误。
             maximumAge: 0,
           },
         )
@@ -202,11 +174,10 @@ export const useLocationStore = defineStore('location', () => {
   }
 
   /**
-   * Start continuous tracking.
+   * 开始连续跟踪。
    *
-   * A denied permission stays denied — re-requesting only spams the console (and
-   * on iOS cannot re-open the prompt anyway), so automatic callers are ignored
-   * once denied and only an explicit user tap retries.
+   * 被拒绝的权限保持被拒绝：重复请求只是刷控制台（iOS 上也开不出第二次弹窗），所以一旦被拒
+   * 就忽略自动调用方，只有用户显式点按才会重试。
    */
   function requestLocation(options?: { userInitiated?: boolean }): void {
     if (SIMULATION_COORDS) return
@@ -221,7 +192,6 @@ export const useLocationStore = defineStore('location', () => {
     geo.pause()
   }
 
-  /** Reverse-geocode the current fix into a human landmark via the backend. */
   async function resolveLandmark(): Promise<void> {
     const coords = userCoords.value
     if (!coords) return
@@ -237,14 +207,12 @@ export const useLocationStore = defineStore('location', () => {
       }
     }
     catch {
-      // Silent: landmark is decorative
+      // 静默：地标只是装饰。
     }
   }
 
   /**
-   * Landmark lookups hit a rate-limited upstream, and continuous tracking emits
-   * a fix per second while moving — debounce so a walk does not fire a request
-   * per GPS tick.
+   * 持续跟踪在移动中每秒产生一次定位，防抖 2 秒：走一段路不应该按定位次数发请求。
    */
   const refreshLandmark = useDebounceFn(resolveLandmark, 2000)
 
@@ -253,10 +221,8 @@ export const useLocationStore = defineStore('location', () => {
   })
 
   /**
-   * Stops of the line currently on screen. Kept as state so `nearestStation`
-   * recomputes whenever either the stop list or the GPS fix changes — the
-   * previous imperative version only recalculated when a view happened to call
-   * it, so a moved user kept seeing the stale nearest stop.
+   * 当前在屏线路的停靠站。放在 state 里，使停靠站表或定位任一变都会重算 `nearestStation` ——
+   * 命令式的写法只在某个界面恰好调用它时才重算，用户移动后就一直看着过期的最近站。
    */
   const stationPool = shallowRef<Station[]>([])
 
@@ -265,15 +231,12 @@ export const useLocationStore = defineStore('location', () => {
   }
 
   /**
-   * The stop of `stationPool` nearest the current fix, or null.
+   * `stationPool` 里离当前定位最近的一站，或 null。
    *
-   * A stop is measured only where it states a position: a missing coordinate —
-   * and a zero on either axis, which on this app's GCJ-02 datum is the same
-   * absence rather than a point at (0, 0) — is read through `statedCoordinate`,
-   * the ONE place that rule lives, rather than restated here. That read is what
-   * keeps an unplaced platform from being presented as the nearest thing to the
-   * user, and it is deliberately the shared helper so this store cannot drift
-   * from the server-side reads that apply the same rule.
+   * 只有说出了位置的站才参与测量：缺坐标，以及任一轴上的 0（在本应用的 GCJ-02 基准上那是同
+   * 一种缺席，而不是 (0, 0) 这个点），一律经 `statedCoordinate` 读取 —— 那是这条规则唯一的
+   * 所在，不在这里重述。正是这次读取，挡住了一个没有位置的站台被当成离用户最近的东西；也
+   * 正因为它刻意是共享的助手，本 store 不会与服务端那几处同样的读取漂移。
    */
   const nearestStation = computed<Station | null>(() => {
     const coords = userCoords.value
@@ -292,8 +255,7 @@ export const useLocationStore = defineStore('location', () => {
         closest = st
       }
     }
-    // No stop carries a position: report none rather than defaulting to the
-    // first stop, which would present an arbitrary stop as "nearest".
+    // 没有任何一站带位置：报「没有」，而不是退回到第一站 —— 那会把一个任意的站呈现成「最近」。
     return closest
   })
 
@@ -301,9 +263,8 @@ export const useLocationStore = defineStore('location', () => {
     const coords = userCoords.value
     const nearest = nearestStation.value
     if (!coords || !nearest) return null
-    // Same rule, same read: the candidate this distance is measured to is the one
-    // `nearestStation` accepted, and a coordinate it did not accept cannot be
-    // measured from here either.
+    // 同一规则、同一次读取：被测距的候选就是 `nearestStation` 接受的那个，它没接受的坐标
+    // 这里也不能测。
     const lat = statedCoordinate(nearest.lat)
     const lng = statedCoordinate(nearest.lng)
     if (lat === undefined || lng === undefined) return null

@@ -7,42 +7,30 @@ import {
 } from '../index.js'
 
 /**
- * G2: the operating day does not start at 00:00, so a last departure after
- * midnight belongs to the NEXT calendar day.
+ * G2：运营日不从 00:00 开始，所以跨 0 点的末班属于下一个日历日。
  *
- * `parseHm` reads a 「H:MM」 into seconds of the CALENDAR day, while the clock
- * this engine compares it against runs 00:00–28:00 (`currentSecOfDay` shifts
- * 00:00–03:59 by +24 h, the same 04:00 boundary `operatingDaySecondsOf` draws in
- * `@real-time-transport/shared`). The transcribed 群芳 direction-1 table ends at
- * `00:16` — its own last departure — so `parseHm` read the window's end as 960 s,
- * EARLIER than its own 05:48 start. The inverted window matched no hour of the
- * day: no departure was enumerated and the direction answered an empty board
- * around the clock.
+ * `parseHm` 把「H:MM」读成日历日秒数，而引擎拿来比较的时钟跑的是
+ * 00:00–28:00（`currentSecOfDay` 把 00:00–03:59 平移 +24h，与
+ * `@real-time-transport/shared` 的 `operatingDaySecondsOf` 画的是同一条
+ * 04:00 边界）。末班早于首班的窗口因此需要整体前移一天。
  *
- * The shift is pinned in both directions: a window whose last time precedes its
- * first moves a day forward, and a window stated 05:16–23:06 does not move at
- * all. The last test drives the REAL transcribed table (do not hand-edit it)
- * through the engine at 00:10, on the direction whose last departure is after
- * midnight and on the one whose day ends at 23:06.
+ * 两个方向都钉住：末班早于首班的窗口前移一天，05:16–23:06 这样的窗口
+ * 一动不动。最后一个用例在 00:10 让引擎跑真实的转录表。
  */
 
-/** 00:10 Beijing on a Thursday: inside the after-midnight tail of the previous operating day. */
 function freezeAtBeijing(utcIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(utcIso))
 }
 
-/** 00:10 Beijing == 16:10 UTC on the previous calendar day. */
 const AFTER_MIDNIGHT = '2026-09-23T16:10:00Z'
 
 const LINE_ID = 'subway_027_7'
 
 /**
- * A line whose stops include the station the shipped table covers, so the
- * engine reads the REAL transcribed times. Eight stops long for the same reason
- * every simulation assertion needs length: a two-stop traversal is shorter than
- * the headway, and there are after-midnight minutes with no train on the line —
- * an assertion over an empty list would prove nothing.
+ * 站点表包含已发布表覆盖的那一站，使引擎读到真实转录的时刻。八站之长
+ * 是每条推演断言都需要长度的同一个原因：两站的运行时间短于发车间隔，
+ * 而跨 0 点存在线路上没有车的分钟 —— 对一个空列表的断言什么都证明不了。
  */
 function stubAmap(): void {
   const stops = [
@@ -65,8 +53,8 @@ function stubAmap(): void {
             type: '地铁线路',
             start_stop: stops[0]![0],
             end_stop: stops[stops.length - 1]![0],
-            // No start_time / end_time: the upstream does not know, so the
-            // line's own published table is what the hours come from.
+            // 没有 start_time / end_time：上游不知道，所以服务时间
+            // 来自线路自己发布的时刻表。
             busstops: stops.map(([name, location], idx) => ({
               id: `s${idx + 1}`,
               name,
@@ -87,7 +75,6 @@ afterEach(() => {
 
 describe('G2: an after-midnight last departure lands on the 24h+ timeline', () => {
   it('moves a last time that precedes the first a day forward', () => {
-    // 群芳 direction 1's own window, as the engine reads it: `05:48` … `00:16`.
     expect(serviceWindowSeconds('05:48', '00:16')).toEqual({
       first: 5 * 3600 + 48 * 60,
       last: 24 * 3600 + 16 * 60,
@@ -102,8 +89,8 @@ describe('G2: an after-midnight last departure lands on the 24h+ timeline', () =
   })
 
   it('still stands in the simulation window when neither time is stated', () => {
-    // The fallback is a simulation parameter, not a reported fact: absent hours
-    // must enumerate the same departures they always did.
+    // 兜底值是模拟参数，不是可上报的事实：时间缺失时必须枚举出
+    // 与以往相同的发车。
     expect(serviceWindowSeconds('', '')).toEqual({
       first: 5 * 3600 + 30 * 60,
       last: 23 * 3600,
@@ -127,9 +114,8 @@ describe('G2: the direction whose last departure is after midnight runs a cohere
   })
 
   it('still answers with no train at 00:10 for direction 0, whose day ended at 23:06', async () => {
-    // The shift must not fire for a window that already ends after its start: if
-    // the same-day window were pushed a day forward, this direction would report
-    // trains four hours after its last departure.
+    // 对「末班本就晚于首班」的窗口，平移绝不能触发：若把同日窗口
+    // 整体推后一天，这个方向会在末班几小时之后仍报出车。
     stubAmap()
     freezeAtBeijing(AFTER_MIDNIGHT)
     const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())

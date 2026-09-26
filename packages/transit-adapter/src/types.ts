@@ -6,15 +6,15 @@ import type {
 } from '@real-time-transport/shared'
 
 /**
- * Unified transport provider contract.
+ * 统一的交通数据源 provider 契约。
  *
- * cityCode is the chelaile city id ('027' = Beijing, '034' = Shanghai ...).
- * For cities not covered by chelaile realtime data (e.g. Guangzhou / Shenzhen),
- * subway simulation via Amap static data still works with `amap_<adcode>` codes.
+ * cityCode 是车来了的城市 id（'027' = 北京，'034' = 上海 ...）。
+ * 车来了实时数据未覆盖的城市（如广州 / 深圳），
+ * 仍可用 `amap_<adcode>` 编码走高德静态数据的地铁推演。
  *
- * IMPORTANT (pluggability contract): every provider must degrade gracefully —
- * network failures / invalid ids return null or [] instead of throwing, so the
- * TransitAggregator can transparently fall back to the next provider.
+ * 重要（可插拔契约）：每个 provider 都必须优雅降级 ——
+ * 网络失败 / 非法 id 返回 null 或 []，绝不抛异常，这样
+ * TransitAggregator 才能透明地回退到下一个 provider。
  */
 export interface ITransitProvider {
   readonly name: DataSourceType

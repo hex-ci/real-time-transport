@@ -1,9 +1,8 @@
 /**
- * Screen-space anchor for a station marker on the route board.
+ * 报站板上站点标记的屏幕坐标锚点。
  *
- * Emitted by RouteBoard so a popover can be positioned against the marker
- * without reaching into the canvas: screenX/screenY are viewport pixels,
- * x/y are the board's own coordinate space.
+ * 由 RouteBoard 发出，使弹窗无需伸手进画布即可贴着标记定位：screenX/screenY 是视口像素，
+ * x/y 是报站板自己的坐标空间。
  */
 export interface StationAnchor {
   screenX: number
@@ -13,7 +12,7 @@ export interface StationAnchor {
   y: number
 }
 
-/** One of the line's two travel directions, as a tab in the direction switcher. */
+/** 线路两个行驶方向之一，作为方向切换器的一个页签。 */
 export interface DirectionOption {
   direction: number
   lineId: string

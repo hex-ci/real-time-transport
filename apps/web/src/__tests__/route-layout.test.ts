@@ -17,23 +17,23 @@ describe('Route Layout Algorithm', () => {
 
   describe('calculateResponsiveStopsPerRow', () => {
     it('adapts stops per row across screen widths', () => {
-      // Narrow mobile (<360)
+      // 窄屏手机（<360）
       expect(calculateResponsiveStopsPerRow(320, 57)).toBe(4)
-      // Standard mobile (<640)
+      // 标准手机（<640）
       expect(calculateResponsiveStopsPerRow(375, 57)).toBe(5)
       expect(calculateResponsiveStopsPerRow(390, 57)).toBe(5)
       expect(calculateResponsiveStopsPerRow(430, 57)).toBe(5)
-      // sm: Large mobile / foldable (640 - 767)
+      // sm：大屏手机 / 折叠屏（640 - 767）
       expect(calculateResponsiveStopsPerRow(640, 57)).toBe(6)
-      // md: Tablet / iPad (768 - 1023)
+      // md：平板 / iPad（768 - 1023）
       expect(calculateResponsiveStopsPerRow(768, 57)).toBe(8)
-      // lg: Laptop (1024 - 1279)
+      // lg：笔记本（1024 - 1279）
       expect(calculateResponsiveStopsPerRow(1024, 57)).toBe(10)
-      // xl: Desktop PC (1280 - 1535)
+      // xl：桌面 PC（1280 - 1535）
       expect(calculateResponsiveStopsPerRow(1280, 57)).toBe(12)
-      // 2xl: Wide desktop (1536 - 1919)
+      // 2xl：宽桌面（1536 - 1919）
       expect(calculateResponsiveStopsPerRow(1600, 57)).toBe(14)
-      // Ultrawide (>= 1920)
+      // 超宽（>= 1920）
       expect(calculateResponsiveStopsPerRow(1920, 57)).toBe(16)
     })
 
@@ -55,19 +55,18 @@ describe('Route Layout Algorithm', () => {
 
       expect(layout.mode).toBe('folded')
       expect(layout.points.length).toBe(57)
-      expect(layout.stopsPerRow).toBe(5) // On 375px viewport
+      expect(layout.stopsPerRow).toBe(5) // 375px 视口下
       expect(layout.arcs.length).toBeGreaterThan(0)
 
-      // Row 0 is left-to-right
+      // 第 0 行从左到右
       expect(layout.points[0]!.x).toBeLessThan(layout.points[1]!.x)
 
-      // Row 1 should be right-to-left
+      // 第 1 行应从右到左
       const stopsInRow = layout.stopsPerRow
       const row1First = layout.points[stopsInRow]!
       const row1Second = layout.points[stopsInRow + 1]!
       expect(row1First.x).toBeGreaterThan(row1Second.x)
 
-      // Interpolated position along track
       const pos = layout.getInterpolatedPosition(5, 0.5)
       expect(pos.x).toBeGreaterThan(0)
       expect(pos.y).toBeGreaterThan(0)
@@ -87,18 +86,15 @@ describe('Route Layout Algorithm', () => {
       expect(layout.mode).toBe('linear')
       expect(layout.points.length).toBe(57)
       expect(layout.totalRows).toBe(1)
-      expect(layout.arcs).toEqual([]) // Zero U-turns in linear mode
+      expect(layout.arcs).toEqual([]) // 线性模式零 U 形回折
 
-      // All points share the same Y
       const firstY = layout.points[0]!.y
       expect(layout.points.every(p => p.y === firstY)).toBe(true)
 
-      // Monotonically increasing X coordinates
       for (let i = 1; i < layout.points.length; i++) {
         expect(layout.points[i]!.x).toBeGreaterThan(layout.points[i - 1]!.x)
       }
 
-      // Interpolation produces angle 0 and exact Y
       const pos = layout.getInterpolatedPosition(10, 0.4)
       expect(pos.y).toBe(firstY)
       expect(pos.angleDeg).toBe(0)

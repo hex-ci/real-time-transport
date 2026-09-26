@@ -1,12 +1,9 @@
 <script setup lang="ts">
 /**
- * What the page shows while it has no answer yet: the read in progress, or the read
- * that failed.
+ * 还没有答案时页面显示的东西：正在读取，或读取失败。
  *
- * The two are different facts and neither may read as the other — an empty page
- * that says nothing reads as a page with nothing to show, which is exactly what the
- * user cannot tell apart from a failure. A failed read states that it failed and
- * offers the retry, because the request is the only thing that can fix it.
+ * 两者是不同的两个事实，不得读成彼此——什么都不说的空页面读起来与失败无法区分。
+ * 读取失败要说明失败并给出重试，因为请求是唯一能修好它的东西。
  */
 defineProps<{
   loading: boolean

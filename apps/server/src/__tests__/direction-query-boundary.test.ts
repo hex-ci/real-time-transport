@@ -2,26 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 
 /**
- * F-D at the HTTP boundary: a direction the contracts do not accept is refused
- * THERE, with the accepted values named.
+ * F-D 在 HTTP 边界：契约不接受的方向在这里就被拒绝，并点名可接受的值。
  *
- * The app's own contracts say what a direction is — `z.number().int().min(0)`
- * `.max(1)`, on `LineDetail`, `LiveLineStatus` and the WS messages — and this
- * boundary read the query with `Number(q.direction ?? 0)`. So `?direction=abc`
- * became NaN, which travelled through the engine and came back as
- * `train_subway_027_7_dNaN_dep118` (the `busId` of every arrivals row) with
- * `direction: null` in the payload; and `?direction=9` was answered 200 for a
- * value the same contracts forbid. The engine-side guard (`statedDirection`)
- * keeps a malformed number out of the generated ids, and that defence stays —
- * but a value the API cannot mean is a REQUEST error and belongs at the edge,
- * where the caller can be told what is accepted.
+ * 应用自己的契约（`LineDetail`、`LiveLineStatus` 与 WS 消息上的 `z.number().int().min(0)
+ * .max(1)`）规定了方向是什么，所以不符合它的值是一个请求错误，该在边界上回答，好让调用方
+ * 知道什么可以接受。引擎侧的守卫（`statedDirection`）继续挡住畸形数字进入生成的 id。
  *
- * Two things are pinned: the refusal itself (400, naming 0 and 1) and the
- * absence of the leak it prevents — no accepted request ever answers with an id
- * derived from a malformed direction.
+ * 钉住两件事：拒绝本身（400，点名 0 与 1），以及没有任何被接受的请求会用畸形方向推导出的
+ * id 作答。
  */
 
-/** 08:00 Beijing: inside the fixture line's window, so the live answer has trains. */
+/** 北京 08:00：落在夹具线路的营运窗口内，实时答案才有车。 */
 function freezeAtBeijingMorning(): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(Date.UTC(2026, 8, 24, 0, 0, 0)))
@@ -30,22 +21,13 @@ function freezeAtBeijingMorning(): void {
 const LINE_ID = 'subway_027_7'
 const STATION_NAME = '群芳'
 /**
- * A platform TRAINS APPROACH, for the arrivals sweep below: the origin cannot
- * serve one, since a train whose next stop is the origin has already left it
- * (`nextOrder > targetOrder` drops it) — 群芳 would answer an empty list and the
- * sweep over its busIds would pass while holding nothing.
+ * 一个「有车正在接近」的站台，供下面的到达扫描用：起点站不行，下一站是起点站的车
+ * 已经离开它了（`nextOrder > targetOrder` 会丢弃）—— 群芳 会答出空列表，而扫它的
+ * busId 会一无所获地通过。
  */
 const ARRIVALS_STATION = '万盛西'
 
-/**
- * An Amap v3 success envelope around a fixture line the shipped table covers.
- *
- * The stop list is eight long on purpose: a two-stop line's whole traversal is
- * shorter than the timetable's own headway, so there are minutes of the morning
- * with no train on the line and an assertion over the generated ids would read
- * as passed while holding an empty list. Eight stations (8 × 135 s) outlast the
- * ~6 min peak headway, so the morning always has a train en route.
- */
+/** 一个包住夹具线路的 Amap v3 成功响应外壳。 */
 function stubUpstream(): void {
   const stops = [
     ['群芳', '116.392540,39.924299'],
@@ -87,7 +69,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** The four routes that take a `direction`, built for the same line. */
 function directionRoutes(direction: string): Array<{ route: string, url: string }> {
   const q = `direction=${encodeURIComponent(direction)}`
   return [
@@ -116,8 +97,8 @@ describe('G1: a direction the contracts do not accept is refused at the boundary
           const res = await app.inject({ method: 'GET', url })
           expect(res.statusCode, `${route} accepted direction=${JSON.stringify(direction)}`).toBe(400)
           expect(JSON.parse(res.body).success).toBe(false)
-          // The refusal names BOTH values the schema accepts, so a caller can
-          // correct the request without reading the source.
+          // 拒绝里点名 schema 接受的两个值，调用方不必读源码
+          // 就能改对请求。
           expect(JSON.parse(res.body).error, route).toBe('direction must be 0 or 1')
         }
         finally {
@@ -133,8 +114,8 @@ describe('G1: a direction the contracts do not accept is refused at the boundary
     const app = await buildApp({ amapKey: 'test-key' })
     try {
       await app.inject({ method: 'GET', url: `/api/transit/lines/${LINE_ID}/live?direction=abc` })
-      // A request the boundary cannot mean must not spend upstream quota — or,
-      // worse, be answered from a call made with NaN.
+      // 边界无法表达其含义的请求不得花掉上游配额 —— 更糟的是，
+      // 用一次 NaN 调用去作答。
       expect(vi.mocked(fetch)).not.toHaveBeenCalled()
     }
     finally {
@@ -180,8 +161,8 @@ describe('G1: no accepted request answers with an id derived from a malformed di
           buses: Array<{ id: string }>
         }
         expect(data.direction, 'the answer states a direction the contracts accept').toBe(Number(direction))
-        // A direction the boundary accepted must still produce trains, or this
-        // assertion would pass over an empty list and prove nothing.
+        // 边界接受的方向必须仍然产出车，否则这条断言
+        // 会在空列表上通过，什么也证明不了。
         expect(data.buses.length, `direction=${direction} answered no train`).toBeGreaterThan(0)
         for (const bus of data.buses) {
           expect(bus.id, `id carries a malformed direction: ${bus.id}`).not.toMatch(/NaN|undefined|null/)
@@ -195,9 +176,9 @@ describe('G1: no accepted request answers with an id derived from a malformed di
   })
 
   it('carries no NaN-derived busId in the arrivals rows either', async () => {
-    // The reported leak reached the screen as the `busId` of an ARRIVALS row,
-    // not of the live payload — the same generated ids, one contract further
-    // out. Both surfaces are swept so the invariant is stated where it was seen.
+    // 到达行的 `busId` 也不许带 NaN 推导出来的 id ——
+    // 同一批生成的 id，只是更外一层契约；两个面都扫，
+    // 让这条不变量钉在它被看见的地方。
     for (const direction of ['0', '1']) {
       stubUpstream()
       freezeAtBeijingMorning()

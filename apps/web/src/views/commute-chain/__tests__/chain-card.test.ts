@@ -3,17 +3,14 @@ import { chainCardOf } from '../card'
 import { chainView, conclusion, leg, refusal } from './chain-fixtures'
 
 /**
- * One chain's answer, as its card renders it.
+ * 一条链路的答案，如它的卡片所渲染。
  *
- * The card is where a deduction and a refusal go their separate ways, and where
- * two facts have to be taken from the right place:
+ * 卡片是推断与拒绝分道之处，也是两个事实必须取自正确位置之处：
  *
- *  - the anchor a refusal names is the CHAIN's own stored one (`originAnchor`),
- *    never the purpose's — a chain recorded from 公司 is not repaired by the 家
- *    anchor's row, and naming the wrong one sends the user to the wrong setting;
- *  - a refused chain carries a conclusion of NO kind: there is no margin, no
- *    minute and no vehicle to render, because a refusal is a code rather than a
- *    smaller answer.
+ *  - 拒绝点名的锚点是**链路**自己存储的那个（`originAnchor`），绝非目的的——从公司记录的
+ *    链路不会被「家」锚点的行修复，点错会把用户送去错的设置；
+ *  - 被拒绝的链路不带任何种类的结论：没有余量、没有分钟、没有车辆可渲染，因为拒绝是一个
+ *    代码而非一个更小的答案。
  */
 
 describe('a deduced chain becomes a conclusion and its per-transfer rows', () => {
@@ -36,8 +33,7 @@ describe('a deduced chain becomes a conclusion and its per-transfer rows', () =>
   })
 
   it('states the reading\'s instant, and no chain-level mark when the legs disagree', () => {
-    // 实时 and 排班推演 are two different kinds of number in one answer, so the
-    // chain states no single kind — each leg states its own instead.
+    // 实时与排班推演是同一答案里两种不同种类的数字，故链路不陈述单一类型——每段各自陈述。
     expect(card.chainProvenance).toBeNull()
     expect(card.reading?.text).not.toContain('实时')
     expect(card.reading?.text).toContain('最后更新')
@@ -68,17 +64,14 @@ describe('a refused chain becomes one sentence and no answer', () => {
   })
 
   it('hands the refusal the chain\'s own anchor rather than the purpose\'s', () => {
-    // An 上班 chain recorded from 公司: the 家 anchor is not the row this user has
-    // to repair, and naming it would send them to fix something else.
+    // 从公司记录的上班链路：「家」锚点不是该用户需要修复的行，点名它会把人送去修别的东西。
     const card = chainCardOf(chainView(refusal('anchor-unset'), { originAnchor: 'work', purpose: 'morning' }))
     expect(card.refusal?.sentence).toBe('未设置「公司」位置 · 在「设置」中设置')
     expect(card.refusal?.action).toBe('settings')
   })
 
   it('states no reading line for a leg that was never read', () => {
-    // No reading means no line at all: the refusal's own instant is the reading's
-    // instant, and this leg was never read, so neither the reading nor the refusal
-    // carries one.
+    // 无读取即无该行：本段从未被读取，故读取与拒绝都不带时刻。
     const card = chainCardOf(chainView(refusal('anchor-unset')))
     expect(card.reading).toBeNull()
     expect(card.refusal).not.toHaveProperty('updatedAt')

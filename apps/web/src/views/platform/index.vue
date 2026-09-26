@@ -31,63 +31,50 @@ const currentStationName = shallowRef('')
 const stationOptions = shallowRef<string[]>([])
 const landmarkHint = shallowRef('多线聚合')
 /**
- * The board's loading body: shown only while there is nothing on screen to keep.
+ * 报告板的加载体：只在屏上没有东西可留时显示。
  *
- * Renamed from `loading` because the name was the defect's hiding place: every
- * refresh set it, and the board rendered the WHOLE body from it, so a refresh
- * unmounted the rows. It now moves only when the board is empty (first load, a
- * station change, a followed-lines reload that left nothing to show).
+ * 只在屏空时移动：首屏加载、切换站台，或一次什么都没留下的关注线路重载。
  */
 const boardLoading = shallowRef(false)
 const detecting = shallowRef(false)
 /**
- * The board's refresh control is mid-read. Unlike the loading body this signals
- * an update running OVER rows that stay on screen: it is the non-destructive
- * half of the same fact, so the busy wording is the refresh family's own
- * (「正在刷新…」) and the control is disabled while it holds.
+ * 报告板的刷新控件正在读取。与加载体不同，它示意更新正运行在留在屏上的行**之上**：
+ * 同一事实的非破坏性一半，故忙时的措辞用刷新家族自己的，且占用期间控件禁用。
  */
 const boardBusy = shallowRef(false)
-/** A locate was requested and is waiting for the first GPS fix to arrive. */
+/** 已请求定位，正在等第一次 GPS 定位结果到达。 */
 const awaitingFix = shallowRef(false)
 const departureItems = shallowRef<DepartureItem[]>([])
 
 /**
- * The station the rows on screen were built for. A row claims to be about a
- * platform, so the station is part of what the rows assert — this is the other
- * half of that claim, kept beside the rows so a change can be judged the moment
- * a load starts rather than whenever the reactive flush gets to it.
+ * 屏上这些行是为哪个站台构造的。
+ *
+ * 一行声称它是关于某个站台的，故站台是这些行所断言的一部分；把这一半留在行旁边，
+ * 一次变更就能在加载开始时立即被判断，而不必等响应式刷新轮上。
  */
 const rowsStation = shallowRef('')
 
 /**
- * The board's own load: which read the rows on screen were produced by.
+ * 报告板自己的这次加载：屏上这些行由哪次读取产出。
  *
- * Honesty needs an instant on screen, and the view's rows are already the read they
- * describe — so the instant recorded here is the response's OWN `updatedAt`. The
- * upstream stamps each reading the moment it obtained it; the server replays the
- * cached object unchanged until the 18 s TTL forces a fresh read (measured on the
- * dev API: two hits inside one TTL carry the same instant), so a late serve never
- * restamps it, and a clock stamped at request time is exactly what this field must
- * never become: a request nobody answered would then read as a reading.
+ * 时刻取自响应自己的 `updatedAt`——服务端在实时缓存条目存活期间原样重放该对象，
+ * 故晚到的响应不会重新打时间戳；而请求时刻的钟正是本字段绝不能变成的东西：
+ * 那样一个没人作答的请求就会被读成一次读数。
  *
- * Clearing is as deliberate as setting. The rows leave on a station change (they
- * were built for another platform and must never survive under a new one — the
- * station is part of what a row claims to be about), and the instant goes with
- * them: a stamp without its rows is the fresher-looking lie.
+ * 清空与写入同样刻意。行随切站台离开（它们是为另一个站台构造的，绝不该在新站台下存活），
+ * 时刻随之离开：没有行的戳是更好看的谎。
  */
 const rowsReadAt = shallowRef<number | null>(null)
 
 /**
- * Which of the three states the followed-lines read is in.
+ * 关注线路读取处于三种状态中的哪一种。
  *
- * Every station option on this page is built from the followed lines, so a read that FAILED
- * leaves the board with nothing — and an empty board and an unreadable list would otherwise
- * say the same sentence about the user's stored rows. The store reports the answer; this page
- * states it and lets the board word its own empty state.
+ * 本页每个站台选项都来自关注线路，故读失败会让屏上空无一物；而空屏与读不到的列表
+ * 会就用户已存的数据说同一句话。由 store 报告答案，本页陈述它，空状态措辞交给报告板。
  */
 const favouritesRead = shallowRef<ReadState>('reading')
 
-/** line details for all favorited lines in the current city (both directions resolved lazily) */
+/** 当前城市所有已关注线路的线路详情（两个方向按需解析）。 */
 const lineDetails = shallowRef<Record<string, LineDetail>>({})
 
 const cityFavorites = computed(() =>
@@ -102,11 +89,9 @@ function detailKey(lineId: string, direction: number): string {
 
 async function loadLineDetails(): Promise<void> {
   const tasks = cityFavorites.value.map(async (f) => {
-    // Load each direction the route actually HAS, under the lineId serving it:
-    // upstream issues a distinct lineId per direction on bus routes, so the
-    // reverse leg's stops are not reachable through f.lineId at all. A
-    // single-direction route contributes one entry — never a phantom second
-    // direction pointing at the same lineId.
+    // 只为线路真正拥有的方向加载，且用它自己的 lineId：公交线路每个方向
+    // 各有一个 lineId，故反向段的站点根本无法通过 f.lineId 取到。单方向
+    // 线路贡献一条记录——绝不产生指向同一 lineId 的幻影第二方向。
     for (const { direction: dir, lineId } of favoriteDirections(f)) {
       const key = detailKey(lineId, dir)
       if (lineDetails.value[key]) continue
@@ -119,7 +104,6 @@ async function loadLineDetails(): Promise<void> {
         }
       }
       catch {
-        // skip
       }
     }
   })
@@ -127,14 +111,14 @@ async function loadLineDetails(): Promise<void> {
 }
 
 /**
- * Build station options: rank stops by how many favorited lines serve them,
- * so the top options are genuine multi-line hubs.
+ * 构造站台选项：按有多少已关注线路经过给站排序，
+ * 使靠前的选项是真正的多线枢纽。
  */
 function buildStationOptions(): void {
   const counter = new Map<string, number>()
   for (const f of cityFavorites.value) {
-    // The primary direction only: ranking hubs by how many followed lines call
-    // here. `favoriteDirections` returns it first, so no direction arithmetic.
+    // 只用主方向：按有多少已关注线路在此停靠给枢纽排序。
+    // `favoriteDirections` 先返回主方向，故无需方向算术。
     const primary = favoriteDirections(f)[0]
     if (!primary) continue
     const detail = lineDetails.value[detailKey(primary.lineId, primary.direction)]
@@ -153,22 +137,21 @@ function buildStationOptions(): void {
   }
 }
 
-/** All (line, direction, order) rules passing through the selected station. */
+/** 经过所选站台的所有（线路，方向，站序）规则。 */
 function buildRulesForStation(stationName: string): PlatformLineRule[] {
   const rules: PlatformLineRule[] = []
   for (const f of cityFavorites.value) {
-    // Every direction this route actually has — one row per direction, and a
-    // single-direction route contributes exactly one.
+    // 这条线路真正拥有的每个方向——每个方向一行，
+    // 单方向线路恰好贡献一行。
     for (const { direction: dir, lineId } of favoriteDirections(f)) {
       const detail = lineDetails.value[detailKey(lineId, dir)]
       if (!detail) continue
       const stop = detail.stops.find(s => s.name === stationName)
       if (!stop) continue
 
-      // F3: the operating fact comes from the detail this rule was just built
-      // from, so the row states it from the line's own first/last departure
-      // rather than from a clock. Rules are rebuilt on every poll, so the state
-      // follows the service day across midnight without a second request.
+      // 运营事实取自刚构造出本规则的详情，故陈述的是线路自己的首末班而非时钟。
+      // 规则每次轮询都重建，故运营日跨零点能自动跟上，
+      // 无需第二次请求。
       const operating = operatingStatusOf({
         firstDeparture: detail.firstBusTime,
         lastDeparture: detail.lastBusTime,
@@ -189,14 +172,11 @@ function buildRulesForStation(stationName: string): PlatformLineRule[] {
 }
 
 /**
- * One full read of the board, whatever asked for it (12 s poll, station picker,
- * GPS snap, retry).
+ * 报告板的一次完整读取，无论由什么触发（12 秒轮询、站台选择器、GPS 对准、重试）。
  *
- * The destructive refresh this page shipped is fixed by WHEN each state moves, not
- * by painting anything new: the rows on screen stay rendered through a refresh and
- * only the refresh control shows the update is running, the loading body appears
- * only when there is nothing to keep, and the rows' instant is written only by the
- * response that produced the rows now on screen.
+ * 破坏性刷新问题由「每个状态何时移动」解决，而非靠多画什么：刷新期间屏上的行继续渲染，
+ * 只有刷新控件示意更新在跑；加载体只在没有东西可留时出现；行的时刻只由产出屏上这些行的
+ * 那个响应写入。
  */
 async function loadPlatformDepartures(): Promise<void> {
   if (!currentStationName.value) {
@@ -215,11 +195,10 @@ async function loadPlatformDepartures(): Promise<void> {
     return
   }
 
-  // An empty board has nothing to keep: show the loading body. A board WITH rows
-  // keeps them (the retention contract) and signals the update on the control —
-  // but only rows built for THIS station. The picker's change handler and the
-  // v-model write are not one synchronous step, so rows can still be the old
-  // station's here; they are not this station's answer to keep.
+  // 空屏没有东西可留：显示加载体。有行的屏保留它们（保留契约）并在控件上示意更新——
+  // 但只保留为本站台构造的行。选择器的 change 处理与 v-model 写入不是同一个同步步骤，
+  // 故这里的行仍可能是旧站台的；
+  // 它们不是本站台的答案，不该被保留。
   if (rowsStation.value !== currentStationName.value) {
     departureItems.value = []
     rowsReadAt.value = null
@@ -234,21 +213,19 @@ async function loadPlatformDepartures(): Promise<void> {
 
   const results: DepartureItem[] = []
   /**
-   * The instant each RESPONSE reports as the reading's own (upstream `updatedAt`,
-   * replayed unchanged by the server while the live cache entry is alive). Keyed
-   * by the row id the answer produced, so a failed request contributes nothing
-   * and the winner below is answered rows only.
+   * 每个**响应**报告为自身读数时刻的瞬时值（数据源的 `updatedAt`，实时缓存条目存活期间
+   * 由服务端原样重放）。以答案产出的行 id 为键，故失败的请求不贡献任何东西，
+   * 下面取到的是已作答的行。
    */
   const stamps = new Map<string, number>()
 
   const promises = rules.map(async (rule, idx) => {
     const id = `dep_${rule.lineId}_${rule.direction}_${idx}`
     try {
-      // The stop this row is about has to travel with the request: upstream prices a
-      // vehicle to the requested stop order and to the line's terminus otherwise, so a
-      // reading asked for without one carries every vehicle's minute for the END of the
-      // line — which is why this column could state no minute at all (see
-      // `departure-row.ts`). `order` is the platform's own ordinal on THIS direction.
+      // 本行所关于的站必须随请求一起走：数据源按所请求的站序定价车辆，否则按线路终点，
+      // 故不带站序的读数把每辆车的分钟都算到线路**末端**——这正是本列曾经一个分钟
+      // 都说不出来的原因（见 `departure-row.ts`）。
+      // `order` 是本站台在**本**方向上的站序。
       const qs = new URLSearchParams({
         direction: String(rule.direction),
         cityCode: cityStore.currentCode,
@@ -258,21 +235,19 @@ async function loadPlatformDepartures(): Promise<void> {
       const json = await res.json()
       const buses: LiveBus[] = (json.success && json.data?.buses) ? json.data.buses : []
       /**
-       * F4: the source this response declared. The row builder decides the kind of
-       * number from it — this view never guesses one from the route type, and a source
-       * this build does not know leaves its rows unclassified.
+       * 本响应声明的来源。行的类别由构造器据此决定——本视图绝不从线路类型猜，
+       * 本版本不认识的来源使其行不归类。
        */
       const dataSource = (json.success && json.data) ? json.data.dataSource : null
-      // The reading's own instant, exactly as the response stated it — the
-      // record of WHEN these rows were read, or nothing if the body carried
-      // no instant to state.
+      // 读数自己的时刻，照响应陈述的原样——记录这些行是何时读到的，
+      // 若响应体未携带时刻则什么都没有。
       const updatedAt = (json.success && json.data) ? json.data.updatedAt : null
       if (typeof updatedAt === 'number') stamps.set(id, updatedAt)
 
       results.push(departureRowOf({ id, rule, answer: { dataSource, buses } }))
     }
     catch {
-      // The request failed: neither a vehicle nor the service day is known.
+      // 请求失败：车辆与运营日都未知。
       results.push(departureRowOf({ id, rule, answer: null }))
     }
   })
@@ -286,10 +261,9 @@ async function loadPlatformDepartures(): Promise<void> {
     return a.etaMinutes - b.etaMinutes
   })
 
-  // The instant the rows on screen were read at comes from the responses
-  // themselves, and only when at least one answer arrived: all-failed results
-  // keep the previous read's instant, because the rows it produced are still
-  // the rows on screen (the failed rows state their own failure per row).
+  // 屏上这些行的读取时刻来自响应本身，且只在至少有一个答案到达时写入：
+  // 全部失败的结果保留上一次读取的时刻，因为它产出的行仍是屏上的行
+  // （失败的行逐行陈述自己的失败）。
   const answeredAt = results
     .filter(row => !row.unavailable)
     .map(row => stamps.get(row.id))
@@ -303,14 +277,13 @@ async function loadPlatformDepartures(): Promise<void> {
 }
 
 /**
- * GPS radar: find the nearest real platform (Amap POI) and snap the board to
- * the matching stop name across favorited lines.
+ * GPS 雷达：找出最近的真实站台（地图 POI），把报告板对准关注线路中匹配的站名。
  */
 async function detectNearbyPlatform(): Promise<void> {
   const coords = locationStore.userCoords
   if (!coords) {
-    // Start tracking and let the coords watcher re-run this once a fix lands,
-    // rather than sleeping a guessed interval and hoping it arrived in time.
+    // 开始跟踪并在定位结果到达后让 coords 侦听器重跑本函数，
+    // 而不是睡一个猜出来的间隔、指望它及时到达。
     awaitingFix.value = true
     detecting.value = true
     locationStore.requestLocation({ userInitiated: true })
@@ -327,7 +300,7 @@ async function detectNearbyPlatform(): Promise<void> {
       return
     }
 
-    // Strip POI suffixes like "(公交站)" and match against known stop names
+    // 去掉 POI 名称里的「(公交站)」这类后缀，再与已知站名比对
     const stopNames = new Set(stationOptions.value)
     let matched = ''
     for (const st of nearby) {
@@ -343,9 +316,8 @@ async function detectNearbyPlatform(): Promise<void> {
     }
 
     const nearestPoi = nearby[0]!
-    // The distance is rendered only where the radar stated one: it is absent for a
-    // POI Amap did not measure, and a substituted 0 would read as 「you are on the
-    // platform」.
+    // 只在地图陈述了距离时渲染它：它对该 POI 缺失，
+    // 而补一个 0 会被读成「你就站在站台上」。
     const distance = statedDistanceSuffix(nearestPoi.distanceMeters)
     if (matched) {
       currentStationName.value = matched
@@ -362,19 +334,18 @@ async function detectNearbyPlatform(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
-  // loadLineDetails already pulls BOTH directions, each under the lineId that
-  // serves it, so a second pass here would only re-fetch the forward route.
+  // loadLineDetails 已经拉取了**两个**方向，各用它自己的 lineId，
+  // 故此处再来一遍只会重复请求正向线路。
   await loadLineDetails()
   buildStationOptions()
   await loadPlatformDepartures()
 }
 
 /**
- * Reload everything for the active city: favourites first, then the board.
+ * 为当前城市重载一切：先关注线路，再报告板。
  *
- * The first read's ANSWER is recorded as well as its result: every station option below is
- * derived from the list it returns, so a failed read has to be stated rather than left to look
- * like a city with nothing followed.
+ * 第一次读取的**答案**与其结果一同记录：下面每个站台选项都派生自它返回的列表，
+ * 故读失败必须被陈述，而不能看起来像一个什么都没关注的城。
  */
 async function reloadForCurrentCity(): Promise<void> {
   favouritesRead.value = (await transitStore.fetchFavorites()) ? 'read' : 'unreadable'
@@ -392,8 +363,8 @@ watch(
 )
 
 /**
- * A GPS fix requested by `detectNearbyPlatform` arrives asynchronously; resume
- * the detection once coords land instead of leaving the board waiting.
+ * `detectNearbyPlatform` 请求的 GPS 定位是异步到达的；坐标落地后继续那次探测，
+ * 而不是让报告板一直等。
  */
 watch(
   () => locationStore.userCoords,
@@ -408,17 +379,12 @@ onMounted(() => {
 })
 
 /**
- * The station picker moved: the rows on screen were built for the PREVIOUS
- * platform, and under the new station's title they are a false claim about
- * data the board does not hold — a station change is not a refresh, so
- * nothing is kept across it. The rows and their read instant go together
- * (a stamp without its rows is the fresher-looking lie), and the board
- * drops back into its loading state until the new station's read lands.
+ * 站台选择器移动了：屏上的行是为**上一个**站台构造的，挂在新站台标题下就是关于报告板
+ * 并不持有的数据的假陈述——切站台不是刷新，故不跨它保留任何东西。行与它们的读取时刻
+ * 一同离开（没有行的戳是更好看的谎），报告板退回加载状态，直到新站台的读取落地。
  *
- * `rowsStation` is deliberately NOT reset here: it is the load's own
- * keep/clear bookkeeping, and a reset landing after a load has begun would
- * make the NEXT load misjudge whose rows are on screen. The load's guard at
- * its start is the authority that decides keep-versus-clear.
+ * `rowsStation` 刻意**不**在此重置：它是加载自己的保留/清空记账，一次在加载开始后才落地的
+ * 重置会让**下一次**加载误判屏上是谁的行。加载开始处的守卫才是保留与清空的裁定者。
  */
 watch(currentStationName, () => {
   departureItems.value = []
@@ -426,10 +392,9 @@ watch(currentStationName, () => {
 })
 
 /**
- * The freshness line's instant, in the one shape the refresh family words it:
- * the read behind the rows on screen, never the clock that sent the request.
- * Null renders the store's own 「尚未获取到数据」 — a board nobody has read
- * states no time rather than a borrowed one.
+ * 新鲜度行的时刻，用刷新家族唯一的那种形状：屏上这些行背后的那次读取，
+ * 绝不是发出请求的时钟。为 null 时渲染 store 自己的「尚未获取到数据」——
+ * 一块没人读过的屏不陈述时间，而不是借来的时间。
  */
 const rowsFreshness = computed(() =>
   refreshFreshnessOf(rowsReadAt.value === null
@@ -448,7 +413,7 @@ const rowsFreshness = computed(() =>
       @change="loadPlatformDepartures"
     />
 
-    <!-- Departure Board Table -->
+    <!-- 发车报告板 -->
     <DepartureBoard
       :items="departureItems"
       :loading="boardLoading"

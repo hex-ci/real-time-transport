@@ -4,19 +4,14 @@ import { describe, expect, it } from 'vitest'
 import { AT_PLATFORM_ETA_TEXT } from '../at-platform'
 
 /**
- * F-A and F-C on the display side.
+ * 显示侧的 F-A 与 F-C。
  *
- * F-A: the upstream says `travelTime 0` for a vehicle standing at the stop, and
- * the server now routes that to the at-platform row (`isAtStation`, `time:
- * '正在进站'`, `etaSeconds: 0`). The panel must then state the fact and NO minute —
- * 「车辆正在本站」 is an observation of where a vehicle is, and a minute printed
- * beside it would be this app's arithmetic dressed as the source's reading. The
- * panel is a browser-only artefact here (no jsdom, no @vue/test-utils), so the
- * wording is asserted as a module and the rendering is asserted against the SFC
- * source, the way the panel's provenance rules already are.
+ * F-A：上游对停在站的车辆说 `travelTime 0`，服务端现在把它路由到 at-platform 行
+ * （`isAtStation`、`time: '正在进站'`、`etaSeconds: 0`）。面板必须陈述事实且**不**给分钟——
+ * 「车辆正在本站」是对车所在位置的观测，旁边印一个分钟就是本应用的算术装扮成来源的读数。
+ * 面板在本仓库只跑在浏览器（无 jsdom、无 @vue/test-utils），故措辞按模块断言、渲染按 SFC 源码断言。
  *
- * F-C: the exact table's caveat about the day's last departures (a half-route)
- * travels in the arrivals answer and is rendered where those departures are.
+ * F-C：精确时刻表对当日末班（半程）的说明随到站答案传递，并渲染在那些末班所在处。
  */
 
 const popover = readFileSync(
@@ -26,7 +21,6 @@ const popover = readFileSync(
 
 const view = readFileSync(fileURLToPath(new URL('../index.vue', import.meta.url)), 'utf8')
 
-/** Everything between the SFC's own <template> tags: what reaches the screen. */
 function templateOf(sfc: string): string {
   const start = sfc.indexOf('<template>')
   const end = sfc.lastIndexOf('</template>')
@@ -36,26 +30,20 @@ function templateOf(sfc: string): string {
 describe('F-A: the at-platform state is a statement, not a number', () => {
   it('words the state with no minute in it', () => {
     expect(AT_PLATFORM_ETA_TEXT).toBe('车辆正在本站 (即将发车)')
-    // No digit: a number beside this sentence would be the app's own estimate of
-    // a vehicle the source already reported as here.
+    // 无数字：这句话旁的数字会是本应用对一辆来源已报告在场的车辆的估价。
     expect(AT_PLATFORM_ETA_TEXT).not.toMatch(/\d/)
   })
 
   it('is the ONE wording, chosen by the module rather than typed into the view', () => {
-    // The same sentence stood in three branches of this view; a wording that can
-    // drift in three places is how one fact becomes three readings.
+    // 同一句话曾站在本视图的三个分支里；能在三处漂移的措辞就是一个事实变成三种读数的路径。
     expect(view).not.toContain('车辆正在本站')
     expect(view).toContain('AT_PLATFORM_ETA_TEXT')
   })
 
   it('answers a row that is at the platform BEFORE any minute arithmetic', () => {
     const branch = view.indexOf('if (next.isAtStation)')
-    // The minute comes from `statedArrivalMinutes` now, which answers `null` for a
-    // row that states none — that is what makes the absence a state instead of the
-    // `NaN分` raw arithmetic over an optional field would paint. Pinned here so the
-    // at-platform ordering keeps being asserted against the real expression (this
-    // assertion is RED until the pending `index.vue` patch lands: see
-    // `src/__tests__/absent-arrival-minute-display.test.ts`).
+    // 分钟现在来自 `statedArrivalMinutes`，它对未陈述分钟的行答 `null`——
+    // 这使得缺失成为一种状态。钉在此处使 at-platform 的顺序继续对真实表达式断言。
     const minuteMath = view.indexOf('statedArrivalMinutes(next)')
     expect(branch, 'the arrivals branch no longer checks isAtStation').toBeGreaterThan(-1)
     expect(minuteMath, 'the arrivals minute is no longer computed there').toBeGreaterThan(-1)
@@ -65,15 +53,13 @@ describe('F-A: the at-platform state is a statement, not a number', () => {
 
   it('renders no per-row minute for a row the server marked at the platform', () => {
     const template = templateOf(popover)
-    // The minute now comes from `statedArrivalMinutes`, which answers `null` for a row
-    // that states none — so the guard is on the ANSWER rather than on the raw field,
-    // and a row with no minute renders the absence instead of `undefined分`.
+    // 分钟现在来自 `statedArrivalMinutes`，它对未陈述分钟的行答 `null`——故守卫在**答案**上而非
+    // 裸字段上，没有分钟的行渲染缺失而非 `undefined分`。
     const minuteSpan = /<span[^>]*>\s*\{\{\s*statedArrivalMinutes\(a\)\s*\}\}分\s*<\/span>/
     const match = minuteSpan.exec(template)
     expect(match, 'the panel no longer renders a per-row minute at all').not.toBeNull()
     expect(match![0], 'the row minute is not guarded by isAtStation').toContain('v-if="!a.isAtStation"')
-    // The whole branch is guarded by the row stating a minute at all, and the
-    // at-platform observation inside it precedes any number.
+    // 整个分支由「该行是否陈述了分钟」守卫，其中的 at-platform 观测先于任何数字。
     const guard = template.indexOf('statedArrivalMinutes(a) !== null')
     expect(guard, 'the panel no longer distinguishes a row with no minute').toBeGreaterThan(-1)
     expect(guard).toBeLessThan(template.indexOf('{{ a.time }}'))
@@ -87,9 +73,8 @@ describe('F-C: the table\'s own caveat is rendered with the departures', () => {
   })
 
   it('renders it OUTSIDE the departures list, so an empty list still states it', () => {
-    // After the last departure has gone the list is empty — and that is exactly
-    // the hour the caveat matters (the last train may not go the whole way). So
-    // the note's element is its own sibling of the list, not a child of it.
+    // 末班走后列表是空的——而那正是该说明要紧的时段（末班车可能不走完全程）。
+    // 故该说明元素是列表自己的兄弟而非其子。
     const template = templateOf(popover)
     const listOpen = template.indexOf('v-if="arrivals && arrivals.arrivals.length > 0"')
     expect(listOpen, 'the departures list is no longer guarded by its own v-if').toBeGreaterThan(-1)
@@ -109,8 +94,7 @@ describe('F-C: the table\'s own caveat is rendered with the departures', () => {
   })
 
   it('words nothing itself: the sentence is the table\'s', () => {
-    // The note is upstream's own caveat text; a prefix written here would make
-    // the app the author of a claim it only carries.
+    // 该说明是上游自己的提示文本；在此写前缀会让本应用成为一个它只是携带的断言的作者。
     const template = templateOf(popover)
     expect(template).not.toContain('末班说明')
     expect(template).not.toContain('半程')
@@ -122,7 +106,7 @@ describe('F-C: the table\'s own caveat is rendered with the departures', () => {
   })
 })
 
-/** Index just past the element opened at `from` (its matching </div>), or -1. */
+/** 从 `from` 处打开的元素之后的下一个索引（其配对的 </div>），或 -1。 */
 function endOfElement(template: string, from: number): number {
   const openTagEnd = template.indexOf('>', from)
   if (openTagEnd < 0) return -1

@@ -4,32 +4,19 @@ import { ChevronRight } from '@lucide/vue'
 import type { ChainEmptyStateView, EmptyStateAction } from '../types'
 
 /**
- * This purpose has no chain recorded.
+ * 这个时段没有任何链路记录。
  *
- * The empty state names a cause the USER can act on, and it may not let one cause
- * hide another: when the anchor a chain would start from was never saved, that fact
- * is stated and its screen is offered, whatever else is also true. The sentence and
- * the destination are F1's own for the same settings row, so the two features that
- * read it speak one language about it.
- *
- * The words are decided in `empty-state.ts` — including the case where the anchor
- * state could not be read at all, which is stated as neither saved nor missing.
- *
- * EACH CAUSE GETS ITS OWN PAGE, never 设置's index: 设置 is an index plus four pages, and
- * the cause picks which one. `chains` is only here because that recording surface exists
- * (see `EmptyStateAction` and `empty-state.ts`).
+ * 空屏只点名使用者可行动的成因，且一个成因不得掩盖另一个：链路将要起步的锚点从未保存时，
+ * 该事实先说，并给出它自己的页面。锚点状态完全读不到时既非已保存也非缺失，对此不作断言。
  */
 const props = defineProps<{ view: ChainEmptyStateView }>()
 
-/** Where a cause's one control goes, and the words it does it in. */
 const ACTION: Record<EmptyStateAction, { to: string, label: string }> = {
-  // The anchor row F1's own sentence names, on the page that owns it.
+  // 锚点行由位置锚点页拥有。
   settings: { to: '/settings/anchors', label: '去设置起点位置' },
-  // The page a chain is recorded on (F10).
   chains: { to: '/settings/chains', label: '去设置里录入链路' },
 }
 
-/** The control to render, or none when the cause leaves the user nothing to press. */
 const action = computed(() => (props.view.action === null ? null : ACTION[props.view.action]))
 </script>
 

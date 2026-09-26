@@ -1,27 +1,17 @@
 <script setup lang="ts">
 /**
- * 设置's INDEX: four rows, one per domain, each stating that domain's CURRENT STATE as a
- * fact.
+ * 设置 的**索引**：四行，每行一个域，各自把该域的**当前状态**作为事实陈述。
  *
- * WHAT THIS PAGE IS. The four domains used to share one 841-line screen; they are now four
- * pages, and this is the map to them (`§4.1`). A row is a WHOLE-ROW `<RouterLink>` rather
- * than a scripted `router.push`: the row then carries the semantics, the keyboard
- * reachability and 「open in a new tab」 the browser already knows how to give a link.
+ * 本页是什么。四个域曾挤在一个 841 行的屏幕上；现在是四个页面，而这里是通往它们的地图。
+ * 一行是整行 `<RouterLink>` 而非脚本化的 `router.push`：这样这一行自带语义、键盘可达性
+ * 与浏览器已经会给链接的「在新标签页打开」。
  *
- * WHAT A ROW MAY SAY. Facts only — how many lines are followed, which hours are saved,
- * whether each anchor is set, how many chains are recorded. No advice, no 「去配置」: the
- * action is the row's own link, and a summary that also told the user what to do would
- * state the same thing twice. `index-summary.ts` owns every wording, and it is total over
- * the three states a read leaves a value in — STILL READING, READ AND FAILED, read — plus
- * the fourth the SETTINGS row adds: the read answered and there is no row, which says
- * 「未设置」. So a read that failed says 「未读到」 here rather than a default that would look
- * like the user's own configuration (the collapsed hours summary used to keep
- * `06:30–11:30` on a thrown request) or a count nobody obtained (「条数只在列表读到之后
- * 给」), and a row nobody ever saved says 「未设置」 rather than the built-in window.
+ * 一行可以说什么。只陈述事实——关注了多少条线路、保存了哪些时段、每个锚点是否已设、
+ * 录入了多少条链路。不给建议、不说「去配置」：动作就是这一行自己的链接，一条还告诉用户
+ * 该做什么的摘要会把同一件事说两遍。措辞由 `index-summary.ts` 拥有。
  *
- * WHAT IT DOES NOT DO. It carries no state into a sub-page: each of the four is a real
- * path that reads everything it needs itself, so a refresh, a bookmark or a browser back
- * lands on the same page with the same content (`§4.1` 深链接).
+ * 它不做什么。不把状态带进子页面：四个页面各自是真实路径，各自读取所需的一切，
+ * 故刷新、书签或浏览器后退都落在同一页面、同一内容上。
  */
 import { computed, onMounted, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -45,26 +35,24 @@ const cityStore = useCityStore()
 const { favoriteOrder } = storeToRefs(transitStore)
 
 /**
- * The followed lines of the CITY ON SCREEN — which is the domain 关注线路 manages, not the
- * whole stored list: a count over every city would describe a page the user is not looking
- * at, and which city that is is already named in the header.
+ * **屏上**这个城市已关注的线路——也就是关注线路管理的那个域，而不是全部已存列表：
+ * 对每个城市计数会描述一个用户没在看的页面，而那是哪个城市，页眉里已经写明。
  */
 const cityFavorites = computed(() =>
   favoriteOrder.value.filter(f => f.cityCode === cityStore.currentCode),
 )
 
-/** The four facts, each in the state its own read left it in. */
+/** 四个事实，各处于它自己那次读取留下的状态。 */
 const followedLines = shallowRef<SummaryValue<number>>({ state: 'reading' })
 const savedHours = shallowRef<SettingsSummaryValue<UserSettings>>({ state: 'reading' })
 const anchors = shallowRef<SummaryValue<StoredAnchors>>({ state: 'reading' })
 const chains = shallowRef<SummaryValue<number>>({ state: 'reading' })
 
 /**
- * The rows, in the order §4.1 lists the domains: followed lines, hours, anchors, chains.
+ * 各行，按四个域的既定次序：关注线路、通勤时段、位置锚点、通勤链路。
  *
- * `favorites`, `hours` and `anchors` are read here rather than taken from a sub-page: this
- * page may be the first thing a session renders (an installed app opening on `/settings`),
- * so every fact it states has to come from its own read.
+ * 其中三个在此读取，而非取自子页面：本页可能是会话渲染的第一屏，
+ * 故它陈述的每个事实都必须来自自己的读取。
  */
 const rows = computed(() => [
   { to: '/settings/lines', label: '关注线路', icon: Search, summary: followedLinesText(followedLines.value) },
@@ -80,11 +68,10 @@ onMounted(() => {
 })
 
 /**
- * The followed lines' count, and whether it is a count at all.
+ * 已关注线路的条数，以及它到底是不是一个条数。
  *
- * The store answers whether the server actually handed back a list: a read that failed
- * leaves an empty array behind, and reporting that array's length would be reporting a
- * number this page never obtained.
+ * store 回答服务端是否真的交回了列表：读失败会留下空数组，
+ * 而报出那个数组的长度，就是报出一个本页从未取得的数字。
  */
 async function readFollowedLines(): Promise<void> {
   const answered = await transitStore.fetchFavorites()
@@ -93,7 +80,7 @@ async function readFollowedLines(): Promise<void> {
     : { state: 'unreadable' }
 }
 
-/** How many chains are recorded — read through the store's own answer, same rule. */
+/** 录入了多少条链路——同样通过 store 自己的答案读取，同一条规则。 */
 async function readChains(): Promise<void> {
   const answered = await transitStore.fetchCommuteChains()
   chains.value = answered
@@ -102,19 +89,15 @@ async function readChains(): Promise<void> {
 }
 
 /**
- * The one settings row, which two of the four domains read from.
+ * 那一条设置记录，四个域中有两个从它读取。
  *
- * The two are set together and separately from each other: a row without the four times is
- * not a readable schedule, while the same row's anchors may still be readable — so the
- * hours may say 「未读到」 beside anchors that are known, and neither ever borrows the
- * other's answer.
+ * 两者一起设置、但彼此独立：没有四个时刻的记录不是可读的时段，而同一记录的锚点仍可能可读
+ * ——故时段可以在已知的锚点旁说「未读到」，两者绝不借用对方的答案。
  *
- * The reading itself is `settingsReadOf`'s, and it carries the one state the server added:
- * a user who has never saved anything is answered `settingsState: 'unset'` with no row, so
- * this page says 「未设置」 — it used to say the built-in `06:30–11:30` here, which is the
- * default wearing the user's own configuration's clothes. That state is ALSO not 「未读到」:
- * one is a read that failed, the other a read that found nothing, and §4.1 keeps them
- * apart.
+ * 读法本身是 `settingsReadOf` 的，它携带服务端新增的那一种状态：从未保存过任何东西的用户
+ * 得到 `settingsState: 'unset'` 且无记录，故本页说「未设置」——而不是内置的 `06:30–11:30`，
+ * 那是默认值穿着用户自己配置的衣服。这一状态也**不是**「未读到」：一个是失败的读取，
+ * 另一个是找到了空无的读取。
  */
 async function readSettings(): Promise<void> {
   try {
@@ -125,9 +108,8 @@ async function readSettings(): Promise<void> {
     anchors.value = read.anchors
   }
   catch {
-    // A request that never answered, or an answer that could not be parsed: nothing about
-    // the stored row is known. 「未设置」 would be a claim about it, and a default would
-    // look like the user's own schedule.
+    // 请求从未作答，或答案无法解析：关于已存记录一无所知。
+    // 「未设置」会是对它的断言，而默认值会看起来像用户自己的时段。
     savedHours.value = { state: 'unreadable' }
     anchors.value = { state: 'unreadable' }
   }
@@ -145,9 +127,8 @@ async function readSettings(): Promise<void> {
       </p>
     </div>
 
-    <!-- A list, each row one link, the row's own summary INSIDE that link: a row and its
-         state must not be two places, or a reader who reaches the row by its link never
-         hears the state. -->
+    <!-- 一个列表，每行一个链接，行自己的摘要**在该链接内部**：一行与它的状态不能是两个
+         地方，否则靠链接到达该行的读者永远听不到那个状态。 -->
     <ul class="divide-y divide-slate-800/80 overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-xl">
       <li v-for="row in rows" :key="row.to">
         <RouterLink

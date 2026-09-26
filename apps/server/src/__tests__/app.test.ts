@@ -22,7 +22,7 @@ describe('Server Application', () => {
     })
     expect(res.statusCode).toBe(200)
     const json = JSON.parse(res.body)
-    // No fake seed injection: unknown lines must return an empty array, never fabricated results
+    // 不做假种子注入：未知线路必须返回空数组，绝不返回编造的结果
     expect(json.success).toBe(true)
     expect(json.data).toEqual([])
     await app.close()
@@ -100,7 +100,6 @@ describe('Server Application', () => {
     expect(json.success).toBe(true)
     expect(Array.isArray(json.data)).toBe(true)
     expect(json.data.length).toBeGreaterThan(100)
-    // Beijing must be present and hot
     const beijing = json.data.find((c: any) => c.code === '027')
     expect(beijing).toBeTruthy()
     expect(beijing.name).toBe('北京')
@@ -122,7 +121,7 @@ describe('Server Application', () => {
       payload: { displayOrder: 3 },
     })
 
-    // An order-only PATCH has no board stops to write; that must not 404.
+    // 只写 order 的 PATCH 没有上车点可写，这不该 404。
     expect(res.statusCode).toBe(200)
     expect(JSON.parse(res.body).data.displayOrder).toBe(3)
     await app.close()

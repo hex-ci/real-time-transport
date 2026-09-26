@@ -17,36 +17,22 @@ import ChainEmptyState from '@/views/commute-chain/components/chain-empty-state.
 import { emptyStateOf } from '@/views/commute-chain/empty-state'
 
 /**
- * The four sub-pages 设置 was split into, and the three in-app pointers that had to
- * follow the split.
+ * `设置` 拆分成的四个子页面，以及拆分后必须跟上的三个应用内指针。
  *
- * THREE CLAIMS, each held by what renders rather than by what the source says:
+ * 三项断言，各由**渲染出的东西**而非源码所说守住：
  *
- *  - every sub-page is a page of its own: a real `<h2>`, and an in-app 「返回设置」
- *    control. The back control is not the browser's back gesture, so it must exist for
- *    real; its accessible name must CONTAIN its visible words (WCAG 2.5.3 Label in Name)
- *    — a name that replaces 「返回设置」 with a shorter phrase is a control a voice-control
- *    user cannot call by reading it out. The precedent in this repo is
- *    `chain-leg-fields.vue`'s 「删除该段（第 1 段）」: visible words first, extras in
- *    parentheses, and `aria-label` never repeats a heading it already renders.
- *  - the four controls THIS PASS brought up to the house 44px: the collapsed 通勤时段 trigger,
- *    the row's 取消关注, and the two controls in the removal dialog. The claim is scoped to those
- *    four, because the same source still holds targets under 44px that this pass did not touch —
- *    the followed row's drag grip (36×32) and the station picker's own search field and option
- *    rows (36px / 38px). Each of them clears WCAG 2.5.8's 24×24 minimum (the grip's 36×32 is the
- *    measured size recorded for it); none of them is the house number. Reading 「the touch targets
- *    this screen was measured to have below 44px」 as an exhaustive set was wrong, and the audit's
- *    list was only ever the ones it fixed. The direction radio items (36px) were on that list and
- *    were raised to 44px by the pass that measured the board stop's own flow (see the 方向单选 test
- *    below).
- *  - the three in-app pointers now name the DOMAIN they are about instead of 设置 as a
- *    whole: the home screen's empty state is about followed lines, the two chain pointers
- *    are about anchors — except the one that only became honest now that a recording
- *    surface exists, which is about the chain page. 设置's own nav item still points at
- *    the index (`/settings`) and is untouched; that is the registry guard's business.
+ *  - 每个子页面都是自己的页面：一个真实 `<h2>`，以及一个应用内「返回设置」控件。该返回控件不是浏览器的
+ *    返回手势，故必须真实存在；其无障碍名必须**包含**其可见文字（WCAG 2.5.3 名称中标签）——用更短短语
+ *    替换「返回设置」的名字，是语音控制用户无法念出调用的控件。本仓库的先例是 `chain-leg-fields.vue` 的
+ *    「删除该段（第 1 段）」：可见文字在前，补充在括号里，且 `aria-label` 绝不重复它已渲染的标题。
+ *  - 本轮改动提到院内 44px 的四个控件：折叠的通勤时段触发器、该行的 取消关注，以及移除对话框里的两个控件。
+ *    该断言只覆盖这四个：同一源码里仍有本轮未动的 44px 以下目标（它们是浏览器侧事实，各自满足 WCAG 2.5.8 的
+ *    24×24 下限），而它们都不是那个院内数字。
+ *  - 三个应用内指针现在点名它们所关于的**域**，而非整个 `设置`：首页空态关乎关注线路，两个链路指针关乎锚点
+ *    ——除了那个直到录制界面存在才变得诚实的，它关乎链路页。`设置` 自己的导航项仍指向索引（`/settings`）
+ *    且未被触碰；那是注册表守卫的事。
  *
- * The URL each page answers on is a fact about the route table, and the table is pinned
- * in `settings-index.test.ts` (a structural assertion). Nothing here can load a path.
+ * 每个页面应答的 URL 是关于路由表的事实，该表钉在 `settings-index.test.ts`（结构断言）。此处什么都加载不了路径。
  */
 
 afterEach(async () => {
@@ -54,14 +40,14 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-/** The reads these pages make, all answering with something. */
+/** 这些页面发出的读取，全部作答。 */
 function routes(options: { favourites?: 'ok' | 'fail', settings?: 'ok' | 'fail' | 'unset' } = {}): Route[] {
   return [
     [/\/api\/transit\/favorites$/, () => (options.favourites === 'fail'
       ? { success: false, error: '读取失败' }
       : { success: true, data: [{ id: 'fav-1', userId: 'default_user', cityCode: '027', lineId: 'bus_027_1', lineName: '快线 1 路', preferredDirection: 0, displayOrder: 0 }] })],
-    // The answer carries `settingsState`, as the endpoint does: a stored row and a read
-    // that found no row are different answers, and the state says which one this is.
+    // 答案携带 `settingsState`，与端点一致：已存的行与发现没有行的读取是不同的答案，
+    // 状态说明这是哪一个。
     [/\/api\/transit\/settings/, () => {
       if (options.settings === 'fail') return { success: false, error: '读取失败' }
       if (options.settings === 'unset') return { success: true, settingsState: 'unset', data: null }
@@ -76,7 +62,7 @@ function routes(options: { favourites?: 'ok' | 'fail', settings?: 'ok' | 'fail' 
   ]
 }
 
-/** Mount any of the split's pages, with `RouterLink` reaching the host. */
+/** 挂载拆分出的任一页面，并让 `RouterLink` 触达宿主。 */
 async function mountPage(
   component: Parameters<typeof mountComponent>[0],
   props: Record<string, unknown> = {},
@@ -91,20 +77,20 @@ async function mountPage(
   return host
 }
 
-/** A control's accessible name: the `aria-label` when it has one, else its own text. */
+/** 某控件的无障碍名：有 `aria-label` 时用它，否则用它自己的文本。 */
 function accessibleName(host: MountedHost, node: HostElement): string {
   const label = node.props['aria-label']
   return label === undefined ? host.textOf(node) : String(label)
 }
 
-/** The sub-page's 「返回设置」 control, or a thrown error naming what was missing. */
+/** 子页面的「返回设置」控件，或一个点名缺失之物的抛错。 */
 function backControl(host: MountedHost): HostElement {
   const found = host.nodes(item => item.tag === 'a' && host.textOf(item).includes('返回设置'))[0]
   if (!found) throw new Error('the page rendered no 「返回设置」 control')
   return found
 }
 
-/** A control whose text is exactly the given words, or a thrown error. */
+/** 文本恰为给定文字的控件，或一个抛错。 */
 function controlWith(host: MountedHost, words: string): HostElement {
   const found = host.nodes(item => (item.tag === 'a' || item.tag === 'button') && host.textOf(item).trim() === words)[0]
   if (!found) throw new Error(`the page rendered no 「${words}」 control`)
@@ -112,10 +98,10 @@ function controlWith(host: MountedHost, words: string): HostElement {
 }
 
 /**
- * The 通勤时段 card's collapsed trigger, whose two lines are the card's title AND its summary.
+ * 通勤时段卡片折叠的触发器，其两行是卡片的标题**与**摘要。
  *
- * Located as a `button` carrying the title: the trigger is what the card collapses to, so its
- * text IS the collapsed summary the user reads — the same element the 44px rule is measured on.
+ * 按携带标题的 `button` 定位：触发器就是卡片折叠成的东西，故其文本**即**用户读到的折叠摘要
+ * ——也是 44px 规则所测量的同一元素。
  */
 function collapsedHoursTrigger(host: MountedHost): HostElement {
   return host.node(
@@ -125,16 +111,15 @@ function collapsedHoursTrigger(host: MountedHost): HostElement {
 }
 
 /**
- * The house touch-target rule, as the classes state it.
+ * 院内触摸目标规则，按类所陈述。
  */
 const HOUSE_TOUCH_TARGET = /min-h-\[44px\]|min-h-11|h-11/
 
 /**
- * A followed route whose own detail carries BOTH directions.
+ * 一条自身详情同时携带**两个**方向的关注线路。
  *
- * `reverseLineId` is what makes a bus route two-way (`favoriteIsBidirectional`), and a
- * single-direction route renders its direction as text instead of a picker — so this
- * fixture is the only shape in which the direction radios exist to be measured.
+ * `reverseLineId` 是使公交线路双向的东西（`favoriteIsBidirectional`），而单方向线路把其方向渲染为文本
+ * 而非选择器——故该夹具是方向单选存在可被测量的唯一形状。
  */
 const TWO_WAY_FAVOURITE = {
   id: 'fav-2',
@@ -147,7 +132,7 @@ const TWO_WAY_FAVOURITE = {
   displayOrder: 0,
 }
 
-/** A detail carrying stops, so the expanded row offers a board stop to pick. */
+/** 携带站点的详情，使展开的行提供一个可选的上车点。 */
 const TWO_WAY_DETAIL = {
   lineId: 'bus_027_1',
   direction: 0,
@@ -161,11 +146,10 @@ const TWO_WAY_DETAIL = {
 }
 
 /**
- * The direction radios of the expanded row.
+ * 展开行的方向单选。
  *
- * A filtering helper, so the caller owes the non-empty line first: a list that matched
- * nothing makes the loop below pass for free — the way two 40px controls once satisfied
- * this rule (see `commute-chain-editor.test.ts`).
+ * 一个筛选 helper，故调用方先欠一个非空断言：什么都没匹配到的列表会让下面的循环白通过
+ * ——正如两个 40px 控件曾满足本规则那样。
  */
 function directionRadios(host: MountedHost): HostElement[] {
   return host.nodes(item => item.props.role === 'radio')
@@ -234,13 +218,13 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
   it('取消关注：展开一行之后的那个控件，以及对话框里的两个', async () => {
     const host = await mountPage(LinesPage)
 
-    // The row has to be opened first: the panel is not rendered while it is collapsed.
+    // 必须先打开该行：折叠时面板不渲染。
     await press(host, host.node(item => item.tag === 'button' && host.textOf(item).includes('快线 1 路'), 'the followed-line row'))
     const unfollow = controlWith(host, '取消关注')
     expect(String(unfollow.props.class), '取消关注 is smaller than the house touch target').toMatch(HOUSE_TOUCH_TARGET)
     host.unmount()
 
-    // The dialog's two controls, mounted in the state the flow above puts them in.
+    // 对话框的两个控件，以上流程把它们置于的状态挂载。
     const dialog = await mountPage(RemovalDialog, { open: true, lineName: '快线 1 路', removing: false, error: null })
     for (const words of ['保留', '确认取消关注']) {
       const control = controlWith(dialog, words)
@@ -250,10 +234,9 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
   })
 
   it('展开一行后的方向单选也是 44px（这一处此前是 36px）', async () => {
-    // The direction pills were the one control this screen still measured under the
-    // house number: `min-h-[36px]`, which clears WCAG 2.5.8's 24×24 and is not 44.
-    // A two-way route is the only shape that renders them (a single-direction route
-    // shows its direction as text), so the fixture is a followed route carrying a
+    // 方向药丸是本屏仍被测量为低于院内数字的那一个控件：`min-h-[36px]`，它满足 WCAG 2.5.8 的 24×24
+    // 又不是 44。双向线路是唯一渲染它们的形状（单方向线路把方向显示为文本），
+    // 故夹具是一条带 `reverseLineId` 的关注线路。
     // `reverseLineId`.
     const host = await mountComponent(LinesPage, {
       routes: [
@@ -265,16 +248,15 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
     })
     await host.flush()
 
-    // The row has to be opened first: the panel is not rendered while it is collapsed.
+    // 必须先打开该行：折叠时面板不渲染。
     await press(host, host.node(
       item => item.tag === 'button' && host.textOf(item).includes('快线 1 路'),
       'the followed-line row',
     ))
 
     const radios = directionRadios(host)
-    // NON-EMPTY FIRST, because this list came from a filtering helper: an empty one
-    // would make the loop below pass while measuring nothing. Two purposes × two
-    // directions is the four pills the row shows.
+    // 非空在前，因为这个列表来自筛选 helper：空列表会让下面的循环在什么都没测量时通过。
+    // 两个用途 × 两个方向即该行显示的四个药丸。
     expect(radios.length, 'the expanded row rendered no direction radio to measure').toBe(4)
     for (const radio of radios) {
       expect(String(radio.props.class), `a direction radio is smaller than the house touch target: ${String(radio.props.class)}`)
@@ -285,18 +267,15 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
 })
 
 /**
- * The 通勤时段 sub-page's OWN collapsed summary, held here rather than only through the index
- * row.
+ * 通勤时段子页**自己**的折叠摘要，在此守住，而非只经索引行。
  *
- * The two share one wording function (`index-summary.ts`'s `hoursText`) by design, so the same
- * stored hours cannot read two ways — but the READ is the page's own: this page fetches
- * `/api/transit/settings` itself and decides the three states itself. Nothing else holds that:
- * a `catch` here that restored `06:30–11:30` would make this page state the default wearing the
- * user's own configuration's clothes, and the index row's tests would stay green, because they
- * mount a different file.
+ * 两者按设计共用一个措辞函数（`index-summary.ts` 的 `hoursText`），故同一存储时刻不会有两种读法——
+ * 但**读取**是本页自己的：本页自己取 `/api/transit/settings` 并自己决定三种状态。别的都守不住这一点：
+ * 此处一个恢复 `06:30–11:30` 的 `catch` 会让本页用用户自己配置的衣服陈述默认值，而索引行的测试会保持绿，
+ * 因为它们挂载的是另一个文件。
  */
 describe('通勤时段子页的折叠摘要自己说三态', () => {
-  /** The collapsed summary's own wording, character for character. */
+  /** 折叠摘要自己的措辞，逐字。 */
   const HOURS_SUMMARY = '06:30–11:30 · 17:00–22:00'
 
   it('读到：摘要就是那四个已保存的时刻', async () => {
@@ -317,9 +296,8 @@ describe('通勤时段子页的折叠摘要自己说三态', () => {
   })
 
   it('没存过：摘要说「未设置」，也不是那个默认时段', async () => {
-    // The fourth state, on THIS page: the read answered and found no row. It used to be
-    // answered with the built-in window, which this summary printed as the user's own
-    // hours — one step further from the truth than a failure, because nothing failed.
+    // 本页上的第四种状态：读取作答且没找到行。它曾由内置窗口作答，而本摘要把它印成用户自己的时刻
+    // ——比失败离真相更远一步，因为什么都没失败。
     const host = await mountPage(SchedulePage, {}, { settings: 'unset' })
 
     const summary = host.textOf(collapsedHoursTrigger(host))
@@ -351,10 +329,8 @@ describe('设置拆分后，应用内的指向各自落在那一域的那一页'
   })
 
   it('链路空态的「还没有录入」原因 → /settings/chains：录入界面存在了，这条指向才诚实', async () => {
-    // This entry did not exist while the build had no recording surface (the empty state
-    // promised no affordance then, and rightly so). `/settings/chains` is where a chain is
-    // recorded, so the cause the user can act on now has a screen — and the anchor cause
-    // above keeps its own screen rather than being replaced by this one.
+    // 本条目在构建尚无录制界面时不存在（那时空态不承诺任何可供性，这是对的）。`/settings/chains` 是
+    // 记录链路之处，故用户可行动的成因现在有了屏幕——而上面的锚点成因保留自己的屏幕，而非被这一个替换。
     const host = await mountPage(ChainEmptyState, {
       view: emptyStateOf({ purpose: 'morning', anchorSaved: true }),
     })
@@ -364,8 +340,7 @@ describe('设置拆分后，应用内的指向各自落在那一域的那一页'
   })
 
   it('链路空态的锚点读不到：仍然给录入入口，且一个字都不说锚点', async () => {
-    // An unread anchor row is claimed neither way, and the recording surface is not a
-    // claim about it: the link goes to the chain page, never to the anchor row.
+    // 未读的锚点行不作任何方向的断言，而录制界面不是对它的断言：链接通向链路页，绝不通向锚点行。
     const host = await mountPage(ChainEmptyState, {
       view: emptyStateOf({ purpose: 'morning', anchorSaved: null }),
     })
@@ -377,12 +352,9 @@ describe('设置拆分后，应用内的指向各自落在那一域的那一页'
 })
 
 /**
- * 设置's index row learned this rule first (see `settings-index.test.ts`), and the pages
- * it points at owe it the same: a followed-lines read that FAILED leaves an empty array
- * behind, and rendering that array as 「暂无关注线路」 tells the user they follow nothing
- * when the truth is 「没读到」. The words differ because the facts differ — one names an
- * empty set, the other names a read nobody completed — and only the second has a retry
- * that can change the answer.
+ * `设置` 的索引行最先学到本规则，它所指向的页面同样欠它：**失败**的关注线路读取留下一个空数组，
+ * 把该数组渲染成「暂无关注线路」会告诉用户他们什么都没关注，而真相是「没读到」。措辞不同因为事实不同
+ * ——一个点名空集，另一个点名没人完成的读取——且只有后者有能改变答案的重试。
  */
 describe('关注线路读不到时，说「未读到」，不说「没有」', () => {
   it('关注线路页：读失败时说未读到并给重试，不给「暂无关注线路」，也不报 0 条', async () => {
@@ -412,8 +384,8 @@ describe('关注线路读不到时，说「未读到」，不说「没有」', (
   })
 
   it('通勤链路页的录入：读失败时说未读到，不给「还没有关注线路」这句关于存储行的话', async () => {
-    // The chain editor's premise is the followed set, so a read that failed leaves it with
-    // no line to offer — which is NOT the same fact as 「还没有关注线路」.
+    // 链路编辑器的前提是关注集，故失败的读取让它没有线路可提供——
+    // 这与「还没有关注线路」**不是**同一个事实。
     const host = await mountPage(ChainsPage, {}, { favourites: 'fail' })
     await press(host, controlWith(host, '新增链路'))
 

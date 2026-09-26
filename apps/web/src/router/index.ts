@@ -24,40 +24,34 @@ const router = createRouter({
       component: () => import('@/views/platform/index.vue'),
     },
     {
-      // F10: the recorded commute chains and their per-transfer conclusions. A
-      // first-level entry of its own, because it is a different surface from the
-      // followed-lines list rather than a block of it.
+      // 换乘链路：一级入口，独立于关注线路列表的界面。
       path: '/commute-chain',
       name: 'commute-chain',
       component: () => import('@/views/commute-chain/index.vue'),
     },
     {
-      // 设置: an INDEX of four domains, and the four pages are its CHILDREN.
+      // 设置：四个域的索引页，四个页面是它的子路由。
       //
-      // The nesting is load-bearing rather than cosmetic. The top nav renders its 「设置」
-      // item as a `<RouterLink to="/settings">` carrying `active-class`, and vue-router's
-      // default active matching follows matched route RECORDS: with the four domains as
-      // children, `/settings/lines` still matches the parent record and the nav item stays
-      // lit on every sub-page, where four flat `/settings/…` siblings would leave it dark.
-      // The index itself is the empty-path child, so `/settings` is still its own page.
+      // 这层嵌套是承重的：顶部导航是带 active-class 的 `<RouterLink to="/settings">`，而 vue-router
+      // 默认的激活匹配跟随已匹配的路由**记录**——四个域作子路由时，/settings/lines 仍匹配父记录、
+      // 导航项在每个子页面保持点亮；四条平级的 /settings/… 会让它变暗。
+      // 索引页本身是空路径子路由，故 /settings 仍是自己的页面。
       path: '/settings',
       component: () => import('@/views/settings/layout.vue'),
       children: [
         { path: '', name: 'settings', component: () => import('@/views/settings/index.vue') },
-        // 关注线路 (F9): search, follow, order, and each line's own board stops.
+        // 关注线路：搜索、关注、排序，以及每条线路自己的报站屏站点。
         { path: 'lines', name: 'settings-lines', component: () => import('@/views/settings/lines.vue') },
-        // 早晚高峰起止时刻 (存 `user_settings`).
+        // 早晚高峰起止时刻，存 user_settings。
         { path: 'schedule', name: 'settings-schedule', component: () => import('@/views/settings/schedule.vue') },
-        // 家 / 公司 (F2): F1's walking time is measured from them.
+        // 家 / 公司：步行时间从它们出发测量。
         { path: 'anchors', name: 'settings-anchors', component: () => import('@/views/settings/anchors.vue') },
-        // 通勤链路的录入与编辑 (F10) — 链路页 only reads conclusions.
+        // 通勤链路的录入与编辑；链路页只读结论。
         { path: 'chains', name: 'settings-chains', component: () => import('@/views/settings/chains.vue') },
       ],
     },
     {
-      // Catch-all: an unmatched path must SAY so. Rendering nothing leaves the
-      // page silently blank, which reads as a broken app rather than a bad URL
-      // (e.g. /line/ with the line id missing).
+      // 兜底路由：未匹配的路径必须说出来。渲染空白会被读成应用坏了，而不是网址错了。
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('@/views/not-found/index.vue'),

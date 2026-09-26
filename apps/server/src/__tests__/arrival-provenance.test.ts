@@ -5,27 +5,19 @@ import { TransitService } from '../services/transit.service.js'
 import { buildApp } from '../app.js'
 
 /**
- * F4 on the server: every arrival row states what KIND of number it is.
+ * 服务端的 F4：每一行到达都声明自己那个数是什么种类。
  *
- * The measurement that makes this necessary: an arrivals query names a target
- * order (`/lines/010-1-0/stations/<terminal>/arrivals?order=N`), and the upstream
- * then returns that stop's own travel time — so the payload on this path CAN
- * carry the arrival minute. It need not, and it need not for every vehicle in one
- * response (one vehicle arrives with upstream travels, the next does not); on a
- * board queried without a target it never does. The provenance therefore has to
- * be attached where each minute is produced, per row: a value the payload carried,
- * or the subway engine's model.
+ * 带目标站序的到达查询会让上游返回该站自己的行程时间，所以这条路径上的载荷「可以」带到达
+ * 分钟 —— 但不必带，也不必对同一次响应里的每辆车都带。因此来源必须挂在每个分钟产生的地方、
+ * 按行挂：要么是载荷带来的值，要么是地铁引擎的模型。
  *
- * A row the payload priced NOTHING for no longer receives a minute of this app's
- * own: the position/dwell extrapolation was removed (its error had no fixed sign
- * — see `no-estimated-arrival-minute.test.ts`, which pins that decision), so such
- * a row is served with no `etaSeconds`, no `time` and no provenance. What is
- * asserted here is the other half, and the one F4 exists for: 「没有来源」 and
- * 「实时」 are different facts, and a row whose provenance is unknown must not come
- * back telling the UI it is live.
+ * 载荷什么都没定价的行不再得到本应用自己的分钟：位置/停站外推已移除（见
+ * `no-estimated-arrival-minute.test.ts`），这样的行既没有 `etaSeconds`、没有 `time`，
+ * 也没有来源。这里断言的是另一半，也是 F4 存在的理由：「没有来源」与「实时」是两个不同的
+ * 事实，来源未知的行不能回头告诉 UI 它是实时的。
  */
 
-/** Freeze the wall clock; only `Date` is faked, so nothing else stalls. */
+/** 冻结墙上时钟；只伪造 `Date`，别的东西都不会停摆。 */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(localIso))
@@ -42,8 +34,7 @@ function station(name: string, order: number) {
 }
 
 /**
- * A three-stop bus whose middle platform is the one being queried, so the branch
- * that produces each minute is decided by the vehicle, not by the fixture.
+ * 三站公交，被查询的是它的中间站台：产生每个分钟的分支因此由车辆决定，而不是由固定数据决定。
  */
 function busDetail(geometry: boolean): LineDetail {
   return {
@@ -60,7 +51,7 @@ function busDetail(geometry: boolean): LineDetail {
   }
 }
 
-/** A subway line with no registered timetable for these stops. */
+/** 这些站没有登记时刻表的地铁线路。 */
 function subwayDetail(): LineDetail {
   return { ...busDetail(true), lineId: 'subway_027_88', type: 'subway', directionName: '开往 丙站' }
 }
@@ -80,18 +71,15 @@ function liveStatus(dataSource: LiveLineStatus['dataSource'], buses: Array<Recor
   }
 }
 
-/** The service under test, wired to a stub db so no upstream can be reached. */
 function serviceFor(detail: LineDetail, status: LiveLineStatus | null) {
   const db = {
     getCachedLine: async () => detail,
     getUserSettings: async () => null,
-    // Reached only by the geometry-less fixture, whose backfill attempt is
-    // expected to fail: the service then serves the cached row as-is.
+    // 只有无几何的固定数据会走到这里：它的回填注定失败，服务随后原样给出缓存行。
     upsertCachedLine: async () => {},
   } as unknown as Database
 
-  // Every test here is network-free by construction: a call that escaped would
-  // throw rather than spend real quota.
+  // 这里的每个测试按构造都离网：逃出去的调用会抛错，而不是花掉真实配额。
   forbidNetwork()
 
   const service = new TransitService(db, { amapKey: 'test-key' })
@@ -99,7 +87,7 @@ function serviceFor(detail: LineDetail, status: LiveLineStatus | null) {
   return service
 }
 
-/** Every network call is a bug here: fail loudly rather than spend quota. */
+/** 这里的每一次网络调用都是 bug：宁可响亮地失败，也不花掉配额。 */
 function forbidNetwork(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     throw new Error(`unexpected upstream call: ${String(url)}`)
@@ -135,11 +123,8 @@ describe('F4: a bus minute is 实时 only when the payload carried it', () => {
   it('serves no minute and no mark when the reading published none for the vehicle', async () => {
     freezeAt('2026-09-24T08:30:00')
     const detail = busDetail(true)
-    // A real vehicle, a real odometer, a real speed — and no upstream ETA. This is
-    // the shape the live bus board actually shows, and the row it yields states NO
-    // minute: the minute that used to stand here was this app's own extrapolation
-    // of that speed and a nominal dwell across every remaining stop. A mark
-    // qualifies a number, so this row carries none either.
+    // 真实车辆、真实里程、真实速度，但没有上游到达时间 —— 实时公交站牌就是这个形状，
+    // 而它给出的这一行不给分钟；标记修饰的是一个数字，所以这一行也没有标记。
     const service = serviceFor(detail, liveStatus('chelaile', [
       vehicle({ distanceFromStart: 500, speed: 6 }),
     ]))
@@ -159,8 +144,6 @@ describe('F4: a bus minute is 实时 only when the payload carried it', () => {
 
   it('serves no minute without geometry either, rather than a per-stop constant', async () => {
     freezeAt('2026-09-24T08:30:00')
-    // The other half of the removed arithmetic: with no `distanceFromStart` it
-    // answered `stopsAway * 150`, a flat nominal hop. No minute is stated now.
     const detail = busDetail(false)
     const service = serviceFor(detail, liveStatus('chelaile', [vehicle({})]))
     try {
@@ -179,8 +162,7 @@ describe('F4: a bus minute is 实时 only when the payload carried it', () => {
   it('keeps a vehicle observed at the platform as 实时', async () => {
     freezeAt('2026-09-24T08:30:00')
     const detail = busDetail(true)
-    // Nose at the queried platform's own distance mark: an observation of a real
-    // vehicle, not an arithmetic result.
+    // 车头就在被查询站台自己的里程标上：这是对真实车辆的观测，不是算出来的结果。
     const service = serviceFor(detail, liveStatus('chelaile', [
       vehicle({ distanceFromStart: 3000 }),
     ]))
@@ -199,8 +181,8 @@ describe('F4: the subway engine\'s trains never come back as live data', () => {
   it('marks a generated train 排班推演 however its minute was produced', async () => {
     freezeAt('2026-09-24T08:30:00')
     const detail = subwayDetail()
-    // The engine puts a travelTimeSec on every train, so the row reaches the
-    // "upstream sent the minute" branch while the train itself is generated.
+    // 引擎给每列车都放了 travelTimeSec，所以这一行走到「上游送来了分钟」那个分支，
+    // 而车本身是生成的。
     const service = serviceFor(detail, liveStatus('subway_schedule', [
       vehicle({ travelTimeSec: 300 }),
       vehicle({ id: 'b2', distanceFromStart: 500, speed: 6 }),
@@ -246,8 +228,7 @@ describe('F4: an unclassifiable source yields no claim', () => {
     try {
       const rows = (await arrivalsFor(service, '010-1-0', '丙站', 3)).arrivals
       expect(rows.length).toBeGreaterThan(0)
-      // apizero is a real vehicle feed, so its rows are classified; the point of
-      // this case is the guard below, which a foreign source must trigger.
+      // apizero 是真实的车辆数据源，它的行会被分类；本用例的重点是下面那道闸，外来源必须触发它。
       expect(rows.every(r => r.provenance !== undefined)).toBe(true)
 
       const foreign = serviceFor(detail, liveStatus(
@@ -283,10 +264,7 @@ describe('F4: an unclassifiable source yields no claim', () => {
   })
 })
 
-/**
- * The same two answers through the real HTTP route, so the wire shape the web app
- * receives is the one asserted here.
- */
+/** 同样两种答案走真实 HTTP 路由：这里断言的正是 web 应用收到的线上形状。 */
 describe('F4: the arrivals route ships a provenance on every row', () => {
   const OK = (payload: Record<string, unknown>) => ({
     ok: true,
@@ -294,7 +272,7 @@ describe('F4: the arrivals route ships a provenance on every row', () => {
     json: async () => ({ status: '1', infocode: '10000', info: 'OK', ...payload }),
   })
 
-  /** An amap line fixture with `count` stops, ~1.3 km apart. */
+  /** 一条 amap 线路替身，站与站之间约 1.3 km。 */
   function subwayLineFixture(names: string[]) {
     return {
       id: 'BJ_88',
@@ -340,8 +318,7 @@ describe('F4: the arrivals route ships a provenance on every row', () => {
     stubAmap([subwayLineFixture(['群芳', '乙站'])])
     const app = await buildApp({ amapKey: 'test-key' })
     try {
-      // The fixture's first stop is the one station this repo holds a published
-      // minute-level timetable for (direction 0).
+      // 固定数据的首站，是本仓唯一持有已发布分钟级时刻表的站（方向 0）。
       const data = await arrivals(app, '群芳')
       expect(data.isExact).toBe(true)
       expect(data.arrivals.length).toBeGreaterThan(0)
@@ -357,8 +334,7 @@ describe('F4: the arrivals route ships a provenance on every row', () => {
 
   it('marks a platform with no timetable from the engine\'s trains 排班推演', async () => {
     freezeAt('2026-09-24T08:30:00')
-    // Long enough that the engine always has a train inside the trip, whatever
-    // the headway: a two-stop fixture leaves windows with nothing in transit.
+    // 足够长，使引擎在无论什么发车间隔下都总有车在路上：两站的固定数据会留下没有任何车在途的空窗。
     stubAmap([subwayLineFixture(
       ['甲站', '乙站', '丙站', '丁站', '戊站', '己站', '庚站', '辛站', '壬站', '癸站', '子站', '丑站'],
     )])

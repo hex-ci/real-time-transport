@@ -6,22 +6,17 @@ import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../provenance'
 import { provenanceLabelOf } from '../../../provenance-copy'
 
 /**
- * F4 in the station panel: one arrivals answer, rows of different kinds.
+ * 站点面板里的 F4：一个到站应答，多种类型的行。
  *
- * The panel renders ONE list, and a single answer can carry rows of different
- * kinds — the payload sent a real vehicle's own minute and this app computed the
- * next. `listProvenanceOf` answers null for such a list, so a panel that rendered
- * only the list-level word would show nothing beside the rows, and a live minute
- * would read exactly like a computed one. The fallback under test is the one the
- * overview card already uses.
+ * 面板渲染**一个**列表，而单个应答可以携带不同类型的行——载荷送来真实车辆自己的分钟，
+ * 排班引擎推演的列车紧邻。`listProvenanceOf` 对这样的列表答 null，故只渲染列表级词的面板会在行旁
+ * 什么都不显示，实时分钟会读起来与推算的完全一样。测试中的回退即总览卡片已在用的那个。
  *
- * The panel itself is a browser-only artefact in this repo (no jsdom, no
- * @vue/test-utils), so the rule is asserted here as logic and the wiring is
- * asserted against the SFC source.
+ * 面板在本仓库只跑在浏览器（无 jsdom、无 @vue/test-utils），故规则按逻辑断言，接线按 SFC 源码断言。
  */
 
 let nextMinute = 5
-/** One arrival row, with whatever provenance the case is about. */
+/** 一条到站行，带本用例所关心的来源。 */
 function row(provenance?: string | null): ReturnType<typeof ArrivalRowSchema.parse> {
   nextMinute += 2
   return ArrivalRowSchema.parse({
@@ -33,17 +28,17 @@ function row(provenance?: string | null): ReturnType<typeof ArrivalRowSchema.par
 
 describe('one arrivals list, two kinds of minute', () => {
   it('cannot be described by one word', () => {
-    const mixed = [row('live'), row('position_estimate')]
+    const mixed = [row('live'), row('schedule_simulation')]
     expect(arrivalListProvenanceOf(mixed)).toBeNull()
     expect(provenanceLabelOf(arrivalListProvenanceOf(mixed))).toBeNull()
   })
 
   it('states each row\'s own kind, so the two minutes read differently', () => {
-    const mixed = [row('live'), row('position_estimate')]
+    const mixed = [row('live'), row('schedule_simulation')]
     const lead = provenanceLabelOf(arrivalRowProvenanceOf(mixed, 0))
     const next = provenanceLabelOf(arrivalRowProvenanceOf(mixed, 1))
     expect(lead).toBe('实时')
-    expect(next).toBe('位置推算')
+    expect(next).toBe('排班推演')
     expect(lead).not.toBe(next)
   })
 })
@@ -72,8 +67,8 @@ describe('an unstated provenance is never rounded up to 实时', () => {
   })
 
   it('leaves the unstated row unmarked even when the rest of the list agrees', () => {
-    // `listProvenanceOf` ignores a row that stated nothing, so the list still
-    // speaks with one word — and the silent row is given no borrowed one.
+    // `listProvenanceOf` 忽略未陈述任何内容的行，故列表仍以一个词说话——
+    // 而沉默的行不会被借给它一个词。
     const rows = [row('live'), row()]
     expect(arrivalListProvenanceOf(rows)).toBe('live')
     expect(arrivalRowProvenanceOf(rows, 1)).toBeNull()
@@ -86,7 +81,6 @@ describe('the panel renders that fallback where the minutes are', () => {
     'utf8',
   )
 
-  /** Everything between the SFC's own <template> tags: what reaches the screen. */
   function templateOf(sfc: string): string {
     const start = sfc.indexOf('<template>')
     const end = sfc.lastIndexOf('</template>')
@@ -99,10 +93,9 @@ describe('the panel renders that fallback where the minutes are', () => {
   })
 
   it('words no mark itself', () => {
-    // The kind becomes words in provenance-copy.ts, the one place that decision
-    // lives; 实时 in particular must never be hard-coded into a template.
+    // 类型在 provenance-copy.ts 变词（该决定的唯一所在处）；实时尤其不得硬编码进模板。
     const template = templateOf(popover)
-    for (const word of ['实时', '位置推算', '排班推演', '精确时刻表']) {
+    for (const word of ['实时', '排班推演', '精确时刻表']) {
       expect(template, `the popover template states ${word} itself`).not.toContain(word)
     }
   })

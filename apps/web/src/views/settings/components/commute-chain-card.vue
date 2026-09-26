@@ -1,18 +1,15 @@
 <script setup lang="ts">
 /**
- * F10's chain editor, as 设置's own card: the chains the user recorded, and the one
- * place they are created, edited and deleted.
+ * 通勤链路的编辑器，作为 设置 自己的一张卡片：用户录入的链路，以及创建、编辑与删除它们的
+ * 唯一之处。
  *
- * It is a CARD inside this screen rather than a page of its own, and that is the
- * requirement's shape: 「链路由使用者录入」, and 「链路页是读结论的地方，不是录入的地方」 —
- * the first-level entry beside the home screen shows what the chains conclude, while
- * recording them belongs with the other once-set preferences.
+ * 它是本屏内的**卡片**而非独立页面：链路由使用者录入，而链路页是读结论的地方、不是录入的
+ * 地方——首页旁的一级入口展示链路得出的结论，而录入属于其他「一次设定的偏好」。
  *
- * Nothing here computes a conclusion: no margin, no wait, no duration of any kind. The
- * editor records facts (a line, a board station, an alight station), and the chain page
- * is where they are walked against live readings. A save is answered by the server's
- * own record of what was stored, so the list can never show a chain the server does
- * not hold, and a refusal is printed verbatim rather than swallowed.
+ * 这里不计算任何结论：没有余量、没有等待、没有任何形式的时长。编辑器记录事实（一条线路、
+ * 一个上车站、一个下车站），链路页才是把它们对着实时读数走一遍的地方。一次保存由服务端
+ * 自己的存储记录作答，故列表绝不会展示一条服务端并不持有的链路；
+ * 而拒绝被逐字印出，绝不吞掉。
  */
 import { computed, onMounted, shallowRef } from 'vue'
 import { Pencil, Plus, RefreshCw, Route, Trash2, TriangleAlert } from '@lucide/vue'
@@ -33,14 +30,13 @@ import {
 import type { ChainLineOption } from '../types'
 
 const props = defineProps<{
-  /** Every line+direction a ride leg may name, supplied by the page that loads them. */
+  /** 一段乘车段可以命名的每条线路+方向，由加载它们的页面提供。 */
   lines: ChainLineOption[]
   /**
-   * The followed-lines read's own state, passed straight through to the editor.
+   * 关注线路读取自己的状态，原样透传给编辑器。
    *
-   * The page (`chains.vue`) owns that read — it is `line-stops.ts`'s, shared with 关注线路 —
-   * and the editor is the surface that feels its absence, so the card carries the state and
-   * the retry between them rather than judging either itself.
+   * 页面（`chains.vue`）拥有那次读取——它属于 `line-stops.ts`，与关注线路共享——而编辑器
+   * 是感受其缺席的那个界面，故卡片把状态与重试夹在中间，而不是自己去判断任何一个。
    */
   linesRead: ReadState
 }>()
@@ -52,18 +48,18 @@ const emit = defineEmits<{
 const transitStore = useTransitStore()
 const { commuteChains } = storeToRefs(transitStore)
 
-/** True until the first read of the stored chains has answered. */
+/** 在已存链路的首次读取作答之前为 true。 */
 const loading = shallowRef(true)
-/** The read itself failed — a state of its own, never the empty state's words. */
+/** 读取本身失败——它自己的状态，绝不借用空状态的措辞。 */
 const loadError = shallowRef<string | null>(null)
 
-/** Which chain the editor is open on: a new one, an existing one, or none. */
+/** 编辑器打开在哪条链路上：新的、已存的，或没有。 */
 const editing = shallowRef<{ chain: CommuteChain | null } | null>(null)
 const saving = shallowRef(false)
-/** The server's refusal of the last save, verbatim. */
+/** 服务端对上一次保存的拒绝，逐字。 */
 const saveError = shallowRef<string | null>(null)
 
-/** The chain queued for removal, and the failure of the last attempt. */
+/** 排队等待移除的链路，以及上一次尝试的失败。 */
 const pendingRemoval = shallowRef<CommuteChain | null>(null)
 const removing = shallowRef(false)
 const removalError = shallowRef<string | null>(null)
@@ -71,20 +67,18 @@ const removalError = shallowRef<string | null>(null)
 const rows = computed(() => commuteChains.value)
 
 /**
- * The lines the open editor may offer: the page's followed ones, plus a line the chain
- * being edited already names when it can no longer be chosen from. Without the second
- * part a stored leg whose route was unfollowed would open with no line selected, and the
- * save would refuse a draft the user never made.
+ * 打开的编辑器可以提供哪些线路：页面已关注的，加上被编辑的链路已经命名、而如今无法再从
+ * 选项中选到的那条线路。没有后半部分，一条线路已被取消关注的已存段打开时会没有线路被选中，
+ * 而保存会拒绝一份用户从未做过的草稿。
  */
 const editorLines = computed(() => editorOptionsFor(editing.value?.chain ?? null, props.lines))
 
 /**
- * Read the stored chains.
+ * 读取已存的链路。
  *
- * A read that fails is stated as its own cause, with the retry that is the only thing
- * that can fix it — never as the empty state's 「还没有录入」, which would claim an
- * emptiness nobody read. Nothing here re-reads on a timer: this card is what writes the
- * list, so the only read that can fail is one the user asked for by opening the screen.
+ * 读失败陈述为自己的成因，并给出唯一能修好它的重试——绝不措辞成空状态的「还没有录入」，
+ * 那会声称一种无人读过的空。这里不按定时器重读：本卡片就是写这份列表的东西，
+ * 故唯一可能失败的读取，是用户打开本屏所求的那一次。
  */
 async function load(): Promise<void> {
   loading.value = true
@@ -122,7 +116,7 @@ async function onSubmit(write: CommuteChainWrite): Promise<void> {
     editing.value = null
   }
   catch (err) {
-    // The contract's own message, as the server worded it.
+    // 契约自己的消息，按服务端的措辞。
     saveError.value = err instanceof Error ? err.message : '链路保存失败'
   }
   finally {
@@ -131,12 +125,11 @@ async function onSubmit(write: CommuteChainWrite): Promise<void> {
 }
 
 /**
- * The draft changed after a save had been answered.
+ * 已作答的保存之后，草稿又变了。
  *
- * The server's refusal is about the request THAT draft produced, so once the input it
- * named is edited the sentence would be describing a request nobody has made any more —
- * the same claim-outliving-its-state the form retires on its own refusal, retired here
- * for the server's. Nothing is lost by it: the next save is answered afresh.
+ * 服务端的拒绝是关于**那份**草稿产生的请求，故一旦它点名的输入被编辑，那句话就在描述一个
+ * 不再存在的请求——与表单退回它自己的拒绝是同一个「声称活得比状态久」，此处为服务端的
+ * 拒绝而退回。没有任何损失：下一次保存会重新作答。
  */
 function onDraftEdit(): void {
   saveError.value = null
@@ -148,9 +141,8 @@ function requestRemoval(chain: CommuteChain): void {
 }
 
 /**
- * Remove the pending chain, keeping the dialog up until the request settles: a refusal
- * leaves the reason visible on the control the user just pressed instead of the row
- * silently staying put.
+ * 移除排队的链路，并让对话框保持到请求落定：拒绝会把原因留在用户刚按下的控件上，
+ * 而不是那一行静默地原地不动。
  */
 async function confirmRemoval(): Promise<void> {
   const target = pendingRemoval.value
@@ -169,18 +161,18 @@ async function confirmRemoval(): Promise<void> {
   }
 }
 
-/** 「上班 · 从「家」出发」 — the chain's own two stored facts. */
+/** 「上班 · 从「家」出发」——链路自己的两个已存事实。 */
 function chainMeta(chain: CommuteChain): string {
   return `${purposeText(chain.purpose)} · 从「${anchorText(chain.originAnchor)}」出发`
 }
 
-/** 「第 1 段 · 快线 1 路：东大桥 第3站 → 建国门 第4站」, with an unchosen half left absent. */
+/** 「第 1 段 · 快线 1 路：东大桥 第3站 → 建国门 第4站」，未选的那一半留为空缺。 */
 function legText(chain: CommuteChain, index: number): string {
   const leg = chain.legs[index]!
   return `${legPositionText(index)} · ${leg.lineName}：${stationPairText(leg.boardStationName, leg.boardStationOrder)} → ${stationPairText(leg.alightStationName, leg.alightStationOrder)}`
 }
 
-/** 「接驳额外 5 分」 for a leg that has one configured, and nothing at all for a null. */
+/** 配置了额外时间的段显示「接驳额外 5 分」；为 null 时什么都不显示。 */
 function legExtraText(chain: CommuteChain, index: number): string | null {
   const minutes = chain.legs[index]!.transferExtraMinutes
   return minutes === null ? null : `接驳额外 ${minutes} 分`
@@ -188,10 +180,9 @@ function legExtraText(chain: CommuteChain, index: number): string | null {
 </script>
 
 <template>
-  <!-- The section is named BY its own visible heading rather than by a copy of that text
-       in `aria-label`: a label attribute repeats the words the heading already renders, so
-       a screen reader announcing the region and then the heading hears 「通勤链路」 twice.
-       `aria-labelledby` points at the heading's text, so the name IS the heading. -->
+  <!-- 该区域由它自己可见的标题命名，而不是由 `aria-label` 里该文本的副本：标签属性会
+       重复标题已经渲染的词，故屏幕阅读器先播区域、再播标题，「通勤链路」会被听两遍。
+       `aria-labelledby` 指向标题的文本，故名字**就是**标题。 -->
   <section
     aria-labelledby="commute-chain-heading"
     class="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-xl sm:p-5"
@@ -232,7 +223,7 @@ function legExtraText(chain: CommuteChain, index: number): string | null {
       @retry-lines="emit('retry-lines')"
     />
 
-    <!-- The read's own failure, and the only thing that can fix it. -->
+    <!-- 读取自己的失败，以及唯一能修好它的东西。 -->
     <div v-if="loadError" class="mt-3 flex flex-wrap items-center gap-2">
       <p class="flex items-center gap-1.5 text-xs text-rose-400">
         <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -248,14 +239,13 @@ function legExtraText(chain: CommuteChain, index: number): string | null {
       </button>
     </div>
 
-    <!-- Still reading: this is not the empty state, and must not borrow its words. -->
+    <!-- 仍在读取：这不是空状态，也不得借用它的措辞。 -->
     <p v-else-if="loading" class="mt-3 text-xs text-slate-400">
       正在读取换乘链…
     </p>
 
-    <!-- Nothing recorded: the cause is this card's own subject, and the action is the
-         control above it. The failed read above is a different cause and is never
-         shadowed by this one. -->
+    <!-- 什么都没录入：成因是本卡片自己的主题，动作是它上面的控件。
+         上面的读失败是另一个成因，绝不被这一个遮住。 -->
     <p
       v-else-if="rows.length === 0"
       class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-400"

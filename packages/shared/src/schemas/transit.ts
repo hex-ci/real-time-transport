@@ -7,48 +7,36 @@ export const DataSourceTypeSchema = z.enum(['chelaile', 'apizero', 'subway_sched
 export type DataSourceType = z.infer<typeof DataSourceTypeSchema>
 
 /**
- * F4: the NATURE of a number, as the user is entitled to read it.
+ * F4：一个数字的**性质**，按用户有权读到的方式区分。
+ * 在数值产生处、依产生方式定档 —— 绝不依线路类型、组件所在的视图，或作答的厂商：
  *
- * Decided where the value is produced, from how it was produced — never from the
- * route type, from the view a component happens to be rendered in, or from the
- * vendor that answered:
+ * - `live`                上游数据本身：真实车辆自己的读数，或对真实车辆的观测。
+ * - `schedule_simulation` 本系统按时刻表 / 行车间隔推演出的值（生成的列车及其报时）。
+ * - `exact_timetable`     已发布的分钟级时刻表本身。
  *
- * - `live`               上游数据本身：the value came from the data source — a real
- *                        vehicle's own reading, or an observation of a real vehicle.
- *                        A number this app computed is NOT this.
- * - `position_estimate`  本系统自行算出的到站分钟：按真实车辆的位置与速度算出。该档
- *                        仍是 F4 声明的四态之一（`arrivalProvenanceOf` 仍为「真实车辆 +
- *                        本系统算术」回答它），但位置/停站推算式已从服务端删除，因此当前
- *                        没有任何路径产出它：缺少上游分钟的行改为**不写分钟**，而不是写
- *                        一个误差无固定符号的推算值。收起这一档需要同步 PRD §F4，未做。
- * - `schedule_simulation` 本系统按时刻表/行车间隔推演出的值（生成的列车及其报时）。
- * - `exact_timetable`    已发布的分钟级时刻表本身。
+ * 词汇表只保留**有产出路径**的档：没有生产者的成员不在此声明。曾有一档「本系统自算的到站分钟」，
+ * 因没有任何路径产出它而删除 —— 缺上游分钟的行改为**不写分钟**，而不是写一个误差无固定符号的推算值。
  *
- * Absent (or null) means the producer did not state where the value came from, and
- * the UI then shows no mark rather than the flattering one: 「没有来源」 and
- * 「实时」 are different facts.
+ * 缺省（或 null）表示产出方没有声明来源，此时 UI 不标记，而不是标讨喜的那个：
+ * 「没有来源」与「实时」是不同的事实。
  */
 export const DataProvenanceSchema = z.enum([
   'live',
-  'position_estimate',
   'schedule_simulation',
   'exact_timetable',
 ])
 export type DataProvenance = z.infer<typeof DataProvenanceSchema>
 
-/** The kinds of VEHICLE reading a live status can carry. */
+/** 实时状态可以携带的**车辆**读数种类。 */
 export type VehicleProvenance = Extract<DataProvenance, 'live' | 'schedule_simulation'>
 
 /**
- * Crowding levels. The domain is the OBSERVED upstream vocabulary, not a guessed
- * ladder: measured live, the upstream states exactly two crowding verdicts on its
- * crowding tag — 「不拥挤」 (keys `拥挤度_1`) and 「拥挤」 (`拥挤度_3`, `拥挤度_5`,
- * the observed keys are not contiguous). Those are the only two verdicts a reading
- * may carry; `high` names the upper observed rung and does not claim to be the top
- * of the scale, and `low`/`high` are decided from that label, not from a key's
- * number. A level nobody has sampled (the middle rung included) stays `unknown`,
- * which means "the upstream stated nothing"; consumers must keep that tellable
- * apart from 不拥挤 rather than rendering it as a verdict.
+ * 拥挤度档位。取值域取自**实测到的**上游词表，不是猜出来的分档：
+ * 上游的拥挤标签只给出两种结论 —— 「不拥挤」与「拥挤」（观测到的 key 并不连续）。
+ * 读数只允许携带这两种结论；`high` 指观测到的较高一档、不声称是量程顶端，
+ * 且 `low` / `high` 由该标签而非 key 的编号决定。
+ * 没人采样过的档（含中间档）保持 `unknown`，即「上游什么都没说」；
+ * 消费方必须能把它与 不拥挤 区分开，不得当作一种结论渲染。
  */
 export const CongestionLevelSchema = z.enum(['unknown', 'low', 'high'])
 export type CongestionLevel = z.infer<typeof CongestionLevelSchema>
@@ -58,15 +46,10 @@ export const StationSchema = z.object({
   name: z.string(),
   order: z.number().int().positive(),
   /**
-   * The stop's own GCJ-02 position. Optional because an upstream that states no
-   * coordinate has stated no coordinate: the absence travels end to end and is
-   * never substituted, (0, 0) least of all — it is a real position in the
-   * Atlantic and, once written, is indistinguishable from one the upstream
-   * really sent. A consumer that needs a point (a walking route, a nearest-stop
-   * search, a line's geometry) refuses on the absence instead of measuring from
-   * a stand-in, and a zero on either axis is that same absence: no placed stop on
-   * this datum sits at 0, so `statedCoordinate` reads a zero as no position too,
-   * and a row that carries one cannot be told apart from an unplaced stop.
+   * 该站自身的 GCJ-02 坐标。可选：上游未给出坐标就是未给出 —— 缺省一路传到底、绝不代填，
+   * (0, 0) 尤其不行：那是大西洋上的真实位置，写下来就与上游真发过的坐标无法区分。
+   * 需要点位的消费方（步行路线、最近站搜索、线路几何）在缺省处拒绝，而不是拿替代点去量；
+   * 任一轴为 0 也是同一种缺省：本基准面上没有落点站会落在 0 上。
    */
   lat: z.number().optional(),
   lng: z.number().optional(),
@@ -76,26 +59,24 @@ export type Station = z.infer<typeof StationSchema>
 
 export const LiveBusSchema = z.object({
   id: z.string(),
-  /** Stop ordinal the vehicle last passed / is serving. Undefined when upstream provides no position. */
+  /** 车辆刚驶过 / 正在服务的站序；上游未给位置时缺省。 */
   order: z.number().int().positive().optional(),
   nextOrder: z.number().int().positive().optional(),
-  /** Progress (0..1) between order and nextOrder. Undefined when unknown. */
+  /** order 与 nextOrder 之间 0..1 的进度；未知时缺省。 */
   progress: z.number().min(0).max(1).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
   speed: z.number().min(0).optional(),
   congestion: CongestionLevelSchema.default('unknown'),
   /**
-   * Distance to the vehicle's next wait station in meters. -1 is chelaile's
-   * sentinel meaning "already past the requested targetOrder" — callers use it
-   * to exclude passed buses instead of treating them as approaching.
+   * 到车辆下一等待站的米数。-1 是 chelaile 的哨兵值，表示「已驶过请求的 targetOrder」——
+   * 调用方用它排除已过站的车辆，而不是当成正在接近。
    */
   distanceToWaitStn: z.number().optional(),
   /**
-   * Distance from the route START to the vehicle, in meters along the real
-   * road/track. The authoritative continuous position: chelaile derives it from
-   * the jxPath route length minus distanceToWaitStn; the subway engine from its
-   * own geometry. Undefined when the upstream provides no usable position.
+   * 自线路起点沿真实道路 / 轨道的米数，是权威的连续位置：
+   * 上游由 jxPath 路线长减去 distanceToWaitStn 得出，地铁引擎由自己的几何得出。
+   * 上游没有可用位置时缺省。
    */
   distanceFromStart: z.number().min(0).optional(),
   travelTimeSec: z.number().optional(),
@@ -115,15 +96,13 @@ export const LineDetailSchema = z.object({
   type: TransitTypeSchema.default('bus'),
   stops: z.array(StationSchema),
   /**
-   * Total route length in meters along the real road/track polyline.
-   * Derived from the upstream trajectory (chelaile jxPath) or station geometry.
-   * Enables meter-accurate continuous vehicle positioning on the client.
+   * 沿真实道路 / 轨道折线的线路总长（米）。
+   * 由上游轨迹或站点几何得出，使客户端可做米级精度的连续车辆定位。
    */
   routeLengthMeters: z.number().positive().optional(),
   /**
-   * Cumulative road distance (meters) from the route start to each stop.
-   * Length equals stops.length; stationDistances[0] is 0. Optional when the
-   * upstream provides no trajectory (client falls back to even spacing).
+   * 自线路起点到各站的累计道路距离（米）。长度等于 stops.length，stationDistances[0] 为 0。
+   * 上游没有轨迹时缺省（客户端回落到等距分布）。
    */
   stationDistances: z.array(z.number()).optional(),
   otherDirectionLineId: z.string().optional(),
@@ -141,14 +120,11 @@ export const LiveLineStatusSchema = z.object({
 export type LiveLineStatus = z.infer<typeof LiveLineStatusSchema>
 
 /**
- * F3: whether the line is running right now.
- *
- * `state` is deliberately four-valued rather than a boolean with a caveat
- * string: 「首班车之前」/「末班车已过」/「运营中」 are different facts, each with
- * its own answer, and a line whose service hours are not known says so instead
- * of defaulting to 运营中. `firstDeparture` / `lastDeparture` carry the line's
- * own times (「HH:MM」, the last one possibly after midnight) whenever they are
- * known; they are null when they are not, never a defaulted clock.
+ * F3：线路此刻是否在运营。
+ * `state` 刻意取四态，而不是布尔加一句保留文本：「首班车之前」/「末班车已过」/「运营中」
+ * 是不同的事实、各有各的答案；服务时刻未知的线路就说未知，而不是默认成 运营中。
+ * `firstDeparture` / `lastDeparture` 在已知时携带线路自己的时刻（「HH:MM」，末班可能晚于零点），
+ * 未知时为 null，绝不填一个默认时刻。
  */
 export const OperatingStateSchema = z.enum(['before_first', 'operating', 'after_last', 'unknown'])
 export type OperatingState = z.infer<typeof OperatingStateSchema>
@@ -161,25 +137,15 @@ export const OperatingStatusSchema = z.object({
 export type OperatingStatus = z.infer<typeof OperatingStatusSchema>
 
 /**
- * One row of a station's arrival list — the wire shape `/lines/:lineId/stations/
- * :stationName/arrivals` answers with.
- *
- * `provenance` is per ROW rather than per response, because one response can mix:
- * a vehicle whose upstream travels arrived (实时) sits next to one the subway
- * model priced (排班推演), and the exact-timetable overlay answers for a platform
- * the live path would otherwise have priced. Nullish means the row's producer
- * stated nothing — the UI then marks nothing.
- *
- * A row may also state NO MINUTE AT ALL, and that is data rather than a gap:
- * `time` and `etaSeconds` are then both absent and `provenance` is null. It is
- * what a targeted bus reading that published no arrival time for a vehicle
- * produces — this app no longer extrapolates one from the vehicle's snapshot
- * speed and a nominal per-stop dwell, because that arithmetic's error had no fixed
- * sign and reached ~12 minutes mean (28 min worst). The row is still SERVED: the
- * vehicle is really on its way, and `stopsAway` / `distanceMeters` / `busId` say
- * what is observed about it. Consumers render the same honest absence the platform
- * board uses for an unknown arrival (`statedArrivalMinutes` answers `null`, and
- * `@/arrival-copy` words it) — never a number.
+ * 某站到站列表的一行 —— `/lines/:lineId/stations/:stationName/arrivals` 的线上形状。
+ * `provenance` 按**行**而非按响应：一次响应可以混合 —— 上游有车抵达的车辆（实时）
+ * 与地铁模型计价的车辆（排班推演）相邻，精确时刻表覆盖层还会替实时路径本该计价的站台作答。
+ * 空值表示该行的产出方什么都没声明，此时 UI 不标记。
+ * 一行也可能**完全没有分钟**，那是数据而非空缺：`time` 与 `etaSeconds` 同时缺省、`provenance` 为 null ——
+ * 这是某车的定向读数未发布时间的结果。该行仍然**照常下发**：车确实在途，
+ * `stopsAway` / `distanceMeters` / `busId` 陈述所观测到的东西。
+ * 消费方渲染与站台看板处理未知到站时相同的诚实缺省（`statedArrivalMinutes` 答 `null`，
+ * 文案由 `@/arrival-copy` 落地），绝不写数字。
  */
 export const ArrivalRowSchema = z.object({
   time: z.string().optional(),
@@ -187,7 +153,7 @@ export const ArrivalRowSchema = z.object({
   stopsAway: z.number().int().min(0).optional(),
   distanceMeters: z.number().min(0).optional(),
   isAtStation: z.boolean().optional(),
-  /** The provider's own vehicle id, when the row is tied to one. */
+  /** 该行绑定到具体车辆时，提供方自己的车辆 id。 */
   busId: z.string().optional(),
   provenance: DataProvenanceSchema.nullish(),
 })

@@ -4,19 +4,14 @@ import type { UserFavoriteLine } from '@real-time-transport/shared'
 import { useTransitStore } from '../stores/transit.store'
 
 /**
- * 「只允许关注一条」on the client: a duplicate follow is an OUTCOME, not a failure.
+ * 客户端的「只允许关注一条」：重复关注是一种**结果**，不是失败。
  *
- * The server refuses a follow it already holds with 409 + `alreadyFollowed` and
- * hands back the row that holds the line. Reading that as a plain failure would be
- * as wrong as reading it as a new follow — the line IS followed. So the store must
- * report `false` (this call did not follow it), keep every existing row in place,
- * and take in the row the server named, `reverseLineId` included: that column is
- * what lets the settings screen's own 「已关注」 label be correct for the route the
- * user just tried to follow again.
+ * 服务端对已持有的关注回 409 + `alreadyFollowed`，并交出持有该线路的行。把它当成普通
+ * 失败与当成一次新关注同样错——线路**确实**已被关注。因此 store 必须报告 `false`
+ * （本次调用没有关注它）、保持所有既存行不动，并接收服务端点名的那一行（含
+ * `reverseLineId`）：正是该列让设置页的「已关注」标签对用户刚重复关注的那条线路正确。
  *
- * The settings page's own half of this (`lines.vue`) is not pinned here — it is
- * being edited by another pass, and a test needing code that does not exist yet
- * would only be red. What is pinned is the store contract that half depends on.
+ * 设置页自身的那一半（`lines.vue`）不在此钉：它由另一轮改动并行编辑。
  */
 
 const UP = '010-52-0'
@@ -36,7 +31,7 @@ function row(over: Partial<UserFavoriteLine> = {}): UserFavoriteLine {
   }
 }
 
-/** The server's answer to a POST /favorites, as the store reads it. */
+/** 服务端对 POST /favorites 的应答，即 store 所读的内容。 */
 function answers(body: unknown) {
   return vi.fn(async () => ({ json: async () => body }))
 }
@@ -66,8 +61,7 @@ describe('服务器说「已关注」时，关注没有被当成本次的新关�
     expect(followed, 'a duplicate follow was reported as this call having followed it').toBe(false)
     expect(store.favorites, 'the opposite direction was added as a second card').toHaveLength(1)
     expect(store.favorites[0]!.id).toBe('fa')
-    // The direction the stored row was missing: without it the screen cannot show
-    // the route as followed, which is the only wording for this outcome.
+    // 既存行缺的那个方向：没有它，界面就无法把这条线路显示为已关注，而这是本结果的唯一措辞。
     expect(store.favorites[0]!.reverseLineId).toBe(DOWN)
   })
 
@@ -90,8 +84,7 @@ describe('服务器说「已关注」时，关注没有被当成本次的新关�
     store.favorites = [row()]
     vi.stubGlobal('fetch', answers({ success: false, alreadyFollowed: true, error: '已关注' }))
 
-    // No row to reconcile and nothing that says a follow happened: the outcome is
-    // unknown, and an unknown outcome must not be answered with a claim either way.
+    // 没有可对账的行，也没有任何东西表明发生了一次关注：结果未知，未知的结果不得给出任何方向的断言。
     await expect(store.addFavorite({ lineId: DOWN, lineName: '52路' })).rejects.toThrow('已关注')
     expect(store.favorites).toHaveLength(1)
   })

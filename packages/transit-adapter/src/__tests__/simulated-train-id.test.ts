@@ -8,26 +8,16 @@ import {
 } from '../index.js'
 
 /**
- * F-D: a direction this build cannot read must not become part of a vehicle id.
+ * F-D：本版本读不出的方向，绝不能进入车次 id。
  *
- * Observed on the running dev server: `GET /lines/subway_027_7/live?direction=abc`
- * → the HTTP boundary computes `Number('abc')` = NaN, and the generated trains
- * came back as `train_subway_027_7_dNaN_dep118` with `"direction": null` in the
- * payload — NaN, serialized. Those ids are the `busId` of every arrivals row, so a
- * malformed query parameter travelled into the value the UI carries as a
- * vehicle's handle.
- *
- * The engine already reads any direction but 1 as the normal stop order, so the
- * direction is normalized once, where the trains are named. Both halves are
- * pinned: the name itself (no clock needed) and the whole answer through the
- * engine (an id that reached the API, and a `direction` the contract accepts).
+ * 引擎本就把 1 以外的任何方向读作正常站序，所以方向在车次命名处归一化
+ * 一次。两半都被钉住：名字本身，以及经引擎得到的整个回答。
  */
 
 /**
- * Freeze the wall clock at 08:00 Beijing on a Thursday. The instant is built from
- * UTC so a worker in another timezone reads the same hour, and 08:00 is inside the
- * fixture's service window with the headway model placing trains on the line —
- * a frozen instant with no train would make the id assertions below vacuous.
+ * 把时钟冻结在某个北京上午：用 UTC 构造，使任何时区的 worker 读到同一
+ * 小时；该时刻也落在夹具的服务窗口内、模型在线上放得出车 —— 冻结在
+ * 一个没有车的时刻会让下面的 id 断言变得空洞。
  */
 function freezeAtBeijingMorning(): void {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -75,7 +65,6 @@ function engine(): UniversalSubwayEngine {
 
 describe('F-D: the train name carries a stated direction, never the argument', () => {
   it('names a train with direction 0 when the direction is not a number', () => {
-    // Exactly what `?direction=abc` produces at the HTTP boundary.
     expect(simulatedTrainId('subway_027_7', Number('abc'), 118))
       .toBe('train_subway_027_7_d0_dep118')
   })
@@ -101,8 +90,8 @@ describe('F-D: no generated id reaches the API carrying a malformed direction', 
     const live = await engine().getLiveStatus('subway_027_88', Number('abc'), '027')
 
     expect(live!.direction).toBe(0)
-    // NaN reached the payload as `direction: null`; the schema is the contract
-    // that says a direction is an integer in 0..1.
+    // 非法方向曾以 `direction: null` 进入载荷；schema 就是「方向是
+    // 0..1 的整数」这条契约。
     expect(LiveLineStatusSchema.safeParse(live).success).toBe(true)
   })
 

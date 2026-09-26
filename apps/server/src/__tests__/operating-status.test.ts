@@ -3,36 +3,29 @@ import { CommuteProfileSchema, OperatingStatusSchema } from '@real-time-transpor
 import { buildApp } from '../app.js'
 
 /**
- * F3: the operating state, on five frozen clocks.
+ * F3：营运状态，五个冻结的时钟。
  *
- * The state answers 「今天还有没有车」 from the line's own first/last departure
- * times — not from the wall clock and not from a built-in 05:30/23:00 rule — and
- * WHICH first/last those are depends on the branch that answered. This station
- * has a registered minute-level table (the fixture line's own station), so the
- * exact-timetable branch answers and the TABLE's own hours decide every
- * assertion here; the fixture's upstream `start_time` / `end_time` are never
- * consulted on this path. The live branch, which does read them, is covered by
- * its own block below.
+ * 这个状态用线路自己的首末班时刻回答「今天还有没有车」—— 不看墙上时钟，也不用内置的
+ * 05:30/23:00 规则 —— 而首末班是哪两个取决于作答的分支。这个站有登记的分钟级时刻表，
+ * 所以作答的是精确时刻表分支，这里每条断言都由表自己的时刻决定；夹具的上游
+ * `start_time` / `end_time` 在这条路径上从不被查。实时分支由下面自己的块覆盖。
  *
- * Five clocks are frozen because the interesting hours are the boundaries: two
- * inside the service day, two past midnight, and 04:00 where the operating day
- * itself rolls over.
+ * 五个时刻都是边界：两个在服务日内，两个过了午夜，还有 04:00 —— 营运日自身在那里翻页。
  */
 
 const LINE_ID = 'subway_027_7'
 const STATION_NAME = '群芳'
 
-/** The registered table's own hours for that station, which is where the state comes from. */
+/** 该站在登记表里的时刻，状态就是从那里来的。 */
 const FIRST_DEPARTURE = '05:16'
 const LAST_DEPARTURE = '23:06'
 
 /**
- * A two-stop GCJ-02 subway line, so the engine can build a detail from the stub.
+ * 两站的 GCJ-02 地铁线路，引擎才能从替身建出详情。
  *
- * The station the five clocks below query has a registered minute-level table,
- * so `start_time` / `end_time` on this fixture are carried but never read: the
- * state comes from that table. The fixture below declares the hours that ARE
- * read, on a line with no table.
+ * 下面五个时钟查询的那个站有登记的分钟级时刻表，所以这个夹具上的 `start_time` /
+ * `end_time` 只是带着、从不被读：状态来自那张表。真正会被读的时刻声明在下面那个没有
+ * 表的线路夹具上。
  */
 const subwayLine = {
   id: 'BJ_88',
@@ -49,12 +42,11 @@ const subwayLine = {
 }
 
 /**
- * The live-branch case: a line the timetable registry has NO entry for, so the
- * state is derived from the first/last departure its OWN static detail carries.
+ * 实时分支的情形：时刻表注册表里没有条目的线路，于是状态由它自己静态详情携带的首末班
+ * 推导。
  *
- * `LIVE_FIRST` / `LIVE_LAST` are deliberately not the registered table's
- * 05:16 / 23:06, so an assertion against them cannot pass by reading that table
- * instead — and the station queried is one no table covers.
+ * `LIVE_FIRST` / `LIVE_LAST` 故意不等于登记表的 05:16 / 23:06，这样针对它们的断言不可能
+ * 靠读那张表通过 —— 而查询的站也是任何表都没有覆盖的。
  */
 const LIVE_LINE_ID = 'subway_027_88'
 const LIVE_STATION_NAME = '丙站'
@@ -75,7 +67,7 @@ const upstreamHoursLine = {
   ],
 }
 
-/** The same line with no hours at all: what the detail does not carry, it states. */
+/** 同一条线路，但完全没有时刻：详情没带的，它就说没有。 */
 const upstreamWithoutHours = {
   id: 'BJ_88',
   name: '地铁88号线',
@@ -88,7 +80,6 @@ const upstreamWithoutHours = {
   ],
 }
 
-/** An Amap v3 success envelope around `payload`. */
 function ok(payload: Record<string, unknown>) {
   return {
     ok: true,
@@ -98,9 +89,8 @@ function ok(payload: Record<string, unknown>) {
 }
 
 /**
- * Counted stand-in for every upstream the server can reach: no test here spends
- * real quota, and the service hours the state reads are the fixture's. `line` is
- * what any line search answers with, so a case can declare its own hours.
+ * 服务端能触达的每个上游的带计数替身：这里没有测试花真实配额，状态读的营运时刻都是
+ * 夹具的。`line` 是任何线路搜索会答的东西，所以用例可以声明自己的时刻。
  */
 function stubUpstream(line: Record<string, unknown> = subwayLine): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -112,8 +102,8 @@ function stubUpstream(line: Record<string, unknown> = subwayLine): void {
 }
 
 /**
- * Freeze the wall clock. Only `Date` is faked: the timers stay real, because the
- * app under test polls and the providers use request timeouts.
+ * 冻结墙上时钟。只伪造 `Date`：定时器保持真实，因为被测应用在轮询、provider 也用请求
+ * 超时。
  */
 function freezeAt(localIso: string): void {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -127,7 +117,6 @@ afterEach(() => {
 
 type App = Awaited<ReturnType<typeof buildApp>>
 
-/** The arrivals answer for the fixture platform, through the real route. */
 async function arrivals(app: App, lineId = LINE_ID, stationName = STATION_NAME) {
   const res = await app.inject({
     method: 'GET',
@@ -141,7 +130,6 @@ async function arrivals(app: App, lineId = LINE_ID, stationName = STATION_NAME) 
   }
 }
 
-/** One frozen clock, one assertion: the state the API answers with. */
 async function statusAt(localIso: string) {
   stubUpstream()
   freezeAt(localIso)
@@ -154,10 +142,6 @@ async function statusAt(localIso: string) {
   }
 }
 
-/**
- * One frozen clock on the LIVE branch: the same route, a line the registry has no
- * table for, and the hours the upstream detail declares.
- */
 async function liveStatusAt(localIso: string, line: Record<string, unknown> = upstreamHoursLine) {
   stubUpstream(line)
   freezeAt(localIso)
@@ -198,14 +182,12 @@ describe('F3: the operating state is stated, not implied, at every hour that mat
 })
 
 /**
- * F3 on the LIVE branch — the other two `operatingStatus` sites in
- * `transit.service.ts`, reached whenever the queried station has no registered
- * table. There the first/last departure the state reports are the ones the line's
- * own static detail carries, and a detail that carries none must answer 未知
- * rather than borrow a window.
+ * F3 的实时分支 —— `transit.service.ts` 里另外两处 `operatingStatus`，每当查询的站没有
+ * 登记表时就会走到。那里状态报的首末班就是线路自己静态详情携带的，而详情一个都没带时
+ * 必须答 未知，而不是借用某个窗口。
  *
- * Each assertion names the hours by VALUE, so passing the registered table's
- * 05:16 / 23:06 through the same route cannot satisfy them.
+ * 每条断言都按值点名时刻，所以把登记表的 05:16 / 23:06 从同一条路由传过来也无法满足
+ * 它们。
  */
 describe('F3: with no published table, the state comes from the detail\'s own hours', () => {
   it('is 首班前 at 04:00, before the first departure the detail declares', async () => {
@@ -224,8 +206,8 @@ describe('F3: with no published table, the state comes from the detail\'s own ho
   })
 
   it('states 运营时间未知 — never 运营中 — when the detail declares no hours', async () => {
-    // Same clock as the 运营中 case above: the only difference is that the detail
-    // carries no hours, and that difference is what the answer must show.
+    // 与上面「运营中」那例同一个时钟：唯一的差别是详情
+    // 不带时刻，而这个差别正是答案必须体现的。
     expect(await liveStatusAt('2026-09-24T08:30:00', upstreamWithoutHours))
       .toEqual({ state: 'unknown', firstDeparture: null, lastDeparture: null })
   })
@@ -233,8 +215,8 @@ describe('F3: with no published table, the state comes from the detail\'s own ho
 
 describe('F3: every arrivals answer carries a well-formed operating status', () => {
   it('states a schema-valid status even when no vehicle is in the list', async () => {
-    // 01:00: nothing is running, and the answer says so as a state — the row is
-    // never left to the client to guess from an empty array.
+    // 01:00：什么都没在跑，答案把它作为一个状态说出来 ——
+    // 这一行绝不留给客户端从空数组里去猜。
     stubUpstream()
     freezeAt('2026-09-24T01:00:00')
     const app = await buildApp({ amapKey: 'test-key' })
@@ -255,9 +237,9 @@ describe('F3: the commute profile states facts and carries no dead field', () =>
     const app = await buildApp({ amapKey: 'test-key' })
     try {
       const data = (await app.inject({ method: 'GET', url: '/api/transit/commute-profile' })).json().data
-      // `activeDirection` was hardcoded 0 for every caller — a field with no
-      // meaning. Nothing in the web app read it, so it is gone from the payload
-      // and from the contract.
+      // `activeDirection` 曾被硬编码为 0，是个没有含义的字段；
+      // 网页端没有任何地方读它，于是它从载荷
+      // 和契约里都消失了。
       expect(data).not.toHaveProperty('activeDirection')
       expect(CommuteProfileSchema.safeParse(data).success).toBe(true)
     }
@@ -271,16 +253,16 @@ describe('F3: the commute profile states facts and carries no dead field', () =>
     freezeAt('2026-09-24T08:30:00')
     const app = await buildApp({ amapKey: 'test-key' })
     try {
-      // This user has saved NO settings, and 08:30 is inside the built-in morning
-      // window — which is exactly why he may not be told 「早通勤时段」: the window
-      // that would contain him does not exist. The read states that instead.
+      // 这个用户没保存过任何设置，而 08:30 正落在内置早高峰
+      // 窗口内 —— 这恰恰是他不能被告知「早通勤时段」的原因：
+      // 那个会包含他的窗口并不存在。读取把这件事说出来。
       const unset = (await app.inject({ method: 'GET', url: '/api/transit/commute-profile' })).json().data
       expect(unset.windowState).toBe('unset')
       expect(unset.mode).not.toBe('work')
       expect(unset.description).toBe('未设置通勤时段')
 
-      // With a window actually saved, the copy names the window and adds nothing
-      // else: not a mode, not a destination, not a mood.
+      // 真的存了窗口时，文案点名这个窗口，别的什么都不加：
+      // 不是模式、不是目的地、不是情绪。
       await app.inject({
         method: 'PATCH',
         url: '/api/transit/settings',

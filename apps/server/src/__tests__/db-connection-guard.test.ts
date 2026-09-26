@@ -4,9 +4,8 @@ import { databaseUrlFor } from '../db/client'
 import { buildApp } from '../app'
 
 /**
- * Stands in for the driver so that CONSTRUCTION is observable. The rule below is
- * enforced at one seam, and a test of the filter alone cannot tell a wired guard
- * from one nobody calls.
+ * 用它替身驱动，好让「构造」这一步可观测。下面那条规则只在同一处接缝上执行，
+ * 而单测过滤器本身分不出「接好的守卫」与「没人调用的守卫」。
  */
 vi.mock('pg', () => {
   const Pool = vi.fn(function Pool(this: unknown) {
@@ -20,7 +19,7 @@ vi.mock('pg', () => {
   return { default: { Pool }, Pool }
 })
 
-/** A URL shaped like the real one and pointing at no database that exists. */
+/** 形状像真 URL，但不指向任何存在的数据库。 */
 const AMBIENT = 'postgres://test-user:test-password@localhost:15432/test-db'
 
 const poolSpy = pg.Pool as unknown as ReturnType<typeof vi.fn>

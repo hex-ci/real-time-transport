@@ -5,35 +5,29 @@ import { createPinia, setActivePinia } from 'pinia'
 import { UpdateSettingsSchema } from '@real-time-transport/shared'
 
 /**
- * The anchor grab, on the browser side of the boundary.
+ * 边界浏览器侧的锚点抓取。
  *
- * A stored anchor is GCJ-02 and the server's `/settings` PATCH owns the one
- * conversion, so the only correct thing for this side to do with a
- * `navigator.geolocation` fix (WGS-84) is to hand it over untouched. These
- * tests hold that, and hold that the grab is ONE-SHOT: an anchor is captured
- * once when the user taps, never followed as a live position stream — that
- * stream is a different thing the store already owns, and confusing the two
- * would let an anchor drift as the user walks.
+ * 存储的锚点是 GCJ-02，唯一的坐标转换在服务端 `/settings` PATCH；因此本侧对
+ * `navigator.geolocation` 的 WGS-84 定位只能原样交出，不做任何转换。抓取是一次性的：
+ * 用户点击时取一次，绝不当作实时位置流跟随。
  */
 
-/** The raw fix the test device reports, in WGS-84. */
+/** 测试设备上报的原始 WGS-84 定位。 */
 const BROWSER_FIX = { latitude: 39.90931, longitude: 116.3974, accuracy: 12 }
 
 /**
- * The same point in GCJ-02, from this repo's own `wgs84ToGcj02` — the value a
- * browser-side conversion would produce and which must therefore NEVER be what
- * this path returns.
+ * 同一点的 GCJ-02 值，取自本仓库的 `wgs84ToGcj02`。浏览器侧转换会产出它，
+ * 因此本路径绝不能返回它。
  */
 const GCJ02_OF_BROWSER_FIX = { lat: 39.910714, lng: 116.403644 }
 
-/** A `GeolocationPositionError`-shaped rejection. */
+/** 形如 `GeolocationPositionError` 的拒绝值。 */
 function positionError(code: number) {
   return { code, message: 'test', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }
 }
 
 /**
- * Install a fake `navigator.geolocation`. Both entry points are recorded, so a
- * test can prove which one the capture used.
+ * 安装假的 `navigator.geolocation`，两个入口都记录下来，测试可据此断定抓取用了哪一个。
  */
 function stubGeolocation(outcome: { position: unknown } | { error: { code: number } } | 'none') {
   const getCurrentPosition = vi.fn((success: (p: unknown) => void, failure: (e: unknown) => void) => {
@@ -47,12 +41,10 @@ function stubGeolocation(outcome: { position: unknown } | { error: { code: numbe
 }
 
 /**
- * Load a store module under a PINNED GPS-override environment.
+ * 在固定 GPS 覆写环境下加载 store 模块。
  *
- * The module decides at import time whether `VITE_GPS_SIMULATION` stands in for
- * the device, and a checkout may legitimately have it on in `.env` — so a test
- * that needs the device path has to say so, and one that needs the override has
- * to set it, rather than inheriting whatever the shell happens to hold.
+ * 模块在 import 时决定 `VITE_GPS_SIMULATION` 是否顶替设备，`.env` 可能已把它开着，
+ * 因此需要设备路径的测试必须显式关掉、需要覆写的必须设置，不能继承 shell 的当前值。
  */
 async function freshStore(env: Record<string, string> = {}) {
   vi.stubEnv('VITE_GPS_SIMULATION', 'false')
@@ -81,9 +73,7 @@ describe('the anchor grab hands the server a raw WGS-84 fix', () => {
     const fix = await store.captureAnchorFix()
 
     expect(fix).toEqual({ lat: BROWSER_FIX.latitude, lng: BROWSER_FIX.longitude, accuracyM: BROWSER_FIX.accuracy })
-    // The browser converted nothing: a WGS-84 -> GCJ-02 shift here would be
-    // applied a second time by the server, moving the anchor ~500 m and
-    // inverting the 出门结论 against its 3-minute wait tolerance.
+    // 本侧若转换，服务端会再转一次：双重偏移使出门结论反转。
     expect(fix.lat).not.toBe(GCJ02_OF_BROWSER_FIX.lat)
     expect(fix.lng).not.toBe(GCJ02_OF_BROWSER_FIX.lng)
   })
@@ -97,8 +87,7 @@ describe('the anchor grab hands the server a raw WGS-84 fix', () => {
     await store.captureAnchorFix()
 
     expect(getCurrentPosition).toHaveBeenCalledTimes(1)
-    // The live position stays the live position: `watchPosition` is the store's
-    // other job and this path must not start, or stop, it.
+    // 实时位置归实时位置：`watchPosition` 是 store 的另一项职责，本路径不得启动或停止它。
     expect(watchPosition).not.toHaveBeenCalled()
   })
 
@@ -126,7 +115,6 @@ describe('a failed grab says the departure time is unavailable', () => {
 
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).toContain('权限')
-    // Step 3: never fail silently — the copy states WHY it matters.
     expect((err as Error).message).toContain('出门时间')
   })
 
@@ -181,14 +169,13 @@ describe('VITE_GPS_SIMULATION stands in for the device fix', () => {
 
     expect(fix).toEqual({ lat: 39.90931, lng: 116.3974, accuracyM: null })
     expect(getCurrentPosition).not.toHaveBeenCalled()
-    // The marker the page must show: a simulated fix is never dressed as real.
+    // 模拟定位绝不被装扮成真实定位。
     expect(store.isSimulated).toBe(true)
   })
 
   it('requires both simulated coordinates, so a half-configured pair is not a fix', async () => {
     const { getCurrentPosition } = stubGeolocation({ position: { coords: BROWSER_FIX } })
-    // An empty longitude is the half-configured case: `Number('')` is 0, which
-    // would otherwise be stored as a real (if absurd) longitude.
+    // 空经度是半配置情形：`Number('')` 为 0，会被当成长度存下来。
     const store = await freshStore({ VITE_GPS_SIMULATION: 'true', VITE_GPS_SIM_LAT: '39.90931', VITE_GPS_SIM_LNG: '' })
 
     const fix = await store.captureAnchorFix()
@@ -209,8 +196,7 @@ describe('VITE_GPS_SIMULATION stands in for the device fix', () => {
 
 describe('the browser side of the anchor path converts nothing', () => {
   /**
-   * Source with comments stripped, so a comment may STATE the rule (this file's
-   * own prose does) without tripping a guard that is about executable code.
+   * 去掉注释的源码，使注释可以陈述规则而不触发针对可执行代码的守卫。
    */
   function stripComments(source: string): string {
     return source
@@ -224,9 +210,7 @@ describe('the browser side of the anchor path converts nothing', () => {
   }
 
   it('carries no coordinate conversion in the picker or the store', () => {
-    // The one conversion lives in the server's `/settings` PATCH. A converter
-    // reachable from here would shift a fix the server shifts again — the
-    // double conversion that inflated a 1.2 km walking leg to 2.7 km.
+    // 唯一转换在服务端 `/settings` PATCH；本侧可达的转换器会与之重复偏移。
     for (const file of ['stores/location.store.ts', 'views/settings/components/anchor-picker.vue']) {
       expect(source(file), `${file} can convert a coordinate in the browser`)
         .not.toMatch(/wgs84ToGcj02|gcj02ToWgs84|transit-adapter/)
@@ -234,9 +218,8 @@ describe('the browser side of the anchor path converts nothing', () => {
   })
 
   it('sends each anchor under the contract\'s own field names', () => {
-    // The picker names the wire fields in `latKey`/`lngKey`, so those names ARE
-    // the request body: a rename in the contract that missed this file would
-    // PATCH fields the endpoint does not accept and silently store nothing.
+    // picker 以 `latKey`/`lngKey` 命名线上字段，这些名字就是请求体：
+    // 契约改名而本文件没跟上，就会 PATCH 端点不收的字段并静默不存。
     const picker = source('views/settings/components/anchor-picker.vue')
     for (const key of ['homeLat', 'homeLng', 'workLat', 'workLng']) {
       expect(picker, `${key} is missing from the picker`).toContain(key)
@@ -246,8 +229,7 @@ describe('the browser side of the anchor path converts nothing', () => {
 
   it('labels a simulated grab with a marker of its own, not the vehicle one', () => {
     const picker = source('views/settings/components/anchor-picker.vue')
-    // The GPS override is a different kind of simulation from the line/vehicle
-    // one, so it gets its own attribute and its own wording.
+    // GPS 覆写与线路/车辆模拟是两类，因此有自己的属性和措辞。
     expect(picker).toMatch(/data-anchor-gps-simulation/)
     expect(picker).not.toMatch(/data-simulation-banner/)
     expect(picker).toContain('模拟定位')

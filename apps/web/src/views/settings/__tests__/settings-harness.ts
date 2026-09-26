@@ -6,40 +6,31 @@ import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 
 /**
- * A DOM-free mount of the 设置 page, so the 通勤链路 card's behaviour is tested by
- * driving the screen rather than by grepping its source.
+ * `设置` 页的无 DOM 挂载，使通勤链路卡的行为可按驱动屏幕而非 grep 源码来测试。
  *
- * This repo has no DOM harness (no jsdom, no `@vue/test-utils`), and this file does
- * not add one: Vue's runtime-core is handed a host that keeps the tree as plain
- * objects instead of touching a document. That is enough for everything the card's
- * behaviour is read through here — the rendered tree, the events its controls
- * receive, and the requests it makes — with no new dependency and no global test
- * setup.
+ * 本仓库没有 DOM 测试台（无 jsdom、无 `@vue/test-utils`），本文件也不新增：Vue 的 runtime-core
+ * 被交给一个把树保存为普通对象的宿主，而非触碰 document。这已足够读取该卡行为所需的一切——渲染出的树、
+ * 其控件收到的事件、以及它发出的请求——不新增依赖、不设全局测试装置。
  *
- * WHAT THIS HOST ADDS OVER THE CHAIN PAGE'S. The controls on this page are richer
- * than a radio group: the station picker is a reka-ui combobox whose list lives in
- * a `Teleport`, and the text fields are `v-model`ed native inputs, which read
- * `el.value` and call `el.getRootNode()`. So the host knows how to resolve a
- * teleport target (`querySelector`), and a node here carries the few DOM-ish
- * accessors runtime-dom's own `vModelText` reaches for. `Document` and `ShadowRoot`
- * are stubbed as classes this node is not an instance of, which is what makes
- * `vModelText`'s focus guard a no-op rather than a crash.
+ * 本宿主比链路页的多了什么。本页的控件比一个单选组更丰富：选站器是 reka-ui 组合框，其列表位于 `Teleport` 中；
+ * 文本字段是 `v-model` 的原生输入，会读 `el.value` 并调用 `el.getRootNode()`。故宿主知道如何解析
+ * teleport 目标（`querySelector`），且此处的节点携带 runtime-dom 自己的 `vModelText` 所取用的少数
+ * DOM 式访问器。`Document` 与 `ShadowRoot` 被打桩为本节点并非其实例的类，这使 `vModelText` 的焦点守卫
+ * 成为空操作而非崩溃。
  *
- * `fetch` is the seam. The page and the store it calls both go through it, so the
- * harness records every request (url, method, parsed body) and answers each route
- * from a responder the test supplies.
+ * `fetch` 是接缝。页面与它调用的 store 都经由它，故装置记录每个请求（url、method、解析后的 body）
+ * 并按键由测试提供的 responder 作答。
  */
 
 /**
- * The document the host's nodes belong to, wired per mount so `defaultView` is the
- * window stub. `@floating-ui/vue` reads `element.ownerDocument.defaultView` before
- * it will look at anything else.
+ * 宿主节点所属的 document，按挂载接线，使 `defaultView` 是那个 window 桩。
+ * `@floating-ui/vue` 会先读 `element.ownerDocument.defaultView` 才看别的。
  */
 let hostDocument: Record<string, any> | null = null
 
 /**
- * One rendered node. DOM-ish on purpose: reka-ui reaches for `closest`, `focus` and
- * `instanceof Element`, and native controls are read through `value` and `tagName`.
+ * 一个渲染节点。刻意 DOM 化：reka-ui 会取 `closest`、`focus` 与 `instanceof Element`，
+ * 而原生控件通过 `value` 与 `tagName` 读取。
  */
 export class HostElement {
   tag: string
@@ -67,12 +58,12 @@ export class HostElement {
     return this.tag.toUpperCase()
   }
 
-  /** The `type` attribute a real control carries, read by `vModelText`'s dispatch. */
+  /** 真实控件携带的 `type` 属性，由 `vModelText` 的派发读取。 */
   get type(): string {
     return this.props.type === undefined ? '' : String(this.props.type)
   }
 
-  /** The live value of a native control — what a `v-model` reads and writes. */
+  /** 原生控件的活值——`v-model` 所读写的东西。 */
   get value(): string {
     const own = this.live.get('value')
     if (own !== undefined) return String(own)
@@ -85,17 +76,16 @@ export class HostElement {
   }
 
   /**
-   * The node's root. Deliberately NOT a `Document`, so `vModelText`'s guard about
-   * the focused element is skipped: this host has no document and no focus.
+   * 节点的根。刻意**不是** `Document`，使 `vModelText` 关于焦点元素的守卫被跳过：
+   * 本宿主没有 document、没有焦点。
    */
   getRootNode(): unknown {
     return this
   }
 
   /**
-   * The parent, under the name DOM libraries walk. floating-ui's popper climbs
-   * `parentNode` to find the overflow ancestors it must watch, so a tree with only
-   * a `parent` link reads as a detached node and falls through to `window.document`.
+   * 父节点，用 DOM 库所遍历的那个名字。floating-ui 的 popper 会爬 `parentNode` 找它必须观察的
+   * 溢出祖先，故只有 `parent` 链接的树会被读成脱离的节点并落到 `window.document`。
    */
   get parentNode(): HostElement | null {
     return this.parent
@@ -105,7 +95,7 @@ export class HostElement {
     return hostDocument
   }
 
-  /** Inline styles, with the two methods a popper writes CSS variables through. */
+  /** 内联样式，含 popper 写 CSS 变量所用的两个方法。 */
   style: Record<string, any> = {
     setProperty(name: string, value: unknown): void { (this as any)[name] = value },
     removeProperty(name: string): void { delete (this as any)[name] },
@@ -114,14 +104,14 @@ export class HostElement {
 
   offsetParent: HostElement | null = null
 
-  /** No layout here: a zero rect is what "unmeasured" means to a popper. */
+  /** 此处无布局：零矩形就是 popper 眼中「未测量」的意思。 */
   getBoundingClientRect(): Record<string, number> {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }
   }
 
   scrollIntoView(): void {}
 
-  /** Nothing this page renders sits inside a form, so there is no ancestor to walk. */
+  /** 本页渲染的任何内容都不在 form 内，故没有祖先可走。 */
   closest(): null {
     return null
   }
@@ -130,7 +120,7 @@ export class HostElement {
     return false
   }
 
-  /** No tree to search: the drag library asks on teardown, and nothing is draggable here. */
+  /** 没有树可搜：拖拽库在拆卸时询问，而此处没有可拖拽的东西。 */
   querySelector(): null {
     return null
   }
@@ -150,9 +140,8 @@ export class HostElement {
   }
 
   /**
-   * Fire an event at this node, the way a browser delivers one: listeners registered
-   * through `addEventListener` receive an event carrying the target, and the three
-   * methods a dismissable layer or a `v-model` handler reaches for.
+   * 在此节点上触发一个事件，如浏览器投递事件那样：经 `addEventListener` 注册的监听器会收到携带
+   * target 的事件，以及一个可关闭层或 `v-model` 处理器所取用的三个方法。
    */
   dispatchEvent(event: { type: string, target?: unknown, [key: string]: unknown }): boolean {
     let prevented = false
@@ -186,7 +175,7 @@ export class HostElement {
   }
 }
 
-/** Every node of the tree, in document order. */
+/** 树里的每个节点，按文档顺序。 */
 function walk(root: HostElement): HostElement[] {
   const out: HostElement[] = []
   const visit = (current: HostElement): void => {
@@ -197,7 +186,7 @@ function walk(root: HostElement): HostElement[] {
   return out
 }
 
-/** A hoisted static subtree arrives as raw HTML: read it as the text it shows. */
+/** 被提升的静态子树以原始 HTML 到达：按它显示的文本读取。 */
 function staticText(html: string): string {
   return html.replace(/<[^>]*>/g, ' ')
 }
@@ -213,7 +202,7 @@ function textOf(root: HostElement): string {
     .trim()
 }
 
-/** One request the page (or the store it calls) made. */
+/** 页面（或它调用的 store）发出的一个请求。 */
 export interface RecordedRequest {
   url: string
   method: string
@@ -230,7 +219,7 @@ export interface HttpAnswer {
 
 const HTTP_ANSWER: unique symbol = Symbol('http-answer')
 
-/** Answer a route with a specific status — a 400 is how the contract refuses a write. */
+/** 以特定状态应答一个路由——400 是契约拒绝一次写入的方式。 */
 export function httpStatus(status: number, payload: unknown): HttpAnswer {
   return { status, payload, [HTTP_ANSWER]: true }
 }
@@ -239,7 +228,7 @@ function isHttpAnswer(answer: unknown): answer is HttpAnswer {
   return typeof answer === 'object' && answer !== null && HTTP_ANSWER in answer
 }
 
-/** The fetch seam: routes, and every request it saw. */
+/** fetch 接缝：路由，以及它见过的每个请求。 */
 export class MockServer {
   readonly requests: RecordedRequest[] = []
   private readonly routes: Array<{ pattern: RegExp, respond: Responder }> = []
@@ -249,7 +238,7 @@ export class MockServer {
     return this
   }
 
-  /** Every request whose url matches, in order. */
+  /** url 匹配的每个请求，按顺序。 */
   seen(pattern: RegExp): RecordedRequest[] {
     return this.requests.filter(request => pattern.test(request.url))
   }
@@ -261,7 +250,7 @@ export class MockServer {
     const request: RecordedRequest = { url, method, body }
     this.requests.push(request)
 
-    // The most recently registered match wins, so a test can override a default.
+    // 最近注册的匹配胜出，故测试可覆盖默认值。
     const route = [...this.routes].reverse().find(item => item.pattern.test(url))
     const answer = route ? await route.respond(request) : { success: false }
     if (isHttpAnswer(answer)) {
@@ -280,14 +269,11 @@ export class MockServer {
 }
 
 /**
- * A window as far as this page reaches for one.
+ * 就本页所需而言的一个 window。
  *
- * Two things on this page need it and neither needs a renderer: the popper that
- * positions the station picker's popup (which watches scroll and resize ancestors,
- * so it wants `getComputedStyle`, observers and the document element), and
- * `@vueuse/core`'s `useMediaQuery`, which the settings page uses to place the
- * commute-hours card in the xl side rail. Both are answered with inert stubs —
- * nothing here measures, and nothing here listens.
+ * 本页有两处需要它，且都不需要渲染器：定位选站器弹层的 popper（它观察滚动与尺寸变化的祖先，
+ * 故需要 `getComputedStyle`、观察器与 document 元素），以及 `@vueuse/core` 的 `useMediaQuery`
+ * ——设置页用它把通勤时段卡放在 xl 侧栏。两者都以惰性桩件应答——此处不测量，也不监听。
  */
 function createWindowStub(body: HostElement): Record<string, unknown> {
   const documentStub = {
@@ -300,9 +286,8 @@ function createWindowStub(body: HostElement): Record<string, unknown> {
     getElementById: () => null,
     addEventListener: () => {},
     removeEventListener: () => {},
-    // reka-ui's focus scope walks the document for tabbable nodes. Nothing here is
-    // tabbable, so the walk ends immediately — the node filter must still exist,
-    // because the walker's arguments are evaluated before the call.
+    // reka-ui 的焦点作用域会走 document 找可 tab 的节点。此处没有可 tab 的，故遍历立即结束
+    // ——节点过滤器仍必须存在，因为遍历器的参数在调用前就被求值。
     createTreeWalker: () => ({
       currentNode: null,
       nextNode: () => null,
@@ -318,15 +303,14 @@ function createWindowStub(body: HostElement): Record<string, unknown> {
   const ShadowRootStub = class ShadowRootStub {}
   return {
     document: documentStub,
-    // floating-ui reaches for these through whichever window a node belongs to,
-    // so the same classes are here as on the global. Nothing here is a real DOM:
-    // they exist to answer `instanceof`, which is all that library asks of them.
+    // floating-ui 通过节点所属的那个 window 取用这些，故与全局上的是同一批类。
+    // 此处没有真正的 DOM：它们存在只是为了应答 `instanceof`，那也是该库对它们的全部请求。
     Node: HostElement,
     Element: HostElement,
     HTMLElement: HostElement,
     ShadowRoot: ShadowRootStub,
     Document: class DocumentStub {},
-    // Mobile first: below the xl breakpoint, which is the base layout.
+    // 移动优先：xl 断点之下，即基础布局。
     matchMedia: (query: string) => ({
       matches: false,
       media: query,
@@ -359,7 +343,7 @@ function createWindowStub(body: HostElement): Record<string, unknown> {
   }
 }
 
-/** Just enough `localStorage` for the city store, which reads it while it is created. */
+/** 恰好够 city store 用的 `localStorage`，它在创建时读取。 */
 function createMemoryStorage(): Storage {
   const entries = new Map<string, string>()
   return {
@@ -374,11 +358,11 @@ function createMemoryStorage(): Storage {
 
 export interface Host {
   root: HostElement
-  /** Where a reka-ui portal mounts: the teleport target `querySelector` resolves. */
+  /** reka-ui portal 挂载之处：`querySelector` 解析的 teleport 目标。 */
   body: HostElement
 }
 
-/** Vue's runtime-core, rendered into `HostElement`s instead of a document. */
+/** Vue 的 runtime-core，渲染进 `HostElement` 而非 document。 */
 function createHostRenderer(body: HostElement): Renderer<HostElement> {
   const renderer: Renderer<HostElement> = createRenderer<HostElement, HostElement>({
     createElement: tag => new HostElement(tag),
@@ -409,8 +393,7 @@ function createHostRenderer(body: HostElement): Renderer<HostElement> {
       if (!parent) return null
       return parent.children[parent.children.indexOf(element) + 1] ?? null
     },
-    // The teleport target. Everything else resolves to nothing, which is what a
-    // missing selector means.
+    // teleport 目标。其余一切解析为空，这也是选择器缺失的含义。
     querySelector: selector => (String(selector) === 'body' ? body : null),
     setScopeId: (element, id) => { element.props[id] = '' },
     cloneNode: element => new HostElement(element.tag, element.text),
@@ -426,53 +409,48 @@ function createHostRenderer(body: HostElement): Renderer<HostElement> {
   return renderer
 }
 
-/** One route: the requests it answers, and the answer it gives. */
+/** 一个路由：它应答的请求，以及它给出的答案。 */
 export type Route = [RegExp, Responder]
 
-/** A mount, with the two trees a component can render into. */
+/** 一次挂载，含组件可渲染进的两棵树。 */
 export interface MountedHost {
   root: HostElement
   body: HostElement
   server: MockServer
   store: ReturnType<typeof useTransitStore>
   city: ReturnType<typeof useCityStore>
-  /** Everything the mount renders, portal included, whitespace-normalised. */
+  /** 挂载所渲染的一切，含 portal，已归一化空白。 */
   text(): string
-  /** The visible text of one rendered node, the same way. */
+  /** 某个渲染节点的可见文本，方式相同。 */
   textOf(node: HostElement): string
-  /** All rendered nodes matching a predicate, in document order. */
+  /** 所有匹配谓词的渲染节点，按文档顺序。 */
   nodes(where: (node: HostElement) => boolean): HostElement[]
-  /** The first node matching, or a thrown error naming what was looked for. */
+  /** 首个匹配的节点，或一个点名所寻之物的错误。 */
   node(where: (node: HostElement) => boolean, description: string): HostElement
-  /** Let every pending promise and re-render settle. */
+  /** 让所有挂起的 promise 与重渲染落定。 */
   flush(): Promise<void>
   unmount(): void
 }
 
 export interface MountOptions {
-  /** Routes, tried in order (the last match wins). One route, or a list of them. */
+  /** 路由，按顺序尝试（最后一个匹配胜出）。一个路由，或它们的一个列表。 */
   routes?: Route | Route[]
   /**
-   * Props for the component under test, for the pages that are presentational and read
-   * everything they show off a prop (`empty-state.vue`, `chain-empty-state.vue`).
+   * 被测组件的 props，供那些纯展示、一切皆取自 prop 的页面使用（`empty-state.vue`、`chain-empty-state.vue`）。
    */
   props?: Record<string, unknown>
   /**
-   * Components the app registers globally, so a template that renders one can be mounted
-   * here: 设置's index and its four sub-pages render `RouterLink`, and what a test reads
-   * from one is the DESTINATION it was given (`RouterLinkStub`).
+   * 应用全局注册的组件，使渲染它们的模板能在此挂载：`设置` 的索引与四个子页面渲染 `RouterLink`，
+   * 而测试从它读到的，是它被给到的**目标**（`RouterLinkStub`）。
    */
   components?: Record<string, Component>
 }
 
 /**
- * `RouterLink` as this host can render it: the `to` it is given, as the `href` a browser
- * would follow.
+ * `RouterLink` 在本宿主可渲染的样子：它被给到的 `to`，即浏览器会跟随的 `href`。
  *
- * There is no router behind this host and nothing here navigates — which is exactly the
- * half of 设置's pointers a test can hold. Whether a path is the RIGHT one is a claim
- * about the route table (asserted against `router/index.ts`), and whether the link is lit
- * is the controller's browser pass; what a link was pointed at is read here.
+ * 本宿主背后没有路由，此处什么都不导航——而这正是 `设置` 指针中测试能持有的一半。某个路径是否**正确**
+ * 是对路由表的断言（对 `router/index.ts` 断言），链接是否点亮是控制器的浏览器侧；此处读取的是一个链接被指向了哪里。
  */
 export const RouterLinkStub: Component = {
   props: { to: { type: String, required: true } },
@@ -481,44 +459,41 @@ export const RouterLinkStub: Component = {
   },
 }
 
-/** A page with one route should not have to wrap it in a list. */
+/** 只有一个路由的页面不该被迫把它包成列表。 */
 function routeList(routes: Route | Route[] | undefined): Route[] {
   if (!routes) return []
   return routes[0] instanceof RegExp ? [routes as Route] : routes as Route[]
 }
 
 /**
- * Mount any component the way the settings page is mounted.
+ * 按设置页被挂载的方式挂载任意组件。
  *
- * What the component renders into is a host tree and a teleport target, never a
- * document — so a portalled popup is reachable by the same `nodes()` lookup as
- * anything else, and `text()` reads both trees as what the user sees.
+ * 组件渲染进的是一个宿主树与一个 teleport 目标，绝不是 document——故 portal 出的弹层与别的东西一样
+ * 可被同一个 `nodes()` 查到，且 `text()` 把两棵树都读作用户所见。
  */
 export async function mountComponent(component: Component, options: MountOptions = {}): Promise<MountedHost> {
   const server = new MockServer()
   for (const [pattern, respond] of routeList(options.routes)) server.on(pattern, respond)
   const teleportTarget = new HostElement('body')
   const windowStub = createWindowStub(teleportTarget)
-  // A node's own document, whose `defaultView` is that same window.
+  // 节点自己的 document，其 `defaultView` 即同一个 window。
   ;(windowStub.document as Record<string, any>).defaultView = windowStub
   hostDocument = windowStub.document as Record<string, any>
   vi.stubGlobal('fetch', server.handle)
   vi.stubGlobal('localStorage', createMemoryStorage())
   vi.stubGlobal('window', windowStub)
   vi.stubGlobal('document', windowStub.document)
-  // reka-ui tests `ref instanceof Element`, and runtime-dom's `vModelText` asks
-  // whether a node's root is a Document or a ShadowRoot.
+  // reka-ui 测试 `ref instanceof Element`，而 runtime-dom 的 `vModelText` 会问
+  // 一个节点的根是不是 Document 或 ShadowRoot。
   vi.stubGlobal('Element', HostElement)
   vi.stubGlobal('Node', HostElement)
   vi.stubGlobal('HTMLElement', HostElement)
-  // A class this host's nodes are NOT instances of: reka-ui only selects a text
-  // input it recognises, and nothing here is one.
+  // 本宿主节点**不是**其实例的类：reka-ui 只选择它所识别的文本输入，而此处没有一个是。
   vi.stubGlobal('HTMLInputElement', class HTMLInputElementStub {})
   vi.stubGlobal('Document', class DocumentStub {})
   vi.stubGlobal('ShadowRoot', class ShadowRootStub {})
-  // Called bare by floating-ui, which asks whether an ancestor scrolls.
-  // Called bare by @vueuse's interval/media helpers, which the page's own layout
-  // watcher uses.
+  // 由 floating-ui 裸调用，它问某个祖先是否滚动。
+  // 由 @vueuse 的 interval/media helper 裸调用，页面自己的布局观察器用它们。
   vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => setTimeout(() => callback(Date.now()), 0))
   vi.stubGlobal('cancelAnimationFrame', (handle: any) => clearTimeout(handle))
   vi.stubGlobal('NodeFilter', {
@@ -538,7 +513,7 @@ export async function mountComponent(component: Component, options: MountOptions
     position: 'static',
     getPropertyValue: () => '',
   }))
-  // reka-ui's radio dispatches one of these at the clicked element.
+  // reka-ui 的单选会在被点击元素上派发其中一个。
   vi.stubGlobal('CustomEvent', class {
     type: string
     detail: unknown
@@ -558,9 +533,8 @@ export async function mountComponent(component: Component, options: MountOptions
   for (const [name, registered] of Object.entries(options.components ?? {})) {
     app.component(name, registered)
   }
-  // Vitest transforms modules through Vite's pipeline, so an SFC's compiled wrapper
-  // reaches for `useSSRContext()`. Handing it an empty context keeps the component
-  // mounting in this host instead of into a server render it is not.
+  // Vitest 经 Vite 管线转换模块，故 SFC 的编译包装器会取 `useSSRContext()`。
+  // 给它一个空上下文，使组件挂载于本宿主而非一个它并不属于的服务端渲染。
   app.provide(ssrContextKey, { modules: new Set<string>() })
   app.mount(container)
 
@@ -592,13 +566,11 @@ export async function mountComponent(component: Component, options: MountOptions
 }
 
 /**
- * Click a rendered element, with the event shape a real click carries: reka-ui reads
- * `target`, `preventDefault` and `defaultPrevented` off it.
+ * 点击一个渲染元素，带真实点击所携带的事件形状：reka-ui 会从它读取 `target`、`preventDefault`
+ * 与 `defaultPrevented`。
  *
- * EVERY handler runs, not just the first: when a component binds `onClick` AND the screen
- * binding it binds one too (every reka-ui trigger on this page), Vue stores both in an
- * array, and calling the array directly is how a test turns into `onClick is not a
- * function` instead of a click.
+ * **每个**处理器都会运行，不只是第一个：当组件绑定 `onClick` **且**绑定它的屏幕也绑定时（本页每个
+ * reka-ui 触发器都是），Vue 把两者存进一个数组，直接调用该数组会让测试变成 `onClick is not a function` 而非一次点击。
  */
 export function click(element: HostElement): void {
   let prevented = false
@@ -616,12 +588,10 @@ export function click(element: HostElement): void {
 }
 
 /**
- * Submit the form a control sits in, the way a browser does when a submit control is
- * pressed.
+ * 按浏览器在按下提交控件时的方式提交某控件所在的表单。
  *
- * This host is not a browser, so nothing fires the form's own `submit` for it: a
- * template that binds its save to `@submit.prevent` would read as a dead button here
- * and the test would "pass" against a screen where pressing save does nothing at all.
+ * 本宿主不是浏览器，故没有东西为它触发表单自己的 `submit`：把保存绑到 `@submit.prevent` 的模板在此
+ * 会读成一个死按钮，测试会对一个「按下保存什么也不发生」的屏幕「通过」。
  */
 function submitForm(element: HostElement): void {
   let form: HostElement | null = element
@@ -638,7 +608,7 @@ function submitForm(element: HostElement): void {
   })
 }
 
-/** Press a control the way a user does, then let the render settle. */
+/** 像用户那样按一个控件，然后让渲染落定。 */
 export async function press(host: MountedHost, element: HostElement): Promise<void> {
   click(element)
   if (String(element.props.type ?? '') === 'submit') submitForm(element)
@@ -646,12 +616,10 @@ export async function press(host: MountedHost, element: HostElement): Promise<vo
 }
 
 /**
- * Type into a native text field: set the value, then let the field read it.
+ * 向原生文本字段输入：设置该值，然后让字段读取它。
  *
- * Both ways a template can bind one are served — `v-model` registers its own
- * listener through the element (`addEventListener`), while a plain `@input`
- * arrives as the element's `onInput` prop — so a component written either way is
- * driven the same way by a test.
+ * 模板可以绑定它的两种方式都被服务——`v-model` 经元素注册自己的监听器（`addEventListener`），
+ * 而纯 `@input` 作为元素的 `onInput` prop 到达——故以任一方式写的组件都被测试同样地驱动。
  */
 export async function type(host: MountedHost, element: HostElement, text: string): Promise<void> {
   element.value = text
@@ -660,7 +628,7 @@ export async function type(host: MountedHost, element: HostElement, text: string
   await host.flush()
 }
 
-/** Choose an option of a native select, the way selecting one reports it. */
+/** 选择原生 select 的一个选项，如选中一个所上报的那样。 */
 export async function choose(host: MountedHost, element: HostElement, value: string): Promise<void> {
   element.value = value
   element.props.onChange?.({ type: 'change', target: element })

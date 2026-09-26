@@ -7,9 +7,7 @@ const { simulationEnabled } = storeToRefs(useTransitStore())
 </script>
 
 <template>
-  <!-- Simulation strip, mounted inside the sticky header so it is visible on
-       every page and never scrolls away. Deliberately not dismissible: a user
-       must not mistake 推演车辆 for real in-transit vehicles. -->
+  <!-- 模拟数据横幅：挂在 sticky header 内，故每页可见、不随滚动消失。刻意不可关闭。 -->
   <div
     v-if="simulationEnabled"
     data-simulation-banner

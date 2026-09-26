@@ -1,25 +1,11 @@
 /**
- * F4's unknown-arrival vocabulary — the ONE wording for 「this row has no minute」.
+ * 「这一行没有分钟」只有一种说法：`暂无到站耗时`。
  *
- * A row can state no minute, and that is a fact about the reading rather than a
- * bug to paper over: a targeted upstream request publishes an arrival time only
- * for the vehicles it can price, and this app no longer extrapolates one for the
- * rest from a snapshot speed and a nominal dwell (see
- * `apps/server/src/services/transit.service.ts`). Every surface that lists
- * arrivals therefore has to SAY the absence — the platform board's 预计到站
- * column, the line panel's 后续进站计划, the overview card's leading row and its
- * 后续 sub-list, and the line page's own headline.
+ * 一行说不出分钟是关于这次读取的事实，不是要盖过去的缺陷。列举到站时间的界面都得说出这个
+ * 缺失，所以词放这里一次，而不是每个模板一个字符串 —— 五处渲染同一个状态就是五次各自措辞
+ * 的机会，用户对照两块屏时还得判断两句话是不是同一个意思。
  *
- * That is why the words live here rather than as a literal per template: five
- * places rendering the same state is five chances to word it five ways, and a
- * user comparing the board with the card would then have to decide whether two
- * sentences meant the same thing. `暂无到站耗时` is the token the platform board
- * already shipped for it; nothing new is minted, and nothing here reads a clock
- * or a route type.
- *
- * This is a DISPLAY token, not a value: it must contain no digit, because a digit
- * in the absence reads as a minute beside it. A row that states no minute also
- * carries no provenance mark — a mark qualifies a NUMBER — so no surface pairs
- * this token with a mark.
+ * 这是显示用的词，不是值：里面不能出现数字，否则那数字在它旁边会被读成分钟。说不出分钟的
+ * 行也不带来源标记 —— 标记是给数字的。
  */
 export const ARRIVAL_MINUTE_UNAVAILABLE_TEXT = '暂无到站耗时'

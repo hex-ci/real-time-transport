@@ -1,12 +1,10 @@
 <script setup lang="ts">
 /**
- * 位置锚点 (F2): 家 and 公司, taken from the current position.
+ * 位置锚点（F2）：家与公司，取自当前定位。
  *
- * The card is unchanged — the same `AnchorPicker` with its own read of
- * `/api/transit/settings` and its own three honest states (reading, read-and-failed, read).
- * This page adds only the frame: its own path (`/settings/anchors`), its own `<h2>`, and its
- * own way back. The index row that states whether each anchor is set reads the same row
- * through `anchors.ts`.
+ * 卡片没有变 —— 还是那个 `AnchorPicker`，自己读 `/api/transit/settings`，自己有诚实的三种状态
+ * （读取中、读失败、已读）。这个页面只加了框：它自己的路径（`/settings/anchors`）、自己的
+ * `<h2>`、以及自己的返回方式。陈述每个锚点是否已设置的索引行，通过 `anchors.ts` 读同一个应答。
  */
 import { BackToSettings, AnchorPicker } from './components'
 </script>

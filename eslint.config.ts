@@ -40,6 +40,10 @@ export default defineConfigWithVueTs(
         message: 'Use async/await instead of .then() chaining.',
       }],
 
+      'no-empty': [2, {
+        allowEmptyCatch: true,
+      }],
+
       '@typescript-eslint/no-redeclare': 2,
       '@typescript-eslint/no-explicit-any': 0,
       '@typescript-eslint/no-unused-expressions': [2, {

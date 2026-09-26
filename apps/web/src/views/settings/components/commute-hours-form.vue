@@ -1,24 +1,18 @@
 <script setup lang="ts">
 /**
- * Commute-hours editor.
+ * 通勤时段编辑器。
  *
- * Self-contained: it loads the saved hours and PATCHes them back, so the parent
- * only decides where the form sits (inside the 通勤时段 page's Collapsible, or bare
- * when that page is wide enough for it) and never owns its draft state.
+ * 自足：它自己加载已保存的时段并 PATCH 回去，故父级只决定表单放在哪里，
+ * 从不持有它的草稿状态。
  *
- * A form needs four starting values to be editable at all, and with nothing stored
- * they are the built-in window — as an EXPLICITLY NAMED internal parameter, the
- * pattern the subway engine uses for a line whose service hours nobody stated
- * (`serviceWindowSeconds`). Named, and stated on screen: while no hours are stored the
- * form says so above the fields, so the numbers before the first save are never
- * presented as the user's own. The alternative — opening silently on `06:30–11:30`
- * after a failed read — is the defect this state exists to remove.
+ * 表单要有四个起始值才可编辑，而什么都没存时它们是内置窗口——作为一个**显式命名**的内部
+ * 参数，也就是地铁引擎对未陈述运营时段的线路所用的做法。命名了，也要在屏上说明：尚未保存
+ * 过时段时表单在字段上方就这么说，故首次保存前的数字绝不会被呈现为用户自己的。
  *
- * 「no hours are stored」 covers BOTH of the states a settings read can answer with no
- * hours: 未设置 (no row at all) and 未选择 (a row exists — it may carry anchors — and
- * its four times are NULL, never chosen since 009). The sentence is about 通勤时段, so
- * it is true of both: this user has indeed never saved commute hours. The stored hours
- * still win wherever they exist, and a read nobody completed claims nothing either way.
+ * 「没有任何已存时段」覆盖读取在无时段时的两种回答：未设置（完全没有记录）与未选择
+ * （记录在——可能带锚点——而四个时刻为 NULL，从未被选过）。这句话是关于通勤时段的，
+ * 故对两者都为真：这个用户确实从未保存过通勤时段。已存的时段仍然优先，而一次没人完成的
+ * 读取两边都不主张。
  */
 import { onMounted, shallowRef } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
@@ -26,10 +20,10 @@ import { DEFAULT_COMMUTE_HOURS, type UserSettings } from '@real-time-transport/s
 import { settingsReadOf } from '../index-summary'
 
 /**
- * The four times this editor opens with when nothing is stored.
+ * 什么都没存时，编辑器以这四个时刻开场。
  *
- * Values only — they are this form's starting point, never reported as stored hours.
- * Whatever the user then saves replaces them, and the save path PATCHes the draft.
+ * 只有值——它们是本表单的起点，绝不作为已存时段报出。用户随后保存的内容会取代它们，
+ * 而保存路径 PATCH 的是这份草稿。
  */
 const EDITOR_STARTING_POINT: UserSettings = { ...DEFAULT_COMMUTE_HOURS }
 
@@ -39,8 +33,8 @@ const settingsError = shallowRef<string | null>(null)
 const settingsSaved = shallowRef(false)
 
 /**
- * Whether the four times were never saved. `true` is 未设置/未选择 — a fact the form
- * states; `false` is a stored window; `null` is 「还没读到」, about which it says nothing.
+ * 四个时刻是否从未被保存过。`true` 是未设置/未选择——表单会陈述的事实；
+ * `false` 是已存窗口；`null` 是「还没读到」，对此它两边都不说。
  */
 const hoursNeverSaved = shallowRef<boolean | null>(null)
 
@@ -54,16 +48,15 @@ onMounted(async () => {
       hoursNeverSaved.value = false
       return
     }
-    // unset: nothing is stored, so the draft keeps the starting point AND the form
-    // says where those numbers come from. unchosen: the same, one level in — a row
-    // exists but no hour of it was ever chosen, so the four below are still the
-    // editor's own starting point rather than a stored schedule. unreadable: the draft
-    // stays as it is and the form claims nothing about the stored row either way.
+    // unset：什么都没存，故草稿保持起点，**并且**表单说明这些数字来自哪里。
+    // unchosen：同理，只深一层——记录存在但从没有时刻被选过，故下面四个仍是编辑器
+    // 自己的起点，而不是一份已存时段。unreadable：草稿保持原样，
+    // 表单对已存记录两边都不主张。
     hoursNeverSaved.value = hours.state === 'unset' || hours.state === 'unchosen' ? true : null
   }
   catch {
-    // The read never answered: nothing about the stored row is known, and the draft
-    // is this form's own starting point rather than a claim about it.
+    // 读取从未作答：关于已存记录一无所知，草稿是本表单自己的起点，
+    // 而不是关于它的主张。
     hoursNeverSaved.value = null
   }
 })
@@ -83,7 +76,7 @@ async function saveSettings(): Promise<void> {
       throw new Error(json.error || '保存失败')
     }
     settingsDraft.value = json.data as UserSettings
-    // The hours are stored now, so the form stops saying they were never saved.
+    // 时段现已保存，故表单不再说它们从未被保存过。
     hoursNeverSaved.value = false
     settingsSaved.value = true
   }
@@ -101,19 +94,15 @@ async function saveSettings(): Promise<void> {
     <p class="text-xs text-slate-400 lg:text-base">
       用于自动切换「上班 / 下班 / 附近」视图，不参与方向判定
     </p>
-    <!-- 未设置 is stated where the numbers it qualifies are: the four below are this
-         editor's own starting point until something is saved, and a form that opened
-         silently on them would be the built-in window wearing the user's clothes. -->
+    <!-- 未设置 就在它所限定的那些数字旁陈述：在保存之前，下面四个是编辑器自己的起点，
+         而在它们之上静默打开的表单，会是内置窗口穿着用户的衣服。 -->
     <p v-if="hoursNeverSaved === true" class="text-xs text-amber-400/90 lg:text-base">
       尚未保存过通勤时段：下面四个时刻是编辑器的起点，保存之后才会成为你的时段
     </p>
-    <!-- Two columns while the card spans the full width (sm–lg); one column once
-         it narrows into the xl side rail. -->
+    <!-- 卡片占满宽度时（sm–lg）两列；窄进 xl 侧栏后一列。 -->
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
-      <!-- The xl side rail is a hard 20rem, so a single line cannot hold the label
-           plus two 16px native time inputs (needs ~344px against 252px of content).
-           From xl the row wraps and the inputs take a line of their own instead of
-           spilling past the card border. -->
+      <!-- xl 侧栏硬性 20rem，一行放不下标签加两个 16px 原生时间输入，
+           故自 xl 起该行折行、输入独占一行，而不是溢出卡片边框。 -->
       <label class="flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 xl:min-w-0 xl:flex-wrap">
         <span class="flex shrink-0 items-center gap-1.5 text-xs text-slate-300 lg:text-base">
           <span>🏠</span><span>早高峰</span>

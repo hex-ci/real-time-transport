@@ -63,7 +63,7 @@ const displayList = computed(() => {
   return cityStore.cities
 })
 
-/** Top 10 high-frequency cities for a clean, non-bloated hot list (2 rows x 5 cols). */
+/** 热门城市取前 10 个（2 行 × 5 列）。 */
 const topHotCities = computed(() => cityStore.hotCities.slice(0, 10))
 
 function select(code: string): void {
@@ -97,7 +97,7 @@ onMounted(() => {
 
 <template>
   <div class="relative">
-    <!-- Desktop Popover Flow (md: and up) -->
+    <!-- 桌面 Popover 流程（md: 起） -->
     <div class="hidden md:block">
       <PopoverRoot v-model:open="desktopOpen">
         <PopoverTrigger as-child>
@@ -122,7 +122,7 @@ onMounted(() => {
             :collision-padding="16"
             class="z-50 w-80 lg:w-96 overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl backdrop-blur-xl focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2"
           >
-            <!-- Search -->
+            <!-- 搜索 -->
             <div class="border-b border-slate-800 p-3">
               <form action="" class="relative flex items-center" @submit.prevent="onDesktopSearchSubmit">
                 <Search class="pointer-events-none absolute left-3 h-3.5 w-3.5 text-slate-400" />
@@ -146,7 +146,7 @@ onMounted(() => {
               </form>
             </div>
 
-            <!-- Hot cities -->
+            <!-- 热门城市 -->
             <div v-if="!keyword.trim()" class="border-b border-slate-800/80 p-3">
               <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 热门城市
@@ -167,7 +167,7 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Scrollable list -->
+            <!-- 可滚动列表 -->
             <div class="max-h-64 overflow-y-auto p-2">
               <p class="px-2 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 {{ keyword.trim() ? `匹配 ${matched.length} 个城市` : '全部城市' }}
@@ -195,7 +195,7 @@ onMounted(() => {
       </PopoverRoot>
     </div>
 
-    <!-- Mobile Trigger & Bottom Sheet (Screens < md, powered by Reka UI Dialog) -->
+    <!-- 移动端触发器与底部面板（小于 md，基于 Reka UI Dialog） -->
     <div class="md:hidden">
       <DialogRoot v-model:open="mobileOpen">
         <DialogTrigger as-child>
@@ -218,10 +218,10 @@ onMounted(() => {
           <DialogContent
             class="fixed inset-x-0 bottom-0 z-[100] flex h-[82vh] max-h-[85dvh] flex-col rounded-t-3xl border-t border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full"
           >
-            <!-- Drag/Pull Indicator -->
+            <!-- 拖拽指示条 -->
             <div class="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-700"></div>
 
-            <!-- Header -->
+            <!-- 头部 -->
             <div class="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
               <div class="flex items-center gap-2">
                 <DialogTitle class="text-base font-bold text-white">
@@ -245,7 +245,7 @@ onMounted(() => {
               选择用于查询实时公交和地铁的城市
             </DialogDescription>
 
-            <!-- Search Bar -->
+            <!-- 搜索栏 -->
             <div class="shrink-0 border-b border-slate-800 px-4 pb-3">
               <form action="" class="relative flex items-center" @submit.prevent="onMobileSearchSubmit">
                 <Search class="pointer-events-none absolute left-3.5 h-4 w-4 text-slate-400" />
@@ -269,7 +269,7 @@ onMounted(() => {
               </form>
             </div>
 
-            <!-- Hot Cities -->
+            <!-- 热门城市 -->
             <div v-if="!keyword.trim()" class="shrink-0 border-b border-slate-800/80 px-4 py-3">
               <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 热门城市
@@ -290,7 +290,7 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Scrollable List -->
+            <!-- 可滚动列表 -->
             <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2 pb-safe-offset-6">
               <p class="py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 {{ keyword.trim() ? `匹配结果 (${matched.length})` : '全部城市' }}
@@ -323,7 +323,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Suppress native WebKit search cancel/decoration buttons to prevent collision with custom X button */
+/* 关掉 WebKit 原生的搜索取消/装饰按钮，避免与自定义 X 按钮重叠。 */
 input[type="search"]::-webkit-search-cancel-button,
 input[type="search"]::-webkit-search-decoration,
 input[type="search"]::-webkit-search-results-button,

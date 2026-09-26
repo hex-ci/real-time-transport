@@ -13,6 +13,7 @@ import type {
 } from '@real-time-transport/shared'
 import { refreshFreshnessOf, refreshStatusTextOf, useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
+import { commutePurposeOf } from '@/commute-purpose'
 import { ChainEmptyState, ChainLoadState, TransferCard } from './components'
 import { chainCardOf } from './card'
 import { anchorForPurpose, emptyStateOf } from './empty-state'
@@ -25,6 +26,7 @@ import type { PurposeOption } from './types'
  * 链路止于末段的下车站：没有目的地，也没有总到达分钟，此处不算也不加总。
  *
  * 一次只服务一个目的。端点用同一套读数回答一个目的的各条链路，故屏幕上显示的目的永远是答案所属的目的。
+ * 打开时选中哪一个由通勤时段决定（`commutePurposeOf`）；使用者点过页签之后由那一次选择决定。
  */
 
 const transitStore = useTransitStore()
@@ -44,13 +46,19 @@ const PURPOSES: PurposeOption[] = [
   { purpose: 'evening', label: '下班' },
 ]
 
-const purpose = shallowRef<CommuteChainPurpose>('morning')
-/** 本次访问中使用者做的选择；为 null 时本页跟随通勤时段。 */
 const manualPurpose = shallowRef<CommuteChainPurpose | null>(null)
 
-/** 通勤时段蕴含的目的；没有时段可跟随时也取这个默认，由标签说明原因。 */
+/** 通勤时段蕴含的目的；没有可跟随的时段时是上班，由标签说明原因。 */
 const autoPurpose = computed<CommuteChainPurpose>(() =>
-  (commuteProfile.value?.mode === 'home' ? 'evening' : 'morning'))
+  commutePurposeOf(commuteProfile.value) ?? 'morning')
+
+/**
+ * 本页显示的目的：使用者点过页签时就是他那一次选择，否则跟随时段。
+ *
+ * 手动选择是唯一的写入处，故 profile 的每一次重读（或时段本身变了）都改不动它 ——
+ * 「已经点过」是一页访问内的事实，不是一个能被后到的读数翻掉的默认。
+ */
+const purpose = computed<CommuteChainPurpose>(() => manualPurpose.value ?? autoPurpose.value)
 
 const autoPurposeLabel = computed(() => {
   const follow = autoPurpose.value === 'evening' ? '下班' : '上班'
@@ -64,9 +72,8 @@ const autoPurposeLabel = computed(() => {
 })
 
 function onPickPurpose(value: unknown): void {
-  const picked: CommuteChainPurpose = value === 'evening' ? 'evening' : 'morning'
-  manualPurpose.value = picked
-  purpose.value = picked
+  // 只记这一次选择：显示的目的由它推出，故页签与屏幕上的答案不可能来自两个不同的选择。
+  manualPurpose.value = value === 'evening' ? 'evening' : 'morning'
 }
 
 /** 端点的答案，以及它回答的是哪个目的。 */

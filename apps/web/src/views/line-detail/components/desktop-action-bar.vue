@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ArrowLeft } from '@lucide/vue'
+import { purposeBadgeOf } from '@/purpose-badge'
 import type { DirectionOption } from '../types'
 
-defineProps<{
+const props = defineProps<{
   canSwitchDirection: boolean
   directionOptions: DirectionOption[]
   isActiveTab: (opt: DirectionOption) => boolean
@@ -12,6 +14,9 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'switch-direction', opt: DirectionOption): void
 }>()
+
+/** 通勤目的徽标：词与色调取自同一个词表，故与移动端头部说的是同一句话。 */
+const purposeBadge = computed(() => purposeBadgeOf(props.activePurpose))
 </script>
 
 <template>
@@ -51,13 +56,11 @@ const emit = defineEmits<{
 
       <!-- 通勤目的徽标：这个方向服务哪一腿，取自使用者存下来的选择；未选过时隐藏。 -->
       <span
-        v-if="activePurpose"
+        v-if="purposeBadge"
         class="hidden shrink-0 rounded-lg px-2 py-1 text-xs font-medium sm:inline-block"
-        :class="activePurpose === 'morning'
-          ? 'bg-emerald-500/10 text-emerald-400'
-          : 'bg-violet-500/10 text-violet-400'"
+        :class="purposeBadge.tone"
       >
-        {{ activePurpose === 'morning' ? '🏠 上班方向' : '🏢 下班方向' }}
+        {{ purposeBadge.text }}
       </span>
     </div>
   </div>

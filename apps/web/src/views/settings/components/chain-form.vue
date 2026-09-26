@@ -16,7 +16,7 @@ import { Plus, RefreshCw, TriangleAlert } from '@lucide/vue'
 import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
 import type { CommuteChain } from '@real-time-transport/shared'
 import ChainLegFields from './chain-leg-fields.vue'
-import { followedLinesUnreadableText, type ReadState } from '@/read-state'
+import { followedLinesUnreadableText, type ReadState, type ReadValue } from '@/read-state'
 import {
   MAX_CHAIN_LEGS,
   chainBodyOf,
@@ -27,6 +27,8 @@ import {
   refuseChainDraft,
 } from '../chain-draft'
 import type { ChainDraft, ChainRefusal } from '../chain-draft'
+import { legReferencesOf } from '../station-distance'
+import type { StoredAnchors } from '../anchors'
 import type { ChainLineOption } from '../types'
 
 const props = defineProps<{
@@ -40,6 +42,13 @@ const props = defineProps<{
    * （`line-stops.ts`）并把状态传下来；表单不能去问长度，因为读失败留下的正是一个空数组。
    */
   linesRead: ReadState
+  /**
+   * 家与公司的坐标，以及它们那次读取自己的状态。
+   *
+   * 站点选择器量每个站的距离要用它，而三种状态都传下来：参考点不可知时一个数字都不标，
+   * 且「没存下来」与「没读到」是两句话（见 `anchorReference`）。
+   */
+  anchorsRead: ReadValue<StoredAnchors>
   saving: boolean
   /** 服务端自己的拒绝，逐字——绝不在此改写。 */
   error: string | null
@@ -96,6 +105,18 @@ const hasLines = computed(() => props.lines.length > 0)
  * 停用或隐藏，因为「先往反方向坐到枢纽」是真实走法。规则本身住在 `orderedLineOptionsFor`。
  */
 const orderedLines = computed(() => orderedLineOptionsFor(props.lines, draft.value.purpose))
+
+/**
+ * 各段与各自的参考点，成对列出。
+ *
+ * 参考点由**这一份**草稿与刚读到的锚点算出（第 1 段的上车站量起点锚点、末段的下车站量目的
+ * 锚点、其余各端量相邻段的那一站），故它与段一一对应。此处按同一份草稿配对，模板因此不必按
+ * 索引再查一次、也就不必断言某个索引一定在。
+ */
+const legRows = computed(() => {
+  const references = legReferencesOf(draft.value, props.lines, props.anchorsRead)
+  return draft.value.legs.map((leg, index) => ({ leg, references: references[index]! }))
+})
 
 /** 关注集合完全读不到时，缺失的线路读作什么。 */
 const noLinesUnreadable = followedLinesUnreadableText('暂时无法录入乘车段')
@@ -207,11 +228,12 @@ function onCancel(): void {
     <div class="space-y-2">
       <span class="text-xs text-slate-400">乘车段</span>
       <ChainLegFields
-        v-for="(leg, index) in draft.legs"
+        v-for="(row, index) in legRows"
         :key="index"
-        :leg="leg"
+        :leg="row.leg"
         :index="index"
         :lines="orderedLines"
+        :references="row.references"
         :removable="draft.legs.length > 1"
         @update:leg="(next) => { draft.legs[index] = next }"
         @remove="removeLeg(index)"

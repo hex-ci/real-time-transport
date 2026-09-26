@@ -299,23 +299,38 @@ function orderByPosition(rows: UserFavoriteLine[]): UserFavoriteLine[] {
 }
 
 /**
+ * 通勤链路的存储顺序，与服务端 `ORDER BY display_order ASC, created_at ASC`（即该索引的
+ * 列序）逐关键字一致。
+ *
+ * 链路没有置顶，故这里与 `orderByPosition` 只差第二个关键字能读的字段：链路自己的时刻。位置
+ * 同样不唯一（被删链路的后继会被复用），故创建时刻这一层也必须真的读，而不是交给输入顺序。
+ */
+function orderChains(rows: CommuteChain[]): CommuteChain[] {
+  return [...rows].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)
+    || String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+}
+
+/**
  * 移动一行，并给整个列表盖上连续的位置（0..n-1）—— 被置顶的行也在内，因为置顶是铺在顺序上
  * 的状态，绝不是对它的豁免。
+ *
+ * 对行本身一无所知（只要求带一个可选的 `displayOrder`），故关注线路与通勤链路走的是同一份
+ * 重排：两份各自维护的排序是两份会漂移的规则。
  *
  * `from` 与 `to` 索引的是移动之前的列表，这也正是一次拖拽所报告的：`to` 是被移动行占据
  * 的格子，中间的行随之顺移。每行都以新对象返回，只重写它的位置；置顶与其余内容原样随行。
  *
  * 越界的索引返回原样的副本，所以一次坏调用绝不会给已经存对位置的行重新编号。
  */
-export function reorder(
-  favorites: UserFavoriteLine[],
+export function reorder<T extends { displayOrder?: number }>(
+  rows: T[],
   from: number,
   to: number,
-): UserFavoriteLine[] {
-  if (from < 0 || to < 0 || from >= favorites.length || to >= favorites.length) {
-    return [...favorites]
+): T[] {
+  if (from < 0 || to < 0 || from >= rows.length || to >= rows.length) {
+    return [...rows]
   }
-  const next = [...favorites]
+  const next = [...rows]
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved!)
   return next.map((row, index) => ({ ...row, displayOrder: index }))
@@ -1020,6 +1035,67 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
+ * 持久化链路列表的一次拖放：`movedId` 占据 `anchorId` 所在的格子 —— 与关注线路的
+ * `moveFavorite` 同一种做法，只是这里的列表没有置顶这一层。
+ *
+ * 位置真的变了的行各来一个 PATCH，全部同时在途；已经存对位置的行不重发。写入只带序号：
+ * 一次排序不是对链路的编辑，名字、目的、乘车段、接驳方式都不该被这次请求碰到（服务端的
+ * PATCH 是逐字段的，故没带到的字段保持原样）。
+ *
+ * 这一批是「落定」而不是「赛跑」，失败时与服务端对账而不是恢复快照：逐行的 PATCH 在服务端不是
+ * 原子的，所以第一次拒绝可能已经让相邻行写进去了。那时快照会报出一个服务端并不持有的顺序。
+ */
+  async function moveCommuteChain(movedId: string, anchorId: string): Promise<void> {
+    const ordered = orderChains(commuteChains.value)
+    const from = ordered.findIndex(chain => chain.id === movedId)
+    const to = ordered.findIndex(chain => chain.id === anchorId)
+    if (from < 0 || to < 0 || from === to) return
+
+    const next = reorder(ordered, from, to)
+    const was = new Map(ordered.map(chain => [chain.id, chain.displayOrder ?? 0]))
+    const changed = next.filter(chain => chain.id !== undefined && was.get(chain.id) !== chain.displayOrder)
+    // 每一行都已经带着它要落到的位置：没有要写的。
+    if (changed.length === 0) return
+
+    const previous = commuteChains.value
+    commuteChains.value = next
+
+    try {
+      const settled = await Promise.allSettled(changed.map(async (chain) => {
+        const res = await fetch(`/api/transit/commute-chains/${encodeURIComponent(chain.id!)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayOrder: chain.displayOrder }),
+        })
+        const json = await res.json()
+        if (!json.success || !json.data) {
+          throw new Error(json.error || '顺序保存失败')
+        }
+        return json.data as CommuteChain
+      }))
+
+      const failure = settled.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') {
+        throw failure.reason instanceof Error ? failure.reason : new Error('顺序保存失败')
+      }
+
+      const saved = new Map(settled.flatMap(result => (result.status === 'fulfilled'
+        ? [[result.value.id as string, result.value] as const]
+        : [])))
+      // 重新赋值而不是就地修改：`commuteChains` 是 shallowRef。
+      commuteChains.value = orderChains(commuteChains.value.map(chain => (chain.id
+        ? saved.get(chain.id) ?? chain
+        : chain)))
+    }
+    catch (err) {
+      if (!await fetchCommuteChains()) {
+        commuteChains.value = previous
+      }
+      throw err instanceof Error ? err : new Error('顺序保存失败')
+    }
+  }
+
+  /**
  * 删掉一条链路记录。
  *
  * 刻意不做乐观更新：这一行是少数几行之一，请求只有一趟往返，而一次「删了又恢复」的行会闪一下
@@ -1042,6 +1118,7 @@ export const useTransitStore = defineStore('transit', () => {
     commuteChains,
     fetchCommuteChains,
     saveCommuteChain,
+    moveCommuteChain,
     removeCommuteChain,
     favoriteOrder,
     wsConnected,

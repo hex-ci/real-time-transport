@@ -44,6 +44,23 @@ export interface StationChoice {
 }
 
 /**
+ * 站点选择器里每个站量到的**参考点**：一个已知的坐标，或为什么量不出距离。
+ *
+ * 参考点由链路的目的与这一段的位置决定（见 `station-distance.ts`），故本类型只说「从哪儿量」
+ * 与「量不出来是哪一种不可知」，不说距离。`from` 是要印在数字里的名字（家 / 公司 /
+ * 第 2 段上车站），故读法是「离{from}直线 320 米」。
+ */
+export type StationReference
+  = | { state: 'known', from: string, lat: number, lng: number }
+    | { state: 'unknown', sentence: string }
+
+/** 一段的两个选择器各自的参考点：上车站一个、下车站一个，两者可以不同。 */
+export interface StationReferences {
+  board: StationReference
+  alight: StationReference
+}
+
+/**
  * 一段行程可以命名的线路+方向。
  *
  * 来源是当前城市用户**已关注**的线路，每个方向一条，这个选择是刻意的：

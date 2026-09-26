@@ -132,9 +132,13 @@ pnpm dev
 
 ```bash
 pnpm code-check   # 类型检查 + ESLint（严格 0 warning 0 error）
-pnpm test         # 全仓库单元测试（Vitest）
+pnpm test         # 全仓库单元测试（Vitest，不需要数据库）
 pnpm build        # 生产环境编译构建
 ```
+
+需要 PostgreSQL 的 API/SQL 层（走 HTTP 边界的注入用例）是独立的一条命令：
+`pnpm test:db` 建 `transit_test` 并跑迁移，然后 `pnpm test:api`。运行方法、依赖与失败定位见
+[`tests/README.md`](tests/README.md)。
 
 ---
 

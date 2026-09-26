@@ -33,7 +33,7 @@ import type { ReadValue } from '@/read-state'
 import { followedLinesUnreadableText } from '@/read-state'
 import { useCityStore } from '@/stores/city.store'
 import { useTransitStore } from '@/stores/transit.store'
-import { BackToSettings, LineOrderList, RemovalDialog, StationPinPicker } from './components'
+import { BackToSettings, DragOrderList, RemovalDialog, StationPinPicker } from './components'
 import { useLineStops } from './line-stops'
 import type { StationChoice } from './types'
 
@@ -472,7 +472,7 @@ function stopSummary(fav: UserFavoriteLine): string {
         collapsible
         class="mt-3 rounded-xl border border-slate-800 bg-slate-950"
       >
-        <LineOrderList :items="cityFavorites" @move="onReorder">
+        <DragOrderList :items="cityFavorites" @move="onReorder">
           <AccordionItem
             v-for="item in cityFavorites"
             :key="item.id || item.lineId"
@@ -626,7 +626,7 @@ function stopSummary(fav: UserFavoriteLine): string {
               </div>
             </AccordionContent>
           </AccordionItem>
-        </LineOrderList>
+        </DragOrderList>
       </AccordionRoot>
 
       <!-- 读取**失败**：这是它自己的成因，并带着唯一能修好它的重试——

@@ -928,7 +928,7 @@ describe('房子里的结构规则', () => {
     // 而四个域仍挤在一个屏幕上。
     expect(codeOf(read('../chains.vue'))).toContain('<CommuteChainCard')
     expect(codeOf(read('../index.vue'))).not.toContain('<CommuteChainCard')
-    expect(codeOf(read('../index.vue'))).not.toContain('<LineOrderList')
+    expect(codeOf(read('../index.vue'))).not.toContain('<DragOrderList')
     expect(codeOf(read('../index.vue'))).not.toContain('<AnchorPicker')
     const router = codeOf(read('../../../router/index.ts'))
     expect(router).toContain(`path: '/settings'`)
@@ -995,7 +995,7 @@ describe('房子里的结构规则', () => {
     // 本屏的**每个** SFC，含关注线路行与复用的选择器：只读链路卡文件的规则会让回归在本屏其他地方发布。
     for (const name of ['index.vue', 'lines.vue', 'schedule.vue', 'anchors.vue', 'chains.vue',
       'back-to-settings.vue', 'anchor-picker.vue', 'commute-hours-card.vue',
-      'commute-hours-form.vue', 'station-pin-picker.vue', 'line-order-list.vue', 'removal-dialog.vue']) {
+      'commute-hours-form.vue', 'station-pin-picker.vue', 'drag-order-list.vue', 'removal-dialog.vue']) {
       expect(Object.keys(SETTINGS_SFC), `${name} is not audited`).toContain(name)
     }
 

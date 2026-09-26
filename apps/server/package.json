@@ -13,7 +13,8 @@
     "migrate:up": "tsx --env-file-if-exists=../../.env src/db/migrate.ts up",
     "migrate:down": "tsx --env-file-if-exists=../../.env src/db/migrate.ts down",
     "backfill:commute-directions": "tsx --env-file-if-exists=../../.env src/db/backfill-commute-directions.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:api": "vitest run --config vitest.api.config.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

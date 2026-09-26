@@ -35,9 +35,19 @@ export function pickAnchors(data: Record<string, unknown> | null | undefined): S
   }
 }
 
-/** 一个锚点是否存有位置。两个轴都要有，否则就是没设置。 */
+/**
+ * 一个锚点的坐标；**两个轴都要有**才成立，任一轴缺失就是这个锚点没设置。
+ *
+ * 它也是「已设置」这一判定的唯一根据（`isAnchorSet` 就是它是否为空），故读坐标与报状态不会
+ * 变成两条会漂移的规则。绝不强制成 0：0 是坐标上的一个真实位置，不是「没有」。
+ */
+export function anchorPoint(stored: StoredAnchors, id: AnchorId): { lat: number, lng: number } | null {
+  const lat = coord(id === 'home' ? stored.homeLat : stored.workLat)
+  const lng = coord(id === 'home' ? stored.homeLng : stored.workLng)
+  return lat === null || lng === null ? null : { lat, lng }
+}
+
+/** 一个锚点是否存有位置。 */
 export function isAnchorSet(stored: StoredAnchors, id: AnchorId): boolean {
-  return id === 'home'
-    ? stored.homeLat !== null && stored.homeLng !== null
-    : stored.workLat !== null && stored.workLng !== null
+  return anchorPoint(stored, id) !== null
 }

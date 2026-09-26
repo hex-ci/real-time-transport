@@ -11,6 +11,7 @@ import {
 } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
+import { commutePurposeOf } from '@/commute-purpose'
 import { CardGrid, EmptyState } from './components'
 import { commuteLegStateOf, commuteStopOf } from './commute-leg'
 import { nearbyLocationStateOf } from './nearby-notice'
@@ -93,13 +94,11 @@ const modeOverride = shallowRef(readOverride())
  */
 const currentSlot = computed(() => commuteProfile.value?.mode ?? 'auto')
 
-/** 自动选择：配置的通勤时段决定，否则进附近视图。 */
-const autoMode = computed<OverviewMode>(() => {
-  const mode = commuteProfile.value?.mode
-  if (mode === 'work') return 'morning'
-  if (mode === 'home') return 'evening'
-  return 'nearby'
-})
+/**
+ * 自动选择：通勤时段蕴含的目的决定，没有可跟随的时段（此刻在时段之外、或根本没有时段）时进附近视图。
+ * 判定本身不在这里 —— 它与链路页读的是同一个函数，故两页对同一份 profile 不会得出两个目的。
+ */
+const autoMode = computed<OverviewMode>(() => commutePurposeOf(commuteProfile.value) ?? 'nearby')
 
 /**
  * 档案读到的窗口是否是用户真的存过的。

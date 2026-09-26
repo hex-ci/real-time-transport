@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ArrowLeft, ArrowLeftRight, Info } from '@lucide/vue'
 import type { LineDetail, LiveLineStatus } from '@real-time-transport/shared'
+import { purposeBadgeOf } from '@/purpose-badge'
 
-defineProps<{
+const props = defineProps<{
   detail: LineDetail
   liveStatus: LiveLineStatus | null
   canSwitchDirection: boolean
+  /** 屏幕上这个方向服务哪一腿通勤；未声明过时为 null。 */
+  activePurpose: 'morning' | 'evening' | null
   accent: { lineName: string, stops: string }
 }>()
 
@@ -13,6 +17,9 @@ const emit = defineEmits<{
   (e: 'switch-direction'): void
   (e: 'show-info'): void
 }>()
+
+/** 通勤目的徽标：与桌面端头部同一个词表、同一个来源（页面给的那一个值）。 */
+const purposeBadge = computed(() => purposeBadgeOf(props.activePurpose))
 </script>
 
 <template>
@@ -42,6 +49,17 @@ const emit = defineEmits<{
         <span class="min-w-0 truncate text-xs font-bold text-white">
           {{ detail.directionName }}
         </span>
+
+        <!-- 通勤目的徽标：坐在方向名旁边一行之内，不占第二行（头部高度是固定的预算）。
+             词与色调取同一个词表；未声明过时一个字都不显示。 -->
+        <span
+          v-if="purposeBadge"
+          class="shrink-0 rounded-md px-1 py-0.5 text-xs font-medium leading-none whitespace-nowrap"
+          :class="purposeBadge.tone"
+        >
+          {{ purposeBadge.text }}
+        </span>
+
         <button
           v-if="canSwitchDirection"
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-800 text-cyan-400 active:scale-95"

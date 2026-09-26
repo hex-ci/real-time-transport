@@ -375,6 +375,13 @@ function createHostRenderer(body: HostElement): Renderer<HostElement> {
     },
     patchProp: (element, key, _previous, next) => { element.props[key] = next },
     insert: (child, parent, anchor) => {
+      // 真实 DOM 的插入会**移动**已在树里的节点：重排一份带 key 的列表时，Vue 用「插到某个锚点
+      // 之前」来移动一个已渲染的元素，故先把它从原处摘掉，否则它会同时出现在两个位置。
+      const previousParent = child.parent
+      if (previousParent) {
+        const at = previousParent.children.indexOf(child)
+        if (at >= 0) previousParent.children.splice(at, 1)
+      }
       child.parent = parent
       const index = anchor ? parent.children.indexOf(anchor) : -1
       if (index >= 0) parent.children.splice(index, 0, child)

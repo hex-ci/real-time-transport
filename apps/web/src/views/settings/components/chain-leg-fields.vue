@@ -27,7 +27,7 @@ import {
   stopsStateSentence,
 } from '../chain-draft'
 import type { ChainLegDraft } from '../chain-draft'
-import type { ChainLineOption, StationChoice } from '../types'
+import type { ChainLineOption, StationChoice, StationReferences } from '../types'
 
 const props = defineProps<{
   leg: ChainLegDraft
@@ -35,6 +35,12 @@ const props = defineProps<{
   lines: ChainLineOption[]
   /** 本段在链路中的位置。 */
   index: number
+  /**
+   * 本段两个选择器各自的参考点：上车站一个、下车站一个（由本段的位置与链路的目的定，
+   * 见 `station-distance.ts`）。由编辑器算好送下来——单看这一段算不出来，参考点可能是相邻段
+   * 已经选好的那一站。
+   */
+  references: StationReferences
   /** 唯一一段时为 false：没有乘车段的链路给不出任何结论。 */
   removable: boolean
 }>()
@@ -220,6 +226,7 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
         <StationPinPicker
           :model-value="boardChoice"
           :stations="stations"
+          :reference="references.board"
           direction-label="上车站"
           aria-label="上车站"
           @update:model-value="(choice) => onStation('board', choice)"
@@ -230,6 +237,7 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
         <StationPinPicker
           :model-value="alightChoice"
           :stations="stations"
+          :reference="references.alight"
           direction-label="下车站"
           aria-label="下车站"
           @update:model-value="(choice) => onStation('alight', choice)"

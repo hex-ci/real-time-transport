@@ -700,6 +700,7 @@ onUnmounted(() => {
       :detail="currentLineDetail"
       :live-status="currentLiveStatus"
       :can-switch-direction="canSwitchDirection"
+      :active-purpose="activePurpose"
       :accent="badgeAccent"
       @switch-direction="toggleDirectionQuick"
       @show-info="showLineInfo = true"

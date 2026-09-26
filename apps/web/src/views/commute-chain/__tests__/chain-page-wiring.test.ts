@@ -469,9 +469,10 @@ describe('the facts an answer is made of reach the screen', () => {
   })
 
   it('carries the anchor\'s own affordance, and only where the action is that one', async () => {
+    // 下班链路从公司出发，故要修的是公司那一行 —— 起点由目的推出，页面没有第二个来源可读。
     const unset = await mountChainPage({
       routes: [/commute-chains\/deductions/, () => chainsOf([
-        chainView(refusal('anchor-unset'), { originAnchor: 'work' }),
+        chainView(refusal('anchor-unset'), { purpose: 'evening' }),
       ])],
     })
     expect(unset.text()).toContain('未设置「公司」位置')

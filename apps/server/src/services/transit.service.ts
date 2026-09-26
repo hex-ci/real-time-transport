@@ -9,6 +9,7 @@ import {
   StationTimetableService,
   LIVE_CACHE_TTL_MS,
 } from '@real-time-transport/transit-adapter'
+import type { ConnectionMode } from '@real-time-transport/transit-adapter'
 import type {
   ArrivalBasis,
   ArrivalRow,
@@ -42,6 +43,7 @@ import {
   DEFAULT_CITY_CODE,
   DEFAULT_COMMUTE_HOURS,
   DEFAULT_USER_ID,
+  anchorForPurpose,
   anchorLegAt,
   arrivalProvenanceOf,
   arrivalTrust,
@@ -520,6 +522,14 @@ export class TransitService {
   }
 
   /**
+   * 一个 GCJ-02 点对的接驳 ETA，按方式择路线（步行 v3、骑行走 v4 的适配器方法）；
+   * Amap 客户端只接 GCJ-02、不做换算。
+   */
+  async getConnectionEta(mode: ConnectionMode, originLng: number, originLat: number, destLng: number, destLat: number) {
+    return this.amap.getConnectionEta(mode, originLng, originLat, destLng, destLat)
+  }
+
+  /**
    * 赶公交决策：把真实道路步行 ETA 与某条线某站最近车辆的剩余行程时间相比。
    * `origin*` 是 GCJ-02，站点坐标来自缓存的线路详情（Amap 返回的 GCJ-02），步行段两端同一系统。
    */
@@ -901,7 +911,8 @@ export class TransitService {
    * 这里只把存储的链路转成纯引擎的输入；余量、区间与每个「不给结论」的理由都归
    * `deduceCommuteChain`，缺失的事实以 `null` 传递而不是传一个替代值。
    *
-   * 每段乘车腿的衔接按前一段腿被留下的点定价（第一段用链路存的锚点，两端都是 GCJ-02、原样发出）；
+   * 每段乘车腿的衔接按前一段腿被留下的点定价（第一段用链路起点的锚点，即 `anchorForPurpose`
+   * 按该链的通勤目的选出的那个已存锚点，两端都是 GCJ-02、原样发出）；
    * 腿的线路读两次（分别定向到上车站与下车站），按车辆 id 配对。链路止于最后一段乘车腿的下车站，
    * 之后不定价、不给总到达时间。
    *
@@ -921,10 +932,11 @@ export class TransitService {
     const views: CommuteChainDeductionView[] = []
 
     for (const chain of chains) {
-      // 下一段衔接的起点：第一段用链路自己的锚点，之后用前一段腿被留下的点。
+      // 下一段衔接的起点：第一段用链路起点的锚点，之后用前一段腿被留下的点。
+      // 起点由通勤目的推出（`anchorForPurpose`，web 读的是同一个）：链路上没有可录反的起点字段。
       // 只有锚点可能解析不出来，且只对第一段：下车站定位不了的腿被引擎拒，链路到此为止，
       // 因此不会有后面的腿从没解析出来的点组装。
-      let from = this.anchorPoint(chain.originAnchor, settings)
+      let from = this.anchorPoint(anchorForPurpose(chain.purpose), settings)
       const legs: ChainLegInput[] = []
 
       // 引擎对目前已组装腿的答案：每段之后问它一次，正是让短路保持为引擎的规则
@@ -942,7 +954,6 @@ export class TransitService {
       views.push({
         chainId: chain.id,
         name: chain.name,
-        originAnchor: chain.originAnchor,
         purpose: chain.purpose,
         deduction,
       })
@@ -952,7 +963,8 @@ export class TransitService {
   }
 
   /**
-   * 链路起点的存储锚点，按设置行所持（GCJ-02）；从未保存时为 null。
+   * 链路起点所在的存储锚点，按设置行所持（GCJ-02）；从未保存时为 null。
+   * 锚点由通勤目的选定（见 shared 的 `anchorForPurpose`）。
    * 未设置就保持 null：回退到一个坐标会把衔接起点放到用户从未保存的地方。
    */
   private anchorPoint(
@@ -1008,7 +1020,7 @@ export class TransitService {
     // `station-unset`，因此这里也不花读取。
     if (boardOrder === null || alightOrder === null) {
       return {
-        input: { leg, connectionSeconds: null, connectionMode: 'walk', live: null },
+        input: { leg, connectionSeconds: null, connectionMode: leg.connectionMode ?? undefined, live: null },
         alight: null,
       }
     }
@@ -1024,7 +1036,7 @@ export class TransitService {
           leg,
           connectionSeconds: null,
           connectionUnpricedReason: 'anchor-unset',
-          connectionMode: 'walk',
+          connectionMode: leg.connectionMode ?? undefined,
           live: null,
         },
         alight: null,
@@ -1043,7 +1055,7 @@ export class TransitService {
           leg,
           connectionSeconds: null,
           connectionUnpricedReason: detail === null ? 'line-unavailable' : 'station-unlocated',
-          connectionMode: 'walk',
+          connectionMode: leg.connectionMode ?? undefined,
           live: null,
         },
         alight: null,
@@ -1061,7 +1073,7 @@ export class TransitService {
           leg,
           connectionSeconds: null,
           connectionUnpricedReason: 'station-without-coordinate',
-          connectionMode: 'walk',
+          connectionMode: leg.connectionMode ?? undefined,
           live: null,
         },
         alight: null,
@@ -1073,7 +1085,8 @@ export class TransitService {
     // （`line-unavailable`）、存储的站不在此方向站序里（`station-unlocated`）、站序里有该站
     // 但没有坐标（`station-without-coordinate`）、路径服务在两个都已解析的端点间没定出路线
     // （`route-unpriced`），以及站点从未被选择（引擎自己的 `station-unset`）。
-    const connectionSeconds = (await this.getWalkingEta(from.lng, from.lat, boardPoint.lng, boardPoint.lat))?.durationSeconds ?? null
+    // 接驳按该段自己的方式定价：选了骑行走骑行路线，没选过（NULL）由计价侧按步行兜底。
+    const connectionSeconds = (await this.getConnectionEta(leg.connectionMode ?? 'walk', from.lng, from.lat, boardPoint.lng, boardPoint.lat))?.durationSeconds ?? null
     const connectionUnpricedReason: ChainConnectionUnpricedReason | undefined = connectionSeconds === null
       ? 'route-unpriced'
       : undefined
@@ -1109,7 +1122,7 @@ export class TransitService {
     }
 
     return {
-      input: { leg, connectionSeconds, connectionUnpricedReason, connectionMode: 'walk', live },
+      input: { leg, connectionSeconds, connectionUnpricedReason, connectionMode: leg.connectionMode ?? undefined, live },
       alight: alightPoint,
     }
   }

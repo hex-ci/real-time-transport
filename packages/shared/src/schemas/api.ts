@@ -234,8 +234,9 @@ export const CommuteProfileSchema = z.object({
 export type CommuteProfile = z.infer<typeof CommuteProfileSchema>
 
 /**
- * F10：换乘链从两个已保存锚点之一出发，服务两个通勤用途之一。
- * 两者都是封闭集：第三个值不是其中之一的更小版本，而是一条无法作答的链。
+ * F10：一条通勤链起步的两个已保存锚点 —— 家与公司。
+ * 哪个锚点由通勤目的选定（见 `anchorForPurpose`），故它不是链路自己的一列。
+ * 封闭集：第三个值不是其中之一的更小版本，而是一条无法作答的链。
  */
 export const CommuteChainAnchorSchema = z.enum(['home', 'work'])
 export type CommuteChainAnchor = z.infer<typeof CommuteChainAnchorSchema>
@@ -259,6 +260,8 @@ export type CommuteChainPurpose = z.infer<typeof CommuteChainPurposeSchema>
  * 该规则做成 refine 而非路由检查，使 POST、PATCH 与任何直接写入在一个边界上拒绝坏记录；
  * 它是引擎 `leg-recorded-backwards`（`commute-chain.ts`）的写入端孪生，读端对已存行问同一个问题。
  * 没有方向列：公交两个方向是两个 lineId，地铁两个站序已说明路段往哪边走。
+ * 接驳方式是**每段一份**的：它决定进入本段的那一段接驳按哪条路线定价（步行 / 骑行），
+ * 粒度与引擎的 `ChainLegInput.connectionMode` 相同。
  */
 export const CommuteChainLegSchema = z.object({
   /**
@@ -279,6 +282,14 @@ export const CommuteChainLegSchema = z.object({
    * `null` 表示用户什么都没配置 —— 扣减层随后用自己的默认值；它不是 0，0 意为「完全没有额外时间」。
    */
   transferExtraMinutes: z.number().int().min(0).nullable(),
+  /**
+   * 进入本路段的接驳方式，与该段一一对应：一条链路可以一段走路一段骑车。
+   * `null` 是「没选过」—— 它是真实状态，而不是步行的别名：写成默认值会把
+   * 两个状态存成同一个值（引擎读侧的 `?? 'walk'` 已经承担了「没选过按步行计价」）。
+   * 必填可空，与 `transferExtraMinutes` 同一种形状：省略它是一次没说明方式的写入，
+   * 不是隐含的步行。
+   */
+  connectionMode: z.enum(['walk', 'cycle']).nullable(),
 })
   .refine(
     leg => (leg.boardStationName === null) === (leg.boardStationOrder === null),
@@ -303,7 +314,9 @@ export const CommuteChainLegSchema = z.object({
 export type CommuteChainLeg = z.infer<typeof CommuteChainLegSchema>
 
 /**
- * F10：一条具名的通勤链 —— 从哪里出发、服务哪个用途、由哪些有序的乘车路段组成。
+ * F10：一条具名的通勤链 —— 服务哪个用途、由哪些有序的乘车路段组成。
+ * 起点不是链路的一列：它由通勤目的决定（上班从家出发、下班从公司出发，
+ * 见 `anchorForPurpose`），故链不可能记录出「上班·从公司出发」这种矛盾组合。
  * `legs` 是整段序列，作为一个值写入：链就是它的路段，故替换路段是替换链的实质而非并入。
  * 至少需要一条乘车路段 —— 一条都没有的链不携带任何结论。
  * `id` 与 `createdAt` 属于服务端，与收藏一样在入口处可选。
@@ -312,7 +325,6 @@ export const CommuteChainSchema = z.object({
   id: z.string().uuid().optional(),
   userId: z.string().default(DEFAULT_USER_ID),
   name: z.string().min(1),
-  originAnchor: CommuteChainAnchorSchema,
   purpose: CommuteChainPurposeSchema,
   /** 在用户自己的排序中的位置（0 基）。 */
   displayOrder: z.number().int().min(0).default(0),
@@ -328,7 +340,6 @@ export type CommuteChain = z.infer<typeof CommuteChainSchema>
  */
 export const UpdateCommuteChainSchema = z.object({
   name: z.string().min(1).optional(),
-  originAnchor: CommuteChainAnchorSchema.optional(),
   purpose: CommuteChainPurposeSchema.optional(),
   displayOrder: z.number().int().min(0).optional(),
   legs: z.array(CommuteChainLegSchema).min(1, { message: '换乘链至少需要一段乘车段' }).optional(),

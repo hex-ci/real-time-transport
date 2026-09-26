@@ -56,9 +56,10 @@ describe('010：上车点补上站序（只加列的结构改动）', () => {
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步：按文件名排，它排在已有的每一条之后', () => {
+  it('仍排在它之前的每一步之后：010 是唯一的 010（最新的一步归下一条迁移自己的套件）', () => {
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
-    expect(files[files.length - 1]).toBe(FILE)
+    expect(files.filter(name => name.startsWith('010_'))).toEqual([FILE])
+    expect(files.indexOf(FILE)).toBeGreaterThan(files.indexOf('009_user_settings-nullable-hours.sql'))
   })
 
   it('两个站序列都被加上，可空、无默认值，各一次', () => {

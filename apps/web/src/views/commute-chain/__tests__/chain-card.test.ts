@@ -7,8 +7,8 @@ import { chainView, conclusion, leg, refusal } from './chain-fixtures'
  *
  * 卡片是推断与拒绝分道之处，也是两个事实必须取自正确位置之处：
  *
- *  - 拒绝点名的锚点是**链路**自己存储的那个（`originAnchor`），绝非目的的——从公司记录的
- *    链路不会被「家」锚点的行修复，点错会把用户送去错的设置；
+ *  - 拒绝点名的锚点由**通勤目的**推出（上班从家出发、下班从公司出发）——链路自己不再持有起点，
+ *    故点名的那一行设置只有一种可能，且它必然是这条链路真正起步的地方；
  *  - 被拒绝的链路不带任何种类的结论：没有余量、没有分钟、没有车辆可渲染，因为拒绝是一个
  *    代码而非一个更小的答案。
  */
@@ -63,11 +63,23 @@ describe('a refused chain becomes one sentence and no answer', () => {
     expect(card.reading?.text).toContain('最后更新')
   })
 
-  it('hands the refusal the chain\'s own anchor rather than the purpose\'s', () => {
-    // 从公司记录的上班链路：「家」锚点不是该用户需要修复的行，点名它会把人送去修别的东西。
-    const card = chainCardOf(chainView(refusal('anchor-unset'), { originAnchor: 'work', purpose: 'morning' }))
-    expect(card.refusal?.sentence).toBe('未设置「公司」位置 · 在「设置」中设置')
-    expect(card.refusal?.action).toBe('settings')
+  it('hands the refusal the anchor the chain starts from, which is the purpose\'s', () => {
+    // 起点由目的决定，故上班链路要修的是「家」那一行，下班链路要修的是「公司」那一行 ——
+    // 端点上没有第二个说法可供读错（契约里已无 `originAnchor`）。
+    const morning = chainCardOf(chainView(refusal('anchor-unset')))
+    expect(morning.refusal?.sentence).toBe('未设置「家」位置 · 在「设置」中设置')
+    expect(morning.refusal?.action).toBe('settings')
+
+    const evening = chainCardOf(chainView(refusal('anchor-unset'), { purpose: 'evening' }))
+    expect(evening.refusal?.sentence).toBe('未设置「公司」位置 · 在「设置」中设置')
+    expect(evening.refusal?.action).toBe('settings')
+    // 卡片上的起点文案与拒绝点名的锚点是同一个来源，故两者不可能互相矛盾。
+    expect(evening.originText).toBe('从「公司」出发')
+  })
+
+  it('reads no start of its own from the wire: the endpoint sends the purpose, not an anchor', () => {
+    // 契约里没有这个字段了；夹具若被迫补上它，这里就是本页发现自己还在读一个字段的地方。
+    expect('originAnchor' in chainView(refusal('no-legs'))).toBe(false)
   })
 
   it('states no reading line for a leg that was never read', () => {

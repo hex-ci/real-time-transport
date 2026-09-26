@@ -15,6 +15,7 @@ import { computed, onMounted, shallowRef } from 'vue'
 import { Pencil, Plus, RefreshCw, Route, Trash2, TriangleAlert } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import type { CommuteChain } from '@real-time-transport/shared'
+import { anchorForPurpose } from '@real-time-transport/shared'
 import ChainForm from './chain-form.vue'
 import ChainRemovalDialog from './chain-removal-dialog.vue'
 import type { ReadState } from '@/read-state'
@@ -161,9 +162,12 @@ async function confirmRemoval(): Promise<void> {
   }
 }
 
-/** 「上班 · 从「家」出发」——链路自己的两个已存事实。 */
+/**
+ * 「上班 · 从「家」出发」——链路自己的目的，加上由它推出的起点。
+ * 起点不是链路上的一列，故这里与卡片、引擎读的是同一个推导（`anchorForPurpose`）。
+ */
 function chainMeta(chain: CommuteChain): string {
-  return `${purposeText(chain.purpose)} · 从「${anchorText(chain.originAnchor)}」出发`
+  return `${purposeText(chain.purpose)} · 从「${anchorText(anchorForPurpose(chain.purpose))}」出发`
 }
 
 /** 「第 1 段 · 快线 1 路：东大桥 第3站 → 建国门 第4站」，未选的那一半留为空缺。 */
@@ -176,6 +180,17 @@ function legText(chain: CommuteChain, index: number): string {
 function legExtraText(chain: CommuteChain, index: number): string | null {
   const minutes = chain.legs[index]!.transferExtraMinutes
   return minutes === null ? null : `接驳额外 ${minutes} 分`
+}
+
+/**
+ * 段的接驳方式，如使用者选的：null 是「没选过」，它以自己的字显示，
+ * 绝不显示成步行 —— 那会把一个没人做过的选择当成他的选择。
+ */
+const MODE_TEXT = { walk: '步行', cycle: '骑行' } as const
+
+function legModeText(chain: CommuteChain, index: number): string {
+  const mode = chain.legs[index]!.connectionMode
+  return mode === null ? '接驳未选方式' : `接驳${MODE_TEXT[mode]}`
 }
 </script>
 
@@ -250,7 +265,7 @@ function legExtraText(chain: CommuteChain, index: number): string | null {
       v-else-if="rows.length === 0"
       class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-400"
     >
-      还没有录入通勤链路。点「新增链路」逐段录入：名称、起点、通勤目的，加上每一段的线路、上车站与下车站
+      还没有录入通勤链路。点「新增链路」逐段录入：名称、通勤目的，加上每一段的线路、上车站与下车站
     </p>
 
     <ul v-else class="mt-3 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950">
@@ -286,8 +301,8 @@ function legExtraText(chain: CommuteChain, index: number): string | null {
         <div class="space-y-0.5">
           <p v-for="(_, index) in chain.legs" :key="index" class="text-xs text-slate-300">
             {{ legText(chain, index) }}
-            <span v-if="legExtraText(chain, index)" class="text-slate-400">
-              · {{ legExtraText(chain, index) }}
+            <span class="text-slate-400">
+              · {{ legModeText(chain, index) }}<template v-if="legExtraText(chain, index)"> · {{ legExtraText(chain, index) }}</template>
             </span>
           </p>
         </div>

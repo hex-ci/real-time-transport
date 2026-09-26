@@ -5,6 +5,7 @@ import {
   CHAIN_TIGHT_MARGIN_MINUTES,
   CONNECTION_REFUSAL_CODES,
   DEFAULT_CYCLE_EXTRA_MINUTES,
+  anchorForPurpose,
   chainMarginBandOf,
   deduceCommuteChain,
 } from '../commute-chain.js'
@@ -18,8 +19,8 @@ import type {
 } from '../commute-chain.js'
 import { DEFAULT_WAIT_TOLERANCE_MINUTES, STALE_ARRIVAL_SECONDS, arrivalMinutes } from '../departure.js'
 import type { ArrivalBasis } from '../data-provenance.js'
-import { CommuteChainLegSchema } from '../schemas/api.js'
-import type { CommuteChainLeg } from '../schemas/api.js'
+import { CommuteChainAnchorSchema, CommuteChainLegSchema } from '../schemas/api.js'
+import type { CommuteChainLeg, CommuteChainPurpose } from '../schemas/api.js'
 import type { DataSourceType, OperatingStatus } from '../schemas/transit.js'
 
 /**
@@ -94,6 +95,9 @@ function storedLeg(spec: LegSpec, seq: number): CommuteChainLeg {
     alightStationName: alight ? alight.name : null,
     alightStationOrder: alight ? alight.order : null,
     transferExtraMinutes: spec.transferExtraMinutes ?? null,
+    // 已存的那一列：没给就是「没选过」（NULL），绝不默认成步行 —— 默认值会把
+    // 「没人选过」与「选了步行」变成同一个值，而引擎问的正是这个区别。
+    connectionMode: spec.connectionMode ?? null,
   }
 }
 
@@ -798,6 +802,7 @@ describe('F10 schema: a leg must run downstream, and the order is checked on wri
     alightStationName: '丁丁路',
     alightStationOrder: 8,
     transferExtraMinutes: null,
+    connectionMode: null,
   }
 
   it('rejects a leg whose alight order is not downstream of its board order', () => {
@@ -848,6 +853,35 @@ describe('F10 deduction: connections are priced by the path service, never by a 
     expect(cycling.band).toBe('tight')
 
     expect(DEFAULT_CYCLE_EXTRA_MINUTES).toBeGreaterThan(0)
+  })
+
+  it('makes a riding connection exactly the default extra tighter than the same walking one', () => {
+    // 同一条链、同一批读数，只改方式：两个答案的差**就是**找车与停车那一段。
+    // 「充裕 / 紧」这种分档不够：附加时间写成别的分钟数、甚至写成 0，也可能落进同一个分档，
+    // 而那个数字正是用户会拿来做决定的东西。
+    const same = { vehicles: [vehicle('A', minutes(12), minutes(30))] }
+    const walking = deduced(chainInput([{ ...same, connectionMode: 'walk' }]))
+    const cycling = deduced(chainInput([{ ...same, connectionMode: 'cycle' }]))
+
+    // 骑行更紧，绝不更松：附加时间是成本，只会把到达站台的时刻推后。
+    expect(walking.marginMinutes - cycling.marginMinutes).toBe(DEFAULT_CYCLE_EXTRA_MINUTES)
+    expect(walking.legs[0]!.waitMinutes - cycling.legs[0]!.waitMinutes).toBe(DEFAULT_CYCLE_EXTRA_MINUTES)
+  })
+
+  it('prices a connection whose mode was never chosen as walking', () => {
+    // 「没选过」在已存的链路上是 NULL，在引擎的输入里则是**不带**这个键。两种写法都不是骑行，
+    // 故与显式 'walk' 得到逐字相同的答案；把任一处默认成骑行会在这里分叉。
+    const withMode = chainInput([{ connectionMode: 'walk', vehicles: [vehicle('A', minutes(12), minutes(30))] }])
+    const withoutMode = {
+      ...withMode,
+      legs: withMode.legs.map((leg) => {
+        const { connectionMode: omitted, ...rest } = leg
+        expect(omitted).toBe('walk')
+        return rest
+      }),
+    }
+
+    expect(deduced(withoutMode)).toEqual(deduced(withMode))
   })
 
   it('lets a leg\'s own extra override the default, and zero mean no extra at all', () => {
@@ -1009,5 +1043,31 @@ describe('F10 deduction: 余量 belongs to the vehicle it measures', () => {
     expect(leg?.marginMinutes).toBe(0)
     expect(leg?.vehicleId).toBe('V2')
     expect(leg?.referenceVehicleId).toBe('V2')
+  })
+})
+
+/**
+ * F10：起点由通勤目的决定 —— 上班从家出发、下班从公司出发。
+ *
+ * 这是「一条链路从哪里起步」在本仓的**唯一**推导处：服务端按它取衔接的第一个点，
+ * web 的空态与拒绝按它点名要修的那一行设置。起点因此不再是链路上的一列，
+ * 也就不存在一条「上班·从公司出发」的矛盾链 —— 引擎与页面读同一个函数，
+ * 故两侧不可能对同一条链路得出两个起点。
+ */
+describe('F10: the purpose decides where a chain starts', () => {
+  /** 本仓的通勤目的全集；起点推导对它必须是全量的。 */
+  const PURPOSES: CommuteChainPurpose[] = ['morning', 'evening']
+
+  it('starts a morning chain from home and an evening one from work', () => {
+    expect(anchorForPurpose('morning')).toBe('home')
+    expect(anchorForPurpose('evening')).toBe('work')
+  })
+
+  it('answers a value the anchor contract knows, and one anchor per purpose', () => {
+    for (const purpose of PURPOSES) {
+      expect(CommuteChainAnchorSchema.safeParse(anchorForPurpose(purpose)).success).toBe(true)
+    }
+    // 两个目的各有一条真正的路：把它们映到同一个锚点，会让另一半的通勤从错的地方起步。
+    expect(anchorForPurpose('morning')).not.toBe(anchorForPurpose('evening'))
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { anchorForPurpose, emptyStateOf } from '../empty-state'
+import { anchorForPurpose } from '@real-time-transport/shared'
+import { anchorForPurpose as webAnchorForPurpose, emptyStateOf } from '../empty-state'
 import { anchorUnsetSentenceOf } from '../refusal'
 
 /**
@@ -27,6 +28,13 @@ describe('an empty purpose names the cause the user can act on', () => {
     expect(emptyStateOf({ purpose: 'evening', anchorSaved: false }).detail).toContain('公司')
     expect(anchorForPurpose('morning')).toBe('home')
     expect(anchorForPurpose('evening')).toBe('work')
+  })
+
+  it('reads the one derivation the contract exports, rather than a second copy of it', () => {
+    // 推导只有一处：本页导出的那个函数**就是** shared 的那一个（同一个函数对象）。
+    // 复制一份实现——哪怕逐字相同——会让两侧在此分开，而运行时的行为差异要到某次改动才显形。
+    expect(webAnchorForPurpose).toBe(anchorForPurpose)
+    expect(webAnchorForPurpose('evening')).toBe('work')
   })
 
   it('states the anchor fact beside the chain fact rather than in place of it', () => {

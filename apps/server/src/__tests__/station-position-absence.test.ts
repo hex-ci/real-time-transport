@@ -44,6 +44,7 @@ const LEG_A: StoredCommuteChainLeg = {
   alightStationName: '丙路',
   alightStationOrder: 3,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 function freezeAt(epochMs: number): void {
@@ -62,7 +63,6 @@ function storedChain(legs: StoredCommuteChainLeg[]): StoredCommuteChain {
     id: '3f1c2f9e-0000-4000-8000-00000000000a',
     userId: 'default_user',
     name: '上班链路',
-    originAnchor: 'home',
     purpose: 'morning',
     displayOrder: 0,
     createdAt: new Date(NOW_MS).toISOString(),

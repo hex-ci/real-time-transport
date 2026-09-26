@@ -1,4 +1,5 @@
-import type { CommuteChainAnchor, CommuteChainPurpose } from '@real-time-transport/shared'
+import type { CommuteChainPurpose } from '@real-time-transport/shared'
+import { anchorForPurpose } from '@real-time-transport/shared'
 import { anchorUnsetSentenceOf } from './refusal'
 import type { ChainEmptyStateView } from './types'
 
@@ -8,11 +9,13 @@ import type { ChainEmptyStateView } from './types'
  * 空屏要点名使用者可行动的成因，且一个成因不得掩盖另一个。此处两个事实可以同时为真——
  * 这个时段没有记录，以及链路将要起步的锚点从未保存——故锚点的事实先陈述。
  * 第三种状态是读取失败：一个读不到的锚点既非已保存也非缺失，对它不作任何断言。
+ *
+ * 起点由通勤目的决定（上班从家出发、下班从公司出发），推导只有一处：shared 的
+ * `anchorForPurpose`。此处把它原样转出，故本页（与引擎）读的是同一个函数，
+ * 而不是同一段逻辑的第二份抄写。
  */
 
-export function anchorForPurpose(purpose: CommuteChainPurpose): CommuteChainAnchor {
-  return purpose === 'morning' ? 'home' : 'work'
-}
+export { anchorForPurpose }
 
 /**
  * 无记录时段的空态。

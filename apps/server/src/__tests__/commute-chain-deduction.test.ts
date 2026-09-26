@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_COMMUTE_HOURS } from '@real-time-transport/shared'
-import type { LineDetail, LiveLineStatus } from '@real-time-transport/shared'
+import { DEFAULT_COMMUTE_HOURS, DEFAULT_CYCLE_EXTRA_MINUTES } from '@real-time-transport/shared'
+import type { CommuteChainDeductionView, LineDetail, LiveLineStatus } from '@real-time-transport/shared'
 import type { Database, StoredCommuteChain, StoredCommuteChainLeg, StoredUserSettings } from '../db/client.js'
 import { TransitService } from '../services/transit.service.js'
 
@@ -138,6 +138,7 @@ const LEG_A: StoredCommuteChainLeg = {
   alightStationName: '丙路',
   alightStationOrder: 3,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 const LEG_B: StoredCommuteChainLeg = {
@@ -150,6 +151,7 @@ const LEG_B: StoredCommuteChainLeg = {
   alightStationName: '己路',
   alightStationOrder: 4,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 /** 长线上的那一段，它的上车读数能带上比站牌保留的更多的行。 */
@@ -163,6 +165,7 @@ const LEG_C: StoredCommuteChainLeg = {
   alightStationName: '十站',
   alightStationOrder: 10,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 /** 一段，它的 lineId 带着实时读取路由用的前缀，指向一条地铁线路。 */
@@ -176,6 +179,7 @@ const LEG_S: StoredCommuteChainLeg = {
   alightStationName: '丙路',
   alightStationOrder: 3,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 /** 一个只存了 家 的用户的那一行。 */
@@ -187,12 +191,25 @@ const SETTINGS: StoredUserSettings = {
   workLng: null,
 }
 
+/** 同一行里两个锚点都有坐标：起点由目的决定，故两者必须能被区分开。 */
+const BOTH_ANCHORS: StoredUserSettings = {
+  ...DEFAULT_COMMUTE_HOURS,
+  homeLat: 39.9,
+  homeLng: 116.4,
+  workLat: 31.2304,
+  workLng: 121.4737,
+}
+
+/** 一次步行定价请求的起点，按上游收到的样子（`origin=lng,lat`）。 */
+function pricedFrom(url: string): string | null {
+  return new URL(url).searchParams.get('origin')
+}
+
 function storedChain(legs: StoredCommuteChainLeg[], over: Partial<StoredCommuteChain> = {}): StoredCommuteChain {
   return {
     id: '3f1c2f9e-0000-4000-8000-000000000001',
     userId: 'default_user',
     name: '上班链路',
-    originAnchor: 'home',
     purpose: 'morning',
     displayOrder: 0,
     createdAt: new Date(NOW_MS).toISOString(),
@@ -239,11 +256,16 @@ function serviceFor(options: {
    * 有价换乘就是这样失败的。
    */
   walkSeconds?: number | null
+  /**
+   * 骑行替身为每个换乘定价的时长。默认与步行相同 —— 两个替身给同一个价格，
+   * 于是「按方式择路由」与「加不加找车停车」两件事可以分别观察，而不是被路线时长混在一起。
+   */
+  cycleSeconds?: number | null
   /** 完全拿不到站表的线路：没有缓存行，且上游读取失败。 */
   linesWithoutDetail?: readonly string[]
   /** 站表带着它们却没有坐标的站，按名字 —— 「没有」这件事本身。 */
   stopsWithoutCoordinates?: readonly string[]
-}): { service: TransitService, walking: string[] } {
+}): { service: TransitService, walking: string[], cycling: string[] } {
   const db = {
     getCachedLine: async (lineId: string, direction: number) =>
       options.linesWithoutDetail?.includes(lineId)
@@ -255,11 +277,26 @@ function serviceFor(options: {
   } as unknown as Database
 
   const walking: string[] = []
+  const cycling: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
-    walking.push(href)
     // 这里的每个测试按构造都离网：逃出去的调用会抛错，而不是花掉真实配额。
+    // 两个信封按上游真实的样子写：步行在 v3（成功码 + `route.paths[]`，时长是字符串），
+    // 骑行在 v4（成功时只有 `data.paths[]`，两个数都是数字）。
+    if (href.includes('/v4/direction/bicycling')) {
+      cycling.push(href)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...(options.cycleSeconds === null
+            ? {}
+            : { data: { paths: [{ distance: 400, duration: options.cycleSeconds ?? WALK_SECONDS }] } }),
+        }),
+      }
+    }
     if (!href.includes('/v3/direction/walking')) throw new Error(`unexpected upstream call: ${href}`)
+    walking.push(href)
     return {
       ok: true,
       status: 200,
@@ -275,7 +312,7 @@ function serviceFor(options: {
     }
   }))
 
-  return { service: new TransitService(db, { amapKey: 'test-key' }), walking }
+  return { service: new TransitService(db, { amapKey: 'test-key' }), walking, cycling }
 }
 
 async function onlyDeduction(service: TransitService) {
@@ -303,7 +340,6 @@ describe('F10 server: each leg is read twice, and the two reads are matched by i
 
       expect(view.chainId).toBe('3f1c2f9e-0000-4000-8000-000000000001')
       expect(view.name).toBe('上班链路')
-      expect(view.originAnchor).toBe('home')
       expect(view.purpose).toBe('morning')
 
       // 这些数是引擎的，取自两次读数：A 段在车距 900 s（15 分钟）时上车、1200 s（20 分钟）时下车 ——
@@ -1191,6 +1227,161 @@ describe('F10 server: a subway leg recorded the other way round', () => {
       // 换乘被定价了（两端都定位到），且一次读取都没花：这个拒绝是记录的，不是读数的。
       expect(walking).toHaveLength(1)
       expect(reads).toEqual([])
+    }
+    finally {
+      service.stop()
+    }
+  })
+})
+
+/**
+ * F10 服务端：链路从哪里起步由**通勤目的**决定，不由链路上的任何一列。
+ *
+ * 上班从家出发、下班从公司出发，故起点不是可以录反的字段，而是目的的函数
+ * （`anchorForPurpose`；web 的空态与拒绝读的是同一个）。这里钉的是引擎实际拿去定价的那个点：
+ * 第一段衔接被定价时的起点坐标，按上游收到的样子断言 —— 断言「字段没了」证明不了起步点在哪。
+ */
+describe('F10 server: the purpose alone decides where a chain starts', () => {
+  it('prices the first connection from home for a morning chain and from work for an evening one', async () => {
+    freezeAt(NOW_MS)
+    // 一份设置、一次读取、两个目的：两个已存锚点都有坐标，故两次定价的起点只可能来自目的。
+    const chains: StoredCommuteChain[] = [storedChain([LEG_A])]
+    const { service, walking } = serviceFor({ chains, settings: BOTH_ANCHORS })
+
+    try {
+      vi.spyOn(service, 'getLiveStatus')
+        .mockImplementation(async (lineId, _direction, _cityCode, _force, options) =>
+          targetedReads(lineId, options?.targetOrder))
+
+      const morningView = await onlyDeduction(service)
+      expect(morningView.deduction.status).toBe('deduced')
+      expect(pricedFrom(walking[0]!)).toBe('116.400000,39.900000')
+
+      // 同一条链路改判为下班：它的起点随之变成公司 —— 链路上没有任何地方能说别的。
+      chains[0] = storedChain([LEG_A], { purpose: 'evening' })
+      const eveningViews = await service.deduceCommuteChains({ purpose: 'evening' })
+      expect(eveningViews, 'no chain was answered at all').toHaveLength(1)
+      expect(eveningViews[0]!.deduction.status).toBe('deduced')
+      expect(pricedFrom(walking[1]!)).toBe('121.473700,31.230400')
+    }
+    finally {
+      service.stop()
+    }
+  })
+
+  it('names an unsaved anchor even for the purpose whose row was never saved', async () => {
+    freezeAt(NOW_MS)
+    // 只存了家：上班链路有起点可定价，下班链路没有 —— 同一条链路换一个目的就有两种答案，
+    // 这正是「起点由目的决定」在人身上读到的样子。
+    const evening = serviceFor({
+      chains: [storedChain([LEG_A], { purpose: 'evening' })],
+      settings: SETTINGS,
+    })
+
+    try {
+      const views = await evening.service.deduceCommuteChains({ purpose: 'evening' })
+      expect(views[0]!.deduction).toEqual({
+        status: 'no-conclusion',
+        reason: 'anchor-unset',
+        leg: { seq: 0, lineId: LINE_A, lineName: '101路' },
+      })
+      expect(evening.walking).toEqual([])
+    }
+    finally {
+      evening.service.stop()
+    }
+  })
+})
+
+/**
+ * F10 服务端：接驳方式是**按段**存的，故它决定那一段的接驳走哪条路线、以及要不要再加上找车停车。
+ *
+ * 三个断言各钉一件事：方式择端点（骑行问 v4、步行问 v3，谁也不冒充谁）、同一批读数下方式只改变
+ * 那一段附加时间、以及「没选过」（NULL）与显式步行是同一个答案。两段同输入链路只差这一个字段，
+ * 故它们答案的差只能来自这个字段 —— 而写死成步行的装配会让两条链路给出逐字相同的答案。
+ */
+describe('F10 server: the stored connection mode decides the connection', () => {
+  /** 一个已推演答案的余量；答案是拒绝时点名是哪一条原因，而不是读出 undefined。 */
+  function marginOf(view: CommuteChainDeductionView): number {
+    const deduction = view.deduction
+    if (deduction.status !== 'deduced') throw new Error(`expected a deduction, got ${deduction.reason}`)
+    return deduction.marginMinutes
+  }
+
+  it('goes to the cycling route for a leg stored as cycling, and costs exactly the default extra', async () => {
+    freezeAt(NOW_MS)
+    // 两个替身为同一对端点给**同一个**价格，故余量的差只可能来自「骑行要不要加找车停车」，
+    // 而不是被路线时长混在一起。
+    const chains: StoredCommuteChain[] = [storedChain([{ ...LEG_A, connectionMode: 'walk' }])]
+    const { service, walking, cycling } = serviceFor({ chains, settings: SETTINGS })
+
+    try {
+      vi.spyOn(service, 'getLiveStatus')
+        .mockImplementation(async (lineId, _direction, _cityCode, _force, options) =>
+          targetedReads(lineId, options?.targetOrder))
+
+      const asWalking = await onlyDeduction(service)
+      chains[0] = storedChain([{ ...LEG_A, connectionMode: 'cycle' }])
+      const asCycling = await onlyDeduction(service)
+
+      // 方式决定端点：骑行只走 v4、步行只走 v3，各一次（各自缓存一条）。
+      expect(walking, 'the walking route was not the one used for the walking leg').toHaveLength(1)
+      expect(cycling, 'the cycling leg was not priced at the cycling route').toHaveLength(1)
+
+      // 骑行更紧，且差正好是找车与停车那一段 —— 分档相同也会让错的附加时间通过。
+      expect(marginOf(asWalking) - marginOf(asCycling)).toBe(DEFAULT_CYCLE_EXTRA_MINUTES)
+    }
+    finally {
+      service.stop()
+    }
+  })
+
+  it('prices a leg whose mode was never chosen as walking, identically to an explicit walk', async () => {
+    // 「没选过」入库存的是 NULL，而两种写法都**不是骑行**：故两次推演逐字相同。
+    // 把 NULL 读成骑行（或读成第三种东西）会在这里分叉，而屏幕上什么都不会说。
+    freezeAt(NOW_MS)
+    const chains: StoredCommuteChain[] = [storedChain([{ ...LEG_A, connectionMode: null }])]
+    const { service, walking, cycling } = serviceFor({ chains, settings: SETTINGS })
+
+    try {
+      vi.spyOn(service, 'getLiveStatus')
+        .mockImplementation(async (lineId, _direction, _cityCode, _force, options) =>
+          targetedReads(lineId, options?.targetOrder))
+
+      const asUnset = await onlyDeduction(service)
+      chains[0] = storedChain([{ ...LEG_A, connectionMode: 'walk' }])
+      const asExplicit = await onlyDeduction(service)
+
+      expect(cycling, 'a leg with no stored mode was priced as a ride').toEqual([])
+      // 同一对端点、同一方式：第二次从缓存供给，所以上游只被问过一次。
+      expect(walking).toHaveLength(1)
+      expect(asUnset).toEqual(asExplicit)
+    }
+    finally {
+      service.stop()
+    }
+  })
+
+  it('reports an unpriced connection when the CYCLING route has none, even though walking has one', async () => {
+    // 骑行路线答「没有路线」而步行路线有价：若这一段被拿去问步行，它会得到一个价格，
+    // 于是链路上会凭空多出一段按步行定价的接驳。答案只能是「这一段接驳没有时长」。
+    freezeAt(NOW_MS)
+    const { service, walking, cycling } = serviceFor({
+      chains: [storedChain([{ ...LEG_A, connectionMode: 'cycle' }])],
+      settings: SETTINGS,
+      walkSeconds: 300,
+      cycleSeconds: null,
+    })
+
+    try {
+      expect((await onlyDeduction(service)).deduction).toEqual({
+        status: 'no-conclusion',
+        reason: 'connection-unpriced',
+        leg: { seq: 0, lineId: LINE_A, lineName: '101路' },
+      })
+      // 它问的是骑行那条路线，且没有退到步行那条上。
+      expect(cycling).toHaveLength(1)
+      expect(walking, 'the cycling leg fell back to the walking route').toEqual([])
     }
     finally {
       service.stop()

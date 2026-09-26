@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 一段乘车段的字段：乘坐的线路、上车站、下车站，以及接驳进这一段所花的额外分钟。
+ * 一段乘车段的字段：乘坐的线路、上车站、下车站，以及接驳进这一段的方式与额外分钟。
  *
  * 两件本组件拥有、规则模块看不到的事实：
  *
@@ -10,10 +10,13 @@
  *   在该编号上并不持有的站。站名留下，好让用户仍看得见他挑过什么，而保存会一直拒绝，
  *   直到重新挑定；
  * - 「未设置」不是 0。草稿持有 null 时分钟字段为空、持有 0 时读作 0，因为「没配」与
- *   「确实没有额外时间」是推导层区别对待的两个不同事实。
+ *   「确实没有额外时间」是推导层区别对待的两个不同事实；
+ * - 「没选过」不是步行。方式草稿持有 null 时单选**显示**步行（与计价一致），而点下任何一个
+ *   选项都以看到的值落进草稿 —— 屏上不存在「显示步行、存的是 null」的一行。
  */
 import { computed, shallowRef } from 'vue'
 import { Trash2 } from '@lucide/vue'
+import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
 import type { Station } from '@real-time-transport/shared'
 import StationPinPicker from './station-pin-picker.vue'
 import {
@@ -128,6 +131,27 @@ const extraValue = computed(() => (props.leg.transferExtraMinutes === null
   ? ''
   : String(props.leg.transferExtraMinutes)))
 
+/** 本段接驳的两个方式，顺序即屏上顺序：先走后骑。 */
+const MODES: ReadonlyArray<{ value: 'walk' | 'cycle', label: string }> = [
+  { value: 'walk', label: '步行' },
+  { value: 'cycle', label: '骑行' },
+]
+
+/**
+ * 单选组显示的方式：没选过（null）显示步行，与计价一致。
+ *
+ * 显示什么，保存时就写什么：选中态来自草稿原值，而点下任何一个选项都会以**看到并选中的**
+ * 那个值落进草稿 —— 屏上不存在「显示步行、写的是 null」的一行。
+ */
+const shownMode = computed<'walk' | 'cycle'>(() => props.leg.connectionMode ?? 'walk')
+
+function onModeChange(value: unknown): void {
+  // reka-ui 的载荷是宽类型；两个已知方式之外的一切都不是本控件能持有的值，
+  // 草稿保持原值，而不是把一次误触读成「选了别的」。
+  if (value !== 'walk' && value !== 'cycle') return
+  emit('update:leg', { ...props.leg, connectionMode: value })
+}
+
 /** 移除控件显示的文字——因此也是它的名字必须包含的文字。 */
 const REMOVE_VISIBLE_LABEL = '删除该段'
 
@@ -220,6 +244,33 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
     <p v-else-if="!option && lines.length > 0" class="text-xs text-slate-400">
       请先选择线路与方向，再从它的站序里选上车站与下车站
     </p>
+
+    <!-- 与「附加时间」并列的本段接驳方式：骑行在骑行之外还有找车与停车，附加时间就在它上面加。
+         没选过时显示步行（与计价一致），选中即以看到的值落进草稿。 -->
+    <div class="space-y-1.5">
+      <span class="text-xs text-slate-400">接驳方式</span>
+      <RadioGroupRoot
+        :model-value="shownMode"
+        aria-label="接驳方式"
+        class="flex flex-wrap gap-2"
+        @update:model-value="onModeChange"
+      >
+        <RadioGroupItem
+          v-for="item in MODES"
+          :key="item.value"
+          :value="item.value"
+          class="inline-flex min-h-11 items-center rounded-lg border px-3 text-xs font-medium transition data-[state=checked]:border-cyan-500/60 data-[state=checked]:bg-cyan-500/15 data-[state=checked]:text-cyan-200"
+          :class="shownMode === item.value
+            ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
+            : 'border-slate-700 bg-slate-950 text-slate-300'"
+        >
+          {{ item.label }}
+        </RadioGroupItem>
+      </RadioGroupRoot>
+      <p class="text-xs text-slate-400">
+        未选过时按步行计价
+      </p>
+    </div>
 
     <label class="block">
       <span class="text-xs text-slate-400">本段前的接驳额外时间（分钟）</span>

@@ -22,7 +22,7 @@ import type { ArrivalBasis } from './data-provenance.js'
  * 覆盖每一个换乘点，且止于最后一个：故每段乘车的答案各自成立
  * （上哪辆车、在该段上车站等多久、那一次上车的余量、余量衡量的是哪辆车），
  * 而链**终止**于最后一个下车站 —— 没有目的地、没有终点之后的步行、也没有总到达时刻，
- * 因为链记录起点锚点而从不记录目的地。
+ * 因为链的起点由通勤目的决定（见 `anchorForPurpose`）而目的地从不记录。
  *
  * 以余量带位为主、分钟数同时给出（PRD F10）。两者同出一个只算一次的量 `marginMinutes`：
  * 带位是它的函数，行打印的数字也是，故一行不可能在「余量 1 分钟」旁边说 充裕。
@@ -40,7 +40,19 @@ import type { ArrivalBasis } from './data-provenance.js'
  */
 
 /**
- * 进入某乘车路段的接驳 —— 第一段来自链的起点锚点，其后是两段之间。
+ * F10：一条链的起点由通勤目的决定 —— 上班从家出发、下班从公司出发。
+ *
+ * 这是「起点在哪里」在本仓的**唯一**推导处：服务端按它取进入第一段的那次接驳的起点，
+ * web 的空态与拒绝按它点名要在设置里修的那一行。起点因此不是链路的一列 ——
+ * 一列可以被录成与目的矛盾的值（「上班·从公司出发」），而目的的函数不可能自相矛盾；
+ * 服务端与页面读同一个函数，也就不会对同一条记录得出两个起点。
+ */
+export function anchorForPurpose(purpose: CommuteChainPurpose): CommuteChainAnchor {
+  return purpose === 'morning' ? 'home' : 'work'
+}
+
+/**
+ * 进入某乘车路段的接驳 —— 第一段来自链的起点（由通勤目的选定），其后是两段之间。
  * 链不存模式（接驳时长由真实站坐标计价，存一份副本只会漂移成第二个矛盾的事实），故它作为输入传入。
  */
 export type ChainConnectionMode = 'walk' | 'cycle'
@@ -48,7 +60,7 @@ export type ChainConnectionMode = 'walk' | 'cycle'
 /**
  * 某路段的接驳没有计价时长的原因，由尝试计价而知道原因的调用方给出。
  * 引擎只见到一个事实 —— `connectionSeconds` 为 null —— 无法分辨为什么：
- * 接驳在引擎之外计价，依据的是用户出发点的真实站坐标（第一段是链的已存锚点，
+ * 接驳在引擎之外计价，依据的是用户出发点的真实站坐标（第一段是链的起点，即目的所定的锚点，
  * 其后是上一段离开的车站），故只有调用方能知道命中了哪一个事实。
  * 原因因此以代码传入，由引擎映射成页面读到的拒绝。
  *
@@ -58,7 +70,7 @@ export type ChainConnectionMode = 'walk' | 'cycle'
  * 故第一段之后的任何路段都不会由未解析的点装配而来。说不清原因的调用方就什么都不给
  * （见 `ChainLegInput.connectionUnpricedReason`）。
  *
- * - `anchor-unset`      链的起点锚点从未保存，根本没有可出发的点
+ * - `anchor-unset`      链将要起步的那个锚点从未保存坐标，根本没有可出发的点
  * - `line-unavailable`  该路段的线路详情读不到，故其已存车站没有可定位的停靠列表
  * - `station-unlocated` 该路段已存的车站不在该路段所行方向的停靠列表中
  * - `station-without-coordinate` 该方向的停靠列表有该站但没给坐标，故没有可步行的目标点
@@ -136,7 +148,7 @@ export type ChainMarginBand = 'comfortable' | 'tight' | 'uncertain' | 'insuffici
  * - `no-legs`                      链没有任何乘车路段
  * - `station-unset`                某路段的上车或下车站从未选择
  * - `leg-recorded-backwards`       某路段两端是同一站，或公交路段的到达站不在上车站的下游
- * - `anchor-unset`                 链的起点锚点从未保存：第一段根本没有可出发的起点
+ * - `anchor-unset`                 链将要起步的那个锚点从未保存坐标：第一段根本没有可出发的起点
  * - `connection-unpriced`          进入某路段的接驳没有计价时长
  * - `no-live`                      某路段的线路没有实时读数
  * - `no-vehicle`                   看板读数什么都没带：没有车在开往这个上车站
@@ -150,8 +162,8 @@ export type ChainMarginBand = 'comfortable' | 'tight' | 'uncertain' | 'insuffici
  *
  * 两个接驳码确切的原因集，陈述一次，使页面作者不必猜某个码背后是哪个事实：
  *
- *  - `anchor-unset` 只覆盖链的起点锚点，别无其他。它是接驳未计价中唯一用户可行动的原因：
- *    链记录起点而从不记录目的地，故从未保存的锚点根本不留下可出发的点，修法在设置页。
+ *  - `anchor-unset` 只覆盖链将要起步的那个锚点，别无其他。它是接驳未计价中唯一用户可行动的原因：
+ *    链的起点由目的决定而目的地从不记录，故那个锚点从未保存坐标时根本不留下可出发的点，修法在设置页。
  *    链用 F1 自己的空状态对同一事实所用的同一个词陈述它，页面可以给出同样的句子与同样的入口。
  *    反过来也成立，且靠的是**优先顺序**而不是运气：装配层在读取某路段的线路、
  *    定位车站**之前**先问锚点，故锚点从未保存的链即使其详情、停靠表或路线也会失败时仍答 `anchor-unset`。
@@ -445,6 +457,9 @@ export type CommuteChainDeduction = ChainDeduction | ChainNoConclusion
  * 带位、分钟与每条「不给结论」的原因都是码，用户读到的每个字归 web 层。
  * 此处不加任何东西，因为服务端必须解释的任何东西都是对同一批读数的第二种意见。
  *
+ * 链的起点刻意不出现在这里：它由 `purpose` 推出，那个用途值已随链路出行，
+ * 再送一个起点字段就是同一个事实的第二个副本 —— 副本会漂移成一条「上班·从公司出发」的链。
+ *
  * 链的路段行刻意**不**并列回显：每段的答案在 `deduction.legs` 里，
  * 再携带一次已存车站会诱使页面把一个记录下来的站台与一个实时分钟渲染成来自同一处。
  * 标识字段在此，因为一个答案必须说明它属于哪条已记录的链。
@@ -452,7 +467,6 @@ export type CommuteChainDeduction = ChainDeduction | ChainNoConclusion
 export interface CommuteChainDeductionView {
   chainId: string
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   deduction: CommuteChainDeduction
 }
@@ -714,7 +728,7 @@ function alightMinutesOf(vehicle: ChainLegVehicle): number | null {
  * 某个码背后的原因集因此从这张表读出（测试用 `Object.keys` 推导它），绝不手数 ——
  * 手写在 union 旁边的计数只能是一份没人校验的副本。
  *
- * 链自身的起点锚点是用户唯一可行动的原因，故只有它走自己的码 ——
+ * 链自身起点所在的锚点（由目的决定）是用户唯一可行动的原因，故只有它走自己的码 ——
  * 与 F1 的空状态对同一事实所用的同一个词。其余每个原因
  * （今天四个：此处除 `anchor-unset` 之外的每个键），以及说不清原因的调用方，
  * 都是通用的 `connection-unpriced`：命中哪一个不改变页面能诚实写下的字，也不改变它能给出的动作；

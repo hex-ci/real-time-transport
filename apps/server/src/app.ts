@@ -611,7 +611,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   })
 
   // F10：通勤链路。一条链路是命名的、有序的乘车腿序列 —— 每条腿是一条线路加上车站与下车站 ——
-  // 从两个已存锚点之一出发。腿之间的步行/骑行衔接不存储：两端的坐标都在线路详情里，
+  // 起点由它的通勤目的决定：上班从家出发、下班从公司出发（`anchorForPurpose`），故起点不是录入项。
+  // 腿之间的步行/骑行衔接不存储：两端的坐标都在线路详情里，
   // 时长按真实距离算。腿作为一个值写入，腿的站点可以未设置 —— 作为 null，绝不是空名字。
   app.get('/api/transit/commute-chains', async (req) => {
     const userId = resolveUserId(req)
@@ -636,7 +637,6 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     const chain = await db.createCommuteChain({
       userId: resolveUserId(req),
       name: body.data.name,
-      originAnchor: body.data.originAnchor,
       purpose: body.data.purpose,
       displayOrder: body.data.displayOrder,
       legs: body.data.legs,

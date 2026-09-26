@@ -46,6 +46,7 @@ const UNCHOSEN_LEG = {
   alightStationName: null,
   alightStationOrder: null,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 describe('(a) 同一个 id：写进去的，那个 id 读得到', () => {
@@ -211,7 +212,7 @@ describe('(d) 类审计：关注线路与通勤链路的读/写也是同一套�
       const created = await app.inject({
         method: 'POST',
         url: '/api/transit/commute-chains',
-        payload: { userId: WRITER, name: '上班链路', originAnchor: 'home', purpose: 'morning', legs: [{ ...UNCHOSEN_LEG }] },
+        payload: { userId: WRITER, name: '上班链路', purpose: 'morning', legs: [{ ...UNCHOSEN_LEG }] },
       })
       expect(created.statusCode, created.body).toBe(200)
       const chainId = json(created).data.id
@@ -246,7 +247,7 @@ describe('(d) 类审计：关注线路与通勤链路的读/写也是同一套�
       const created = await app.inject({
         method: 'POST',
         url: '/api/transit/commute-chains',
-        payload: { name: '上班链路', originAnchor: 'home', purpose: 'morning', legs: [{ ...UNCHOSEN_LEG }] },
+        payload: { name: '上班链路', purpose: 'morning', legs: [{ ...UNCHOSEN_LEG }] },
       })
       const chainId = json(created).data.id
 

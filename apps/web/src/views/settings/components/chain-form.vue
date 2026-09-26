@@ -1,6 +1,9 @@
 <script setup lang="ts">
 /**
- * 链路编辑器：一条链路的名称、起点锚点、通勤目的与乘车段。
+ * 链路编辑器：一条链路的名称、通勤目的与乘车段。
+ *
+ * 起点刻意不在表单里：它由通勤目的决定（上班从家出发、下班从公司出发），
+ * 故录入的是名称、目的与各段乘车段 —— 一个可以由规则算出的值不该再问一次使用者。
  *
  * 用户可能弄错的一切都在此敲定，先于请求存在：保存按下时由 `refuseChainDraft` 评判草稿，
  * 拒绝就渲染在请求的位置。写入边界自己的规则就是这些规则，在录入之处再说一遍，
@@ -69,10 +72,7 @@ watch(draft, () => {
   emit('edit')
 }, { deep: true })
 
-const ANCHORS = [
-  { value: 'home' as const, label: '家' },
-  { value: 'work' as const, label: '公司' },
-]
+const ANCHOR_NOTE = '起点由通勤目的决定：上班从家出发、下班从公司出发'
 const PURPOSES = [
   { value: 'morning' as const, label: '上班' },
   { value: 'evening' as const, label: '下班' },
@@ -170,27 +170,6 @@ function onCancel(): void {
     </label>
 
     <div class="space-y-1.5">
-      <span class="text-xs text-slate-400">起点</span>
-      <RadioGroupRoot
-        v-model="draft.originAnchor"
-        aria-label="起点"
-        class="flex flex-wrap gap-2"
-      >
-        <RadioGroupItem
-          v-for="anchor in ANCHORS"
-          :key="anchor.value"
-          :value="anchor.value"
-          class="inline-flex min-h-11 items-center rounded-lg border px-3 text-xs font-medium transition data-[state=checked]:border-cyan-500/60 data-[state=checked]:bg-cyan-500/15 data-[state=checked]:text-cyan-200"
-          :class="draft.originAnchor === anchor.value
-            ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
-            : 'border-slate-700 bg-slate-950 text-slate-300'"
-        >
-          {{ anchor.label }}
-        </RadioGroupItem>
-      </RadioGroupRoot>
-    </div>
-
-    <div class="space-y-1.5">
       <span class="text-xs text-slate-400">通勤目的</span>
       <RadioGroupRoot
         v-model="draft.purpose"
@@ -209,6 +188,10 @@ function onCancel(): void {
           {{ item.label }}
         </RadioGroupItem>
       </RadioGroupRoot>
+      <!-- 起点不再是录入项：说出它由目的决定，比让使用者以为少填了一项更诚实。 -->
+      <p class="text-xs text-slate-400">
+        {{ ANCHOR_NOTE }}
+      </p>
     </div>
 
     <div class="space-y-2">

@@ -6,7 +6,6 @@ import { provenanceLabelOf } from '@/provenance-copy'
 import { lineLoadStateOf, type LineLoadState } from '@/line-load-state'
 import type {
   CommuteChain,
-  CommuteChainAnchor,
   CommuteChainPurpose,
   DataSourceType,
   LineDetail,
@@ -41,8 +40,9 @@ export type RefreshOutcome = 'ok' | 'throttled' | 'unavailable' | 'offline'
  * 一次写入携带的链路，其形状即契约接受的那份，减去服务端自己拥有的部分。
  *
  * 刻意不带 `seq`：一段的位置就是数组的顺序，那个数字由服务端从它写出来。站字段可空，因为
- * 「未选」是草稿的真实状态（是 `null`，绝不是一个空名字）；`transferExtraMinutes` 可空，
- * 因为「未设置」与「确实没有额外时间」是两个事实。
+ * 「未选」是草稿的真实状态（是 `null`，绝不是一个空名字）；`transferExtraMinutes` 与
+ * `connectionMode` 可空，因为「未设置」与「确实没有额外时间」、「没选过」与「选了步行」
+ * 是两对各自不同的事实。
  */
 export interface CommuteChainLegWrite {
   lineId: string
@@ -53,12 +53,13 @@ export interface CommuteChainLegWrite {
   alightStationName: string | null
   alightStationOrder: number | null
   transferExtraMinutes: number | null
+  /** 进入本段的接驳方式；`null` = 用户没选过（服务端按步行计价）。 */
+  connectionMode: 'walk' | 'cycle' | null
 }
 
-/** 一次写入携带的链路内容，不含服务端能算出的位置。 */
+/** 一次写入携带的链路内容，不含服务端能算出的位置。起点也不在其中：它由 `purpose` 决定。 */
 export interface CommuteChainWrite {
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   legs: CommuteChainLegWrite[]
 }

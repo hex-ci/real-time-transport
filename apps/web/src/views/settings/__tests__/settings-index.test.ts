@@ -65,7 +65,7 @@ function favourites(count: number): Record<string, unknown>[] {
 
 /** 一条已存链路，使链路行有数可陈。 */
 function chain(): Record<string, unknown> {
-  return { id: 'chain-1', userId: 'default_user', name: '早上上班', originAnchor: 'home', purpose: 'morning', displayOrder: 0, legs: [] }
+  return { id: 'chain-1', userId: 'default_user', name: '早上上班', purpose: 'morning', displayOrder: 0, legs: [] }
 }
 
 /** 端点在测试里的行为：作答、拒绝、交回空列表，或（仅设置）答根本没有任何行。 */

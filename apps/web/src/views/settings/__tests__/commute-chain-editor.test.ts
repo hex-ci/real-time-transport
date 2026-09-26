@@ -216,7 +216,6 @@ function storedChain(overrides: Record<string, unknown> = {}): Record<string, un
     id: 'chain-saved-1',
     userId: 'default_user',
     name: '早上上班',
-    originAnchor: 'home',
     purpose: 'morning',
     displayOrder: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -602,7 +601,6 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
     expect(posts[0]!.url).toBe('/api/transit/commute-chains')
     expect(posts[0]!.body).toEqual({
       name: '早上上班',
-      originAnchor: 'home',
       purpose: 'morning',
       userId: 'default_user',
       displayOrder: 5,
@@ -616,6 +614,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
           alightStationName: '建国门',
           alightStationOrder: 4,
           transferExtraMinutes: null,
+          connectionMode: null,
         },
         {
           lineId: SUBWAY,
@@ -626,6 +625,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
           alightStationName: '平安里',
           alightStationOrder: 3,
           transferExtraMinutes: null,
+          connectionMode: null,
         },
       ],
     })
@@ -1233,7 +1233,7 @@ describe('规则模块本身', () => {
       message: '请先给这条链路起个名字',
     })
 
-    const halfFilled = { name: '早上上班', originAnchor: 'home' as const, purpose: 'morning' as const, legs: [{ ...emptyLegDraft(), lineKey: 'fav-bus-1_0', boardStationName: '东大桥' }] }
+    const halfFilled = { name: '早上上班', purpose: 'morning' as const, legs: [{ ...emptyLegDraft(), lineKey: 'fav-bus-1_0', boardStationName: '东大桥' }] }
     expect(refuseChainDraft(halfFilled, lines)?.message)
       .toBe('第 1 段的上车站「东大桥」没有站序：站名与站序要同时选定，单独一半定位不到车站')
   })

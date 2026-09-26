@@ -18,12 +18,18 @@ const WALK_ETA_TTL_MS = 24 * 3600 * 1000
 const WALK_ETA_RETRY_MS = 30 * 1000
 
 /**
- * 步行走廊 ETA 的缓存键：用原样发给上游的 GCJ-02 坐标构造，保留
+ * 进入某段乘车段的接驳方式。方式决定定价走的**路线**（步行 v3、骑行 v4），
+ * 因此也必须活在缓存键里 —— 否则先定价的一方会被当成另一方的答案供出去。
+ */
+export type ConnectionMode = 'walk' | 'cycle'
+
+/**
+ * 接驳走廊 ETA 的缓存键：方式在前，其余用原样发给上游的 GCJ-02 坐标构造，保留
  * 5 位小数（约 1 m），使同一个 ~1 m 格子内的锚点共用条目，坐标
  * 转换改动后也不会供出为别的坐标定价的腿。
  */
-function walkEtaCacheKey(glng: number, glat: number, dlng: number, dlat: number): string {
-  return `${glng.toFixed(5)},${glat.toFixed(5)}|${dlng.toFixed(5)},${dlat.toFixed(5)}`
+function connectionEtaCacheKey(mode: ConnectionMode, glng: number, glat: number, dlng: number, dlat: number): string {
+  return `${mode}|${glng.toFixed(5)},${glat.toFixed(5)}|${dlng.toFixed(5)},${dlat.toFixed(5)}`
 }
 
 const TRANSIENT_AMAP_INFOCODES = new Set([
@@ -287,32 +293,89 @@ export class AmapGisService {
    * 终点是已存储的站点坐标，本来就在该坐标系内。见类上的契约。
    */
   async getWalkingEta(originLng: number, originLat: number, destLng: number, destLat: number): Promise<WalkEtaResult | null> {
-    const cacheKey = walkEtaCacheKey(originLng, originLat, destLng, destLat)
+    return this.getConnectionEta('walk', originLng, originLat, destLng, destLat)
+  }
+
+  /**
+   * 进入某段乘车段的接驳定价，按该段自己的方式择路线：步行走 v3、骑行走 v4。
+   *
+   * 两端都是 GCJ-02，原样发给上游（契约见类上）。缓存、TTL、容量、串行限流
+   * 与瞬时降级是两条路线**同一份** —— 唯一按方式分开的是上游端点与缓存键：
+   * 两个端点的答案不同（同一对端点上骑行更快、且信封不同），共享键会让
+   * 先定价的一方冒充另一方。
+   *
+   * v4 的成功信封没有 v3 的那对成功码：HTTP 200 + `data.paths[]` 即成功，
+   * 失败以 `errcode`/`errmsg` 陈述（无 key 为 `errcode: 10001`）。`requestDetailed`
+   * 的成功判据是 v3 形状，故 v4 在这里直接以 `fetch` 发出，走同一个限流器。
+   * 载荷的两个数是数字（v3 是字符串），经 `statedNumber` 走同一条「只读声明的数」的规则。
+   */
+  async getConnectionEta(mode: ConnectionMode, originLng: number, originLat: number, destLng: number, destLat: number): Promise<WalkEtaResult | null> {
+    const cacheKey = connectionEtaCacheKey(mode, originLng, originLat, destLng, destLat)
 
     const cached = this.walkEtaCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
       return { distanceMeters: cached.meters, durationSeconds: cached.seconds }
     }
 
-    const { json, transient } = await this.requestDetailed('/v3/direction/walking', {
-      origin: `${originLng.toFixed(6)},${originLat.toFixed(6)}`,
-      destination: `${destLng.toFixed(6)},${destLat.toFixed(6)}`,
-    })
-
-    const path = json?.route?.paths?.[0]
-    if (!path) {
-      // 瞬时失败（QPS/配额/网络）：绝不能污染好数据。此前定价的这条腿
-      // 仍是该端点对可得的最佳答案，所以供出它并把条目标成尽早重试，
-      // 而不是报告此站不可达。还没有任何定价时没有答案可给，
-      // 而 null 正是调用方已在降级处理的信号。
-      if (transient && cached) {
-        this.walkEtaCache.set(cacheKey, { ...cached, expiresAt: Date.now() + WALK_ETA_RETRY_MS })
-        return { distanceMeters: cached.meters, durationSeconds: cached.seconds }
+    let path: any
+    if (mode === 'cycle') {
+      if (!this.apiKey) return null
+      await this.limiter.throttle()
+      const url = `${AMAP_BASE}/v4/direction/bicycling?${new URLSearchParams({
+        key: this.apiKey,
+        origin: `${originLng.toFixed(6)},${originLat.toFixed(6)}`,
+        destination: `${destLng.toFixed(6)},${destLat.toFixed(6)}`,
+      }).toString()}`
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 10000)
+      let json: any = null
+      let transient: boolean
+      try {
+        const res = await fetch(url, { signal: controller.signal })
+        if (!res.ok) {
+          transient = res.status >= 500
+        }
+        else {
+          json = await res.json() as any
+          // v4 以 `errcode` 陈述失败，且配额/QPS 族与 v3 的 infocode 是同一批号。
+          transient = json?.errcode !== undefined && json.errcode !== 0
+            ? TRANSIENT_AMAP_INFOCODES.has(String(json.errcode))
+            : false
+        }
       }
-      return null
+      catch {
+        transient = true
+      }
+      finally {
+        clearTimeout(timer)
+      }
+      path = json?.data?.paths?.[0]
+      // 瞬时失败（QPS/配额/网络）：绝不能污染好数据，规则与步行一致。
+      if (!path) {
+        if (transient && cached) {
+          this.walkEtaCache.set(cacheKey, { ...cached, expiresAt: Date.now() + WALK_ETA_RETRY_MS })
+          return { distanceMeters: cached.meters, durationSeconds: cached.seconds }
+        }
+        return null
+      }
+    }
+    else {
+      const { json, transient } = await this.requestDetailed('/v3/direction/walking', {
+        origin: `${originLng.toFixed(6)},${originLat.toFixed(6)}`,
+        destination: `${destLng.toFixed(6)},${destLat.toFixed(6)}`,
+      })
+      path = json?.route?.paths?.[0]
+      if (!path) {
+        // 瞬时失败：供出此前定价的这条腿并标成尽早重试，而不是报告此站不可达。
+        if (transient && cached) {
+          this.walkEtaCache.set(cacheKey, { ...cached, expiresAt: Date.now() + WALK_ETA_RETRY_MS })
+          return { distanceMeters: cached.meters, durationSeconds: cached.seconds }
+        }
+        return null
+      }
     }
 
-    // 路径存在但没有为两端都定价，与上面空的 `paths` 是同一类答案 ——
+    // 路径存在但没有为两端都定价，与空的 `paths` 是同一类答案 ——
     // 上游自己的「这对端点无路线」—— 所以不用陈旧条目顶替：当下的事实
     // 就是这对端点没有价格。载荷写出的两个数原样采用，写出的 `0` 保留
     // （0 米腿合法），否则视为无价格并返回 null。

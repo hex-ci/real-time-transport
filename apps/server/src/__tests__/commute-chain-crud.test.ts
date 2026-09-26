@@ -29,12 +29,12 @@ const LEG = {
   alightStationName: '乙路',
   alightStationOrder: 7,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 function chainBody(over: Record<string, unknown> = {}) {
   return {
     name: '上班链路',
-    originAnchor: 'home',
     purpose: 'morning',
     legs: [{ ...LEG }],
     ...over,
@@ -74,7 +74,7 @@ describe('F10 chains: storage', () => {
     await db.createCommuteChain(chainBody({
       legs: [
         { ...LEG, boardStationName: null, boardStationOrder: null },
-        { ...LEG, alightStationName: null, alightStationOrder: null, transferExtraMinutes: 3 },
+        { ...LEG, alightStationName: null, alightStationOrder: null, transferExtraMinutes: 3, connectionMode: 'cycle' },
       ],
     }))
 
@@ -90,6 +90,24 @@ describe('F10 chains: storage', () => {
     // 配置过的加时与未设置的是两件事。
     expect(second!.transferExtraMinutes).toBe(3)
     expect(first!.transferExtraMinutes).toBeNull()
+    // 接驳方式同样是两个事实：选过骑行，与从没选过（NULL）。
+    expect(second!.connectionMode).toBe('cycle')
+    expect(first!.connectionMode).toBeNull()
+  })
+
+  it('keeps each leg\'s own connection mode: one chain can walk one leg and ride the next', async () => {
+    // 粒度是**进入每一段乘车段的那一段接驳**，故方式挂在段上而不是链上：
+    // 一条链路一段走路一段骑车不是矛盾记录，而是这个模型的常态。
+    const db = new Database()
+    await db.createCommuteChain(chainBody({
+      legs: [
+        { ...LEG, connectionMode: 'walk', transferExtraMinutes: 0 },
+        { ...LEG, lineId: '010-9-0', lineName: '9路', connectionMode: 'cycle', transferExtraMinutes: 3 },
+      ],
+    }))
+
+    const [chain] = await db.getCommuteChains('default_user')
+    expect(chain!.legs.map(leg => leg.connectionMode)).toEqual(['walk', 'cycle'])
   })
 
   it('numbers the legs from the array order and replaces them as a unit', async () => {
@@ -160,6 +178,7 @@ describe('F10 chains: storage', () => {
       alight_station_name: '乙路',
       alight_station_order: 7,
       transfer_extra_minutes: null,
+      connection_mode: null,
     })
 
     expect(leg.seq).toBe(1)
@@ -169,16 +188,57 @@ describe('F10 chains: storage', () => {
     expect(leg.alightStationName).toBe('乙路')
     expect(leg.alightStationOrder).toBe(7)
     expect(leg.transferExtraMinutes).toBeNull()
+    // NULL 读作「没选过」，绝不替使用者补一个步行 —— 补上之后两种状态读起来一模一样。
+    expect(leg.connectionMode).toBeNull()
+  })
+
+  it('reads a stored mode through the two known values, and anything else as never chosen', () => {
+    // `?? 0` 那个习惯在这里正是错的（它对 `display_order` 是对的）：这一列的缺省含义是
+    // 「不知道」，而默认值会把「不知道」变成「知道」。
+    const row = (connection_mode: unknown) => storedCommuteChainLeg({
+      seq: 0,
+      line_id: '010-2-0',
+      line_name: '2路',
+      city_code: '027',
+      board_station_name: null,
+      board_station_order: null,
+      alight_station_name: null,
+      alight_station_order: null,
+      transfer_extra_minutes: null,
+      connection_mode,
+    })
+
+    expect(row('walk').connectionMode).toBe('walk')
+    expect(row('cycle').connectionMode).toBe('cycle')
+    expect(row(null).connectionMode).toBeNull()
+    // 缺列（更早的库、别的读路径）与写坏的取值都不是一种方式，也不是步行。
+    expect(row(undefined).connectionMode).toBeNull()
+    expect(row('drive').connectionMode).toBeNull()
+    expect(row('').connectionMode).toBeNull()
   })
 
   it('stamps the sequence from position, ignoring a number from the caller', () => {
     const legs = normalizeCommuteChainLegs([
       { ...LEG, seq: 9 },
-      { ...LEG, seq: 9 },
+      { ...LEG, seq: 9, connectionMode: 'cycle' },
     ])
 
     expect(legs.map(l => l.seq)).toEqual([0, 1])
     expect(legs[0]!.cityCode).toBe('027')
+    // 方式由写入方给，编号由存储盖：两个字段各有来源，谁也不替谁作主。
+    expect(legs.map(l => l.connectionMode)).toEqual([null, 'cycle'])
+  })
+
+  it('stores no origin anchor, even when a legacy caller still sends one', async () => {
+    // 起点由通勤目的决定，链路上没有这一列：旧调用方带着它也无处可存 ——
+    // 一条「上班·从公司出发」的矛盾链因此不可能被写进来。
+    const db = new Database()
+    const created = await db.createCommuteChain(chainBody({ originAnchor: 'work' }))
+
+    expect(created).not.toHaveProperty('originAnchor')
+    const [read] = await db.getCommuteChains('default_user')
+    expect(read).not.toHaveProperty('originAnchor')
+    expect(read!.purpose).toBe('morning')
   })
 })
 
@@ -219,6 +279,25 @@ describe('F10 chains: HTTP routes', () => {
     }
   })
 
+  it('answers a created chain without an origin anchor, even for a legacy payload that still carries one', async () => {
+    // 写侧契约里没有这一列了，故旧客户端发来的它在入口就被丢掉：存下的与读回的都不携带它，
+    // 而这条链路照常可用 —— 起点由它自己的 purpose 决定。
+    forbidNetwork()
+    const app = await buildApp()
+    try {
+      const created = json(await createChain(app, chainBody({ originAnchor: 'work' })))
+      expect(created.success).toBe(true)
+      expect(created.data).not.toHaveProperty('originAnchor')
+
+      const read = json(await app.inject({ url: `/api/transit/commute-chains/${created.data.id}` }))
+      expect(read.data).not.toHaveProperty('originAnchor')
+      expect(read.data.purpose).toBe('morning')
+    }
+    finally {
+      await app.close()
+    }
+  })
+
   it('carries an unset station through the wire as null', async () => {
     forbidNetwork()
     const app = await buildApp()
@@ -231,6 +310,57 @@ describe('F10 chains: HTTP routes', () => {
       expect(read.data.legs[0].boardStationName).toBeNull()
       expect(read.data.legs[0].boardStationOrder).toBeNull()
       expect(read.data.legs[0].boardStationName).not.toBe('')
+    }
+    finally {
+      await app.close()
+    }
+  })
+
+  it('carries the connection mode of every leg through the wire, both ways', async () => {
+    forbidNetwork()
+    const app = await buildApp()
+    try {
+      const created = json(await createChain(app, chainBody({
+        legs: [
+          { ...LEG, connectionMode: 'cycle', transferExtraMinutes: 2 },
+          { ...LEG, lineId: '010-9-0', lineName: '9路', connectionMode: null },
+        ],
+      })))
+      expect(created.success, created.error).toBe(true)
+      expect(created.data.legs.map((l: { connectionMode: string | null }) => l.connectionMode)).toEqual(['cycle', null])
+
+      const read = json(await app.inject({ url: `/api/transit/commute-chains/${created.data.id}` }))
+      expect(read.data.legs.map((l: { connectionMode: string | null }) => l.connectionMode)).toEqual(['cycle', null])
+
+      // PATCH 的 `legs` 整段替换，方式跟着走 —— 与加时、站点同一条写入路径。
+      const patched = json(await app.inject({
+        method: 'PATCH',
+        url: `/api/transit/commute-chains/${created.data.id}`,
+        payload: { legs: [{ ...LEG, connectionMode: null }] },
+      }))
+      expect(patched.data.legs).toHaveLength(1)
+      expect(patched.data.legs[0].connectionMode).toBeNull()
+    }
+    finally {
+      await app.close()
+    }
+  })
+
+  it('refuses a leg that names no connection mode, and one that names a mode that is not ours', async () => {
+    forbidNetwork()
+    const app = await buildApp()
+    try {
+      // 省略字段是一次没说清方式的写入，而不是隐含的步行：契约里它是必填可空。
+      const { connectionMode: omitted, ...withoutMode } = { ...LEG, connectionMode: null }
+      expect(omitted).toBeNull()
+      const missing = await createChain(app, chainBody({ legs: [withoutMode] }))
+      expect(missing.statusCode, missing.body).toBe(400)
+      expect(json(missing).success).toBe(false)
+
+      // 两个已知方式之外的一切都不是方式。
+      const wrong = await createChain(app, chainBody({ legs: [{ ...LEG, connectionMode: 'drive' }] }))
+      expect(wrong.statusCode, wrong.body).toBe(400)
+      expect(json(wrong).success).toBe(false)
     }
     finally {
       await app.close()

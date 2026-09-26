@@ -18,7 +18,7 @@ import type { RefusalView } from './types'
 
 /** 一个码一句话；参数是锚点，只有一个码需要它。 */
 export interface RefusalSentenceParams {
-  /** 这条链路起步的锚点，即 `CommuteChainDeductionView.originAnchor`。 */
+  /** 这条链路起步所在的锚点，由它的通勤目的推出（`anchorForPurpose`）。 */
   anchor: CommuteChainAnchor
 }
 

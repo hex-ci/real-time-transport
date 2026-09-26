@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CYCLE_EXTRA_MINUTES } from '@real-time-transport/shared'
 import { buildApp } from '../app.js'
 
 /**
@@ -51,6 +52,7 @@ const LEG_A = {
   alightStationName: '丙路',
   alightStationOrder: 3,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 const LEG_B = {
@@ -62,10 +64,11 @@ const LEG_B = {
   alightStationName: '己路',
   alightStationOrder: 4,
   transferExtraMinutes: null,
+  connectionMode: null,
 }
 
 function chainBody(over: Record<string, unknown> = {}) {
-  return { name: '上班链路', originAnchor: 'home', purpose: 'morning', legs: [{ ...LEG_A }, { ...LEG_B }], ...over }
+  return { name: '上班链路', purpose: 'morning', legs: [{ ...LEG_A }, { ...LEG_B }], ...over }
 }
 
 /**
@@ -77,12 +80,22 @@ function chainBody(over: Record<string, unknown> = {}) {
  * `noseAtByLine` 让线路上的车往前走，于是测试能再现上游那个「一行都不定价」的过滤：车头已经
  * 越过所请求站序的车，对那个站序不会被返回。
  */
-function stubUpstream(options: { noseAtByLine?: Record<string, number> } = {}): { lines: string[], targets: string[], walking: number } {
-  const state = { lines: [] as string[], targets: [] as string[], walking: 0 }
+function stubUpstream(options: { noseAtByLine?: Record<string, number> } = {}): { lines: string[], targets: string[], walking: number, cycling: number } {
+  const state = { lines: [] as string[], targets: [] as string[], walking: 0, cycling: 0 }
 
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
 
+    // 骑行替身走它自己那条路线：v4 的信封与 v3 不同 —— 成功时没有 `status`/`infocode`，
+    // 只有 `data.paths[]`，而两个数都是**数字**（步行那两个是字符串，均为实测）。
+    if (href.includes('/v4/direction/bicycling')) {
+      state.cycling += 1
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { paths: [{ distance: 400, duration: WALK_SECONDS }] } }),
+      }
+    }
     if (href.includes('/v3/direction/walking')) {
       state.walking += 1
       return amapOk({ route: { paths: [{ distance: 400, duration: WALK_SECONDS }] } })
@@ -181,7 +194,6 @@ describe('F10 route: one response carries every chain of the purpose', () => {
       expect(view).toMatchObject({
         chainId: created.id,
         name: '上班链路',
-        originAnchor: 'home',
         purpose: 'morning',
       })
 
@@ -468,6 +480,72 @@ describe('F10 route: a leg recorded the wrong way round cannot be stored', () =>
       const read = (await app.inject({ url: `/api/transit/commute-chains/${created.id}` })).json().data
       expect(read.legs[0].boardStationOrder).toBe(2)
       expect(read.legs[0].alightStationOrder).toBe(3)
+    }
+    finally {
+      await app.close()
+    }
+  })
+})
+
+/**
+ * F10 路由：接驳方式随每段存下来，故它决定那一段按哪条路线定价。
+ *
+ * 两条**同输入**链路只差这一列：若服务端仍把方式写死成步行，两条链路会给出逐字相同的答案，
+ * 而使用者明明选了骑行。差额正好是找车与停车那一段（`DEFAULT_CYCLE_EXTRA_MINUTES`），
+ * 两个替身为同一对端点给同一个价格，所以差额只可能来自这一个字段。
+ */
+describe('F10 route: each leg is priced by the mode it was stored with', () => {
+  it('prices the riding chain at the cycling route and makes it exactly the default extra tighter', async () => {
+    freezeAt(T0)
+    const upstream = stubUpstream()
+    const app = await buildApp({ amapKey: 'test-key' })
+    try {
+      await saveAnchor(app)
+      await createChain(app, chainBody({ name: '走路链', legs: [{ ...LEG_A, connectionMode: 'walk' }] }))
+      await createChain(app, chainBody({ name: '骑车链', legs: [{ ...LEG_A, connectionMode: 'cycle' }] }))
+
+      const res = await deductions(app)
+      expect(res.statusCode, res.body).toBe(200)
+
+      const byName = new Map<string, any>(res.json().data.chains.map((chain: any) => [chain.name, chain]))
+      const marginOf = (name: string): number => {
+        const deduction = byName.get(name)?.deduction
+        if (deduction?.status !== 'deduced') throw new Error(`${name} answered ${JSON.stringify(deduction)}`)
+        return deduction.marginMinutes
+      }
+
+      // 方式决定端点：骑行问的必须是骑行那条路线，步行问的必须是步行那条，各一次。
+      expect(upstream.cycling, 'the riding chain was not priced at the cycling route').toBe(1)
+      expect(upstream.walking, 'the walking chain was not priced at the walking route').toBe(1)
+
+      // 骑行更紧，且差正好是找车与停车那一段。
+      expect(marginOf('走路链') - marginOf('骑车链')).toBe(DEFAULT_CYCLE_EXTRA_MINUTES)
+    }
+    finally {
+      await app.close()
+    }
+  })
+
+  it('answers a leg whose mode was never chosen exactly as an explicit walk, over the wire', async () => {
+    // 「没选过」以 NULL 存下（旧记录、或任何不经过本编辑器写入的记录），而它按步行计价：
+    // 两种写法的答案逐字相同，且骑行那条路线一次都没被请求过。
+    freezeAt(T0)
+    const upstream = stubUpstream()
+    const app = await buildApp({ amapKey: 'test-key' })
+    try {
+      await saveAnchor(app)
+      await createChain(app, chainBody({ name: '没选过', legs: [{ ...LEG_A, connectionMode: null }] }))
+      await createChain(app, chainBody({ name: '显式步行', legs: [{ ...LEG_A, connectionMode: 'walk' }] }))
+
+      const res = await deductions(app)
+      expect(res.statusCode, res.body).toBe(200)
+
+      const chains = res.json().data.chains
+      expect(chains.map((chain: any) => chain.deduction.status)).toEqual(['deduced', 'deduced'])
+      expect(chains[0].deduction).toEqual(chains[1].deduction)
+      expect(upstream.cycling, 'a leg with no stored mode was priced as a ride').toBe(0)
+      // 同一对端点、同一方式：两条链路的接驳只向上游问过一次。
+      expect(upstream.walking).toBe(1)
     }
     finally {
       await app.close()

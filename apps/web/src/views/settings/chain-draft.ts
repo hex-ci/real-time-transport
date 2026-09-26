@@ -9,6 +9,9 @@ import type { ChainLineOption, ChainStopsState } from './types'
 /**
  * 通勤链路的编辑器，作为唯一的判断处。
  *
+ * 一条链路不是每个事实都要录入的：起点由通勤目的决定（上班从家出发、下班从公司出发），
+ * 故草稿里没有起点 —— 录入的是名称、目的与各段乘车段。
+ *
  * 「链路由使用者录入，不由系统规划」是本特性的前提，故让一条记录可读的规则住在这里，
  * 也就是用户录入之处，而不是写入边界：`CommuteChainLegSchema` 能检查一对 (站名, 站序)
  * 自洽，但它看不到线路的站点列表，故「这一对确实在站序里」只有在列表在屏上时才可检查。
@@ -54,12 +57,16 @@ export interface ChainLegDraft {
   alightStationOrder: number | null
   /** null = 用户什么都没配；0 = 他配了「完全没有额外时间」。 */
   transferExtraMinutes: number | null
+  /**
+   * 进入本段的接驳方式。`null` = 用户没选过 —— 它是真实状态，绝不默认成步行：
+   * 默认值会把「没选过」与「选了步行」变成同一个值，而屏幕上显示的应是前者。
+   */
+  connectionMode: 'walk' | 'cycle' | null
 }
 
-/** 一条正在填写的链路。 */
+/** 一条正在填写的链路。起点不在其中：它由 `purpose` 决定。 */
 export interface ChainDraft {
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   legs: ChainLegDraft[]
 }
@@ -79,12 +86,13 @@ export function emptyLegDraft(): ChainLegDraft {
     alightStationName: null,
     alightStationOrder: null,
     transferExtraMinutes: null,
+    connectionMode: null,
   }
 }
 
 /** 新链路的草稿：一个空段，故在敲任何字之前形状就是可见的。 */
 export function emptyChainDraft(): ChainDraft {
-  return { name: '', originAnchor: 'home', purpose: 'morning', legs: [emptyLegDraft()] }
+  return { name: '', purpose: 'morning', legs: [emptyLegDraft()] }
 }
 
 /** 「第 2 段」——每句话与每个标签所用的位置词。 */
@@ -97,7 +105,7 @@ export function purposeText(purpose: CommuteChainPurpose): string {
   return purpose === 'morning' ? '上班' : '下班'
 }
 
-/** 「家」 / 「公司」. */
+/** 「家」 / 「公司」——`anchorForPurpose` 推出来的锚点就是这两个之一。 */
 export function anchorText(anchor: CommuteChainAnchor): string {
   return anchor === 'home' ? '家' : '公司'
 }
@@ -234,7 +242,6 @@ export function editorOptionsFor(chain: CommuteChain | null, lines: ChainLineOpt
 export function chainDraftOf(chain: CommuteChain, lines: ChainLineOption[]): ChainDraft {
   return {
     name: chain.name,
-    originAnchor: chain.originAnchor,
     purpose: chain.purpose,
     legs: chain.legs.map(leg => ({
       lineKey: lineKeyOfStoredLeg(leg, lines),
@@ -243,6 +250,7 @@ export function chainDraftOf(chain: CommuteChain, lines: ChainLineOption[]): Cha
       alightStationName: leg.alightStationName,
       alightStationOrder: leg.alightStationOrder,
       transferExtraMinutes: leg.transferExtraMinutes,
+      connectionMode: leg.connectionMode,
     })),
   }
 }
@@ -257,12 +265,12 @@ export interface ChainLegWrite {
   alightStationName: string | null
   alightStationOrder: number | null
   transferExtraMinutes: number | null
+  connectionMode: 'walk' | 'cycle' | null
 }
 
-/** 写入所携带的链路——创建与编辑同一个形状。 */
+/** 写入所携带的链路——创建与编辑同一个形状。起点由服务端按 `purpose` 推出。 */
 export interface ChainWrite {
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   legs: ChainLegWrite[]
 }
@@ -367,7 +375,6 @@ export function refuseChainDraft(draft: ChainDraft, lines: ChainLineOption[]): C
 export function chainBodyOf(draft: ChainDraft, lines: ChainLineOption[]): ChainWrite {
   return {
     name: draft.name.trim(),
-    originAnchor: draft.originAnchor,
     purpose: draft.purpose,
     legs: draft.legs.map((leg) => {
       const option = optionOfLeg(leg, lines)!
@@ -380,6 +387,7 @@ export function chainBodyOf(draft: ChainDraft, lines: ChainLineOption[]): ChainW
         alightStationName: leg.alightStationName,
         alightStationOrder: leg.alightStationOrder,
         transferExtraMinutes: leg.transferExtraMinutes,
+        connectionMode: leg.connectionMode,
       }
     }),
   }

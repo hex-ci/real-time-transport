@@ -1,7 +1,6 @@
 import pg from 'pg'
 import { DEFAULT_USER_ID } from '@real-time-transport/shared'
 import type {
-  CommuteChainAnchor,
   CommuteChainPurpose,
   LineDetail,
   UserFavoriteLine,
@@ -88,14 +87,18 @@ export interface StoredCommuteChainLeg {
   alightStationName: string | null
   alightStationOrder: number | null
   transferExtraMinutes: number | null
+  /**
+   * 进入本段的接驳方式。`null` 是「没选过」，不是步行 —— 步行由读侧的计价默认承担，
+   * 而这里必须让两种状态可分。
+   */
+  connectionMode: 'walk' | 'cycle' | null
 }
 
-/** 一条存储的链路及其腿，按最早位置在前。 */
+/** 一条存储的链路及其腿，按最早位置在前。起点不在其中：它由 `purpose` 决定。 */
 export interface StoredCommuteChain {
   id: string
   userId: string
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   displayOrder: number
   createdAt: string
@@ -113,7 +116,6 @@ export type CommuteChainLegInput = Omit<StoredCommuteChainLeg, 'seq' | 'cityCode
 export interface CommuteChainInput {
   userId?: string
   name: string
-  originAnchor: CommuteChainAnchor
   purpose: CommuteChainPurpose
   displayOrder?: number
   legs: CommuteChainLegInput[]
@@ -124,7 +126,6 @@ export interface CommuteChainInput {
  */
 export interface CommuteChainPatch {
   name?: string
-  originAnchor?: CommuteChainAnchor
   purpose?: CommuteChainPurpose
   displayOrder?: number
   legs?: CommuteChainLegInput[]
@@ -147,6 +148,7 @@ export function normalizeCommuteChainLegs(legs: CommuteChainLegInput[]): StoredC
     alightStationName: leg.alightStationName,
     alightStationOrder: leg.alightStationOrder,
     transferExtraMinutes: leg.transferExtraMinutes,
+    connectionMode: leg.connectionMode,
   }))
 }
 
@@ -169,6 +171,11 @@ export function storedCommuteChainLeg(row: Record<string, unknown>): StoredCommu
     alightStationName: stationName(row.alight_station_name),
     alightStationOrder: order(row.alight_station_order),
     transferExtraMinutes: order(row.transfer_extra_minutes),
+    // 两个已知方式之外的取值（旧库缺列、写坏的行）读作「没选过」：
+    // `?? 'walk'` 那类默认值在这里正是错的 —— 缺省的含义是「不知道」，不是步行。
+    connectionMode: row.connection_mode === 'walk' || row.connection_mode === 'cycle'
+      ? row.connection_mode
+      : null,
   }
 }
 
@@ -180,7 +187,6 @@ function storedCommuteChain(
     id: String(row.id),
     userId: String(row.user_id),
     name: String(row.name),
-    originAnchor: row.origin_anchor as CommuteChainAnchor,
     purpose: row.purpose as CommuteChainPurpose,
     displayOrder: Number(row.display_order ?? 0),
     createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : '',
@@ -789,9 +795,9 @@ export class Database {
       try {
         await client.query('BEGIN')
         await client.query(
-          `INSERT INTO commute_chains (id, user_id, name, origin_anchor, purpose, display_order)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [id, userId, input.name, input.originAnchor, input.purpose, displayOrder],
+          `INSERT INTO commute_chains (id, user_id, name, purpose, display_order)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [id, userId, input.name, input.purpose, displayOrder],
         )
         await this.insertLegs(client, id, legs)
         const stored = await this.readChain(client, id)
@@ -810,7 +816,6 @@ export class Database {
       id,
       userId,
       name: input.name,
-      originAnchor: input.originAnchor,
       purpose: input.purpose,
       displayOrder,
       createdAt: this.nextInMemoryCreatedAt(),
@@ -845,7 +850,6 @@ export class Database {
           sets.push(`${column} = $${values.length}`)
         }
         push('name', patch.name)
-        push('origin_anchor', patch.originAnchor)
         push('purpose', patch.purpose)
         push('display_order', patch.displayOrder)
 
@@ -872,7 +876,6 @@ export class Database {
     const record = this.inMemoryChains.get(id)
     if (!record) return null
     if (patch.name !== undefined) record.name = patch.name
-    if (patch.originAnchor !== undefined) record.originAnchor = patch.originAnchor
     if (patch.purpose !== undefined) record.purpose = patch.purpose
     if (patch.displayOrder !== undefined) record.displayOrder = patch.displayOrder
     if (patch.legs !== undefined) record.legs = normalizeCommuteChainLegs(patch.legs)
@@ -925,13 +928,14 @@ export class Database {
         leg.alightStationName,
         leg.alightStationOrder,
         leg.transferExtraMinutes,
+        leg.connectionMode,
       )
-      return `(${Array.from({ length: 10 }, (_, i) => `$${at + i + 1}`).join(', ')})`
+      return `(${Array.from({ length: 11 }, (_, i) => `$${at + i + 1}`).join(', ')})`
     })
 
     await client.query(
       `INSERT INTO commute_chain_legs
-         (chain_id, seq, line_id, line_name, city_code, board_station_name, board_station_order, alight_station_name, alight_station_order, transfer_extra_minutes)
+         (chain_id, seq, line_id, line_name, city_code, board_station_name, board_station_order, alight_station_name, alight_station_order, transfer_extra_minutes, connection_mode)
        VALUES ${tuples.join(', ')}`,
       values,
     )

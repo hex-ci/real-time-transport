@@ -114,7 +114,7 @@ export interface ChainEmptyStateView {
 export interface ChainCardView {
   chainId: string
   name: string
-  /** 「从「家」出发」——链路自己存的起点。 */
+  /** 「从「家」出发」——起点由链路目的推出（上班从家、下班从公司）。 */
   originText: string
   /** 有答案时的答案；链路拒绝时为 null。 */
   conclusion: ChainConclusionView | null

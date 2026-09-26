@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CommuteChainLegSchema,
   CommuteChainSchema,
   CongestionLevelSchema,
   LiveBusSchema,
@@ -14,6 +15,8 @@ import {
   WsClientMessageSchema,
   WsServerMessageSchema,
 } from '../index.js'
+
+import type { CommuteChain } from '../index.js'
 
 describe('Shared Schemas', () => {
   it('validates StationSchema properly', () => {
@@ -261,11 +264,11 @@ describe('Commute chain contract (F10)', () => {
     alightStationName: '乙路',
     alightStationOrder: 7,
     transferExtraMinutes: null,
+    connectionMode: null,
   }
 
   const chain = (over: Record<string, unknown> = {}) => ({
     name: '上班链路',
-    originAnchor: 'home',
     purpose: 'morning',
     legs: [{ ...leg }],
     ...over,
@@ -303,10 +306,23 @@ describe('Commute chain contract (F10)', () => {
     expect(CommuteChainSchema.safeParse(chain({ legs: [] })).success).toBe(false)
   })
 
-  it('keeps the anchor and the purpose to their two known values each', () => {
-    expect(CommuteChainSchema.safeParse(chain({ originAnchor: 'office' })).success).toBe(false)
+  it('keeps the purpose to its two known values', () => {
     expect(CommuteChainSchema.safeParse(chain({ purpose: 'noon' })).success).toBe(false)
-    expect(CommuteChainSchema.parse(chain({ originAnchor: 'work', purpose: 'evening' })).originAnchor).toBe('work')
+    expect(CommuteChainSchema.parse(chain({ purpose: 'evening' })).purpose).toBe('evening')
+  })
+
+  it('neither accepts nor carries the origin anchor — the purpose decides where a chain starts', () => {
+    // 起点由通勤目的决定（上班从家出发、下班从公司出发），故契约里没有这个字段：
+    // 旧调用方仍带着它时，它被丢弃而不是被存下 —— 一条「上班·从公司出发」的矛盾链在契约上无法表达。
+    expect(CommuteChainSchema.parse(chain({ originAnchor: 'work' }))).not.toHaveProperty('originAnchor')
+    expect(CommuteChainSchema.parse(chain())).not.toHaveProperty('originAnchor')
+    // PATCH 同理：带它的补丁改不了任何东西，因为它不再是链路上的一列。
+    expect(UpdateCommuteChainSchema.parse({ originAnchor: 'work' })).not.toHaveProperty('originAnchor')
+    expect(UpdateCommuteChainSchema.parse({ originAnchor: 'work' })).toEqual({})
+
+    // 类型层：`CommuteChain` 上没有这个键 —— 字段回到类型里时，这一行本身就不成立。
+    const noAnchorInType: 'originAnchor' extends keyof CommuteChain ? never : true = true
+    expect(noAnchorInType).toBe(true)
   })
 
   it('rejects a negative transfer time rather than storing it as 0', () => {
@@ -314,6 +330,31 @@ describe('Commute chain contract (F10)', () => {
     expect(CommuteChainSchema.safeParse(chain({
       legs: [{ ...leg, transferExtraMinutes: -1 }],
     })).success).toBe(false)
+  })
+
+  it('carries the connection mode as one of the two ways, or as an explicit null', () => {
+    // 方式决定接驳按哪条路线定价，故它必须是契约的一部分，而不是服务端各自写死的常量。
+    // 形状与 `transferExtraMinutes` 相同：必填、可空 —— 省略它就是一次没说明方式的写入。
+    expect(CommuteChainSchema.parse(chain({ legs: [{ ...leg, connectionMode: 'cycle' }] })).legs[0]!.connectionMode)
+      .toBe('cycle')
+    expect(CommuteChainSchema.parse(chain({ legs: [{ ...leg, connectionMode: 'walk' }] })).legs[0]!.connectionMode)
+      .toBe('walk')
+    expect(CommuteChainSchema.parse(chain()).legs[0]!.connectionMode).toBeNull()
+  })
+
+  it('refuses anything that is not one of the two ways — including the empty string', () => {
+    // 两个已知方式之外的一切都不是方式。空串尤其：它不是「没选过」，那是 `null`；
+    // 把它读成「没选」就是把一个用户没做过的选择当成他的选择。
+    for (const wrong of ['drive', 'bike', 'WALK', '', 0]) {
+      expect(CommuteChainLegSchema.safeParse({ ...leg, connectionMode: wrong }).success,
+        `the contract accepted 「${wrong}」 as a connection mode`).toBe(false)
+    }
+
+    // 省略字段同样被拒：方式是必填可空，不是可选 —— 一个 `.optional()` 会让
+    // 「没选过」与「写侧忘了带」在库里是同一个 NULL，而它们该由同一处写成。
+    const { connectionMode: omitted, ...withoutMode } = { ...leg, connectionMode: null }
+    expect(omitted).toBeNull()
+    expect(CommuteChainLegSchema.safeParse(withoutMode).success).toBe(false)
   })
 
   it('patches the order alone without restating the legs', () => {

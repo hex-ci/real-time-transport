@@ -123,7 +123,6 @@ describe('默认用户 id 在契约层只有一个字面量', () => {
 
     const chain = CommuteChainSchema.parse({
       name: '上班链路',
-      originAnchor: 'home',
       purpose: 'morning',
       legs: [{
         lineId: '010-2-0',
@@ -133,6 +132,7 @@ describe('默认用户 id 在契约层只有一个字面量', () => {
         alightStationName: null,
         alightStationOrder: null,
         transferExtraMinutes: null,
+        connectionMode: null,
       }],
     })
     expect(chain.userId).toBe(DEFAULT_USER_ID)

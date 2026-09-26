@@ -76,7 +76,6 @@ export function chainView(
   return {
     chainId: 'chain-1',
     name: '上班 · 一路换乘',
-    originAnchor: 'home',
     purpose: 'morning',
     deduction,
     ...overrides,

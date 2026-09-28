@@ -243,7 +243,7 @@ const decisionStyle = computed(() => {
             <div class="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60 lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
                 :class="stationPurpose === 'morning'
                   ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
                   : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'"
@@ -255,7 +255,7 @@ const decisionStyle = computed(() => {
               </button>
               <button
                 type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] disabled:opacity-60 lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
+                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
                 :class="stationPurpose === 'evening'
                   ? 'border-violet-500/50 bg-violet-500/15 text-violet-300'
                   : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-violet-500/50 hover:text-violet-300'"

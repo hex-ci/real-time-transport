@@ -209,29 +209,54 @@ describe('the browser side of the anchor path converts nothing', () => {
     return stripComments(readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8'))
   }
 
-  it('carries no coordinate conversion in the picker or the store', () => {
+  /** 锚点这一域的浏览器侧：抓取、索引页、每个锚点自己的页面，以及共用的表。 */
+  const ANCHOR_SOURCES = [
+    'stores/location.store.ts',
+    'views/settings/anchors.vue',
+    'views/settings/anchor-detail.vue',
+    'views/settings/anchor-catalog.ts',
+  ]
+
+  it('carries no coordinate conversion in any file on the anchor path', () => {
     // 唯一转换在服务端 `/settings` PATCH；本侧可达的转换器会与之重复偏移。
-    for (const file of ['stores/location.store.ts', 'views/settings/components/anchor-picker.vue']) {
+    // 搜索来的坐标更是**绝不能**在浏览器里转：它本来就是 GCJ-02（见 PRD §5.4）。
+    for (const file of ANCHOR_SOURCES) {
       expect(source(file), `${file} can convert a coordinate in the browser`)
         .not.toMatch(/wgs84ToGcj02|gcj02ToWgs84|transit-adapter/)
     }
   })
 
   it('sends each anchor under the contract\'s own field names', () => {
-    // picker 以 `latKey`/`lngKey` 命名线上字段，这些名字就是请求体：
-    // 契约改名而本文件没跟上，就会 PATCH 端点不收的字段并静默不存。
-    const picker = source('views/settings/components/anchor-picker.vue')
-    for (const key of ['homeLat', 'homeLng', 'workLat', 'workLng']) {
-      expect(picker, `${key} is missing from the picker`).toContain(key)
+    // 锚点表以 `latKey`/`lngKey`/`placeNameKey`/`sourceKey` 命名线上字段，这些名字就是请求体：
+    // 契约改名而这张表没跟上，就会 PATCH 端点不收的字段并静默不存。
+    const catalog = source('views/settings/anchor-catalog.ts')
+    for (const key of [
+      'homeLat', 'homeLng', 'workLat', 'workLng',
+      'homePlaceName', 'workPlaceName', 'homeAnchorSource', 'workAnchorSource',
+    ]) {
+      expect(catalog, `${key} is missing from the anchor catalog`).toContain(key)
+    }
+    // 逐字段过一遍契约：改名的字段会被 `safeParse` 当场拒掉。
+    for (const key of ['homeLat', 'workLat']) {
       expect(UpdateSettingsSchema.safeParse({ [key]: 39.90931 }).success, key).toBe(true)
     }
+    for (const key of ['homePlaceName', 'workPlaceName']) {
+      expect(UpdateSettingsSchema.safeParse({ [key]: '珠江帝景B区' }).success, key).toBe(true)
+    }
+    for (const key of ['homeAnchorSource', 'workAnchorSource']) {
+      expect(UpdateSettingsSchema.safeParse({ [key]: 'search' }).success, key).toBe(true)
+    }
+    // 而页面自己提交的是它拿到的那一个锚点的字段：表是唯一一处知道字段名的地方。
+    expect(source('views/settings/anchor-detail.vue')).toContain('target.sourceKey')
+    expect(source('views/settings/anchor-detail.vue')).toContain('target.placeNameKey')
   })
 
-  it('labels a simulated grab with a marker of its own, not the vehicle one', () => {
-    const picker = source('views/settings/components/anchor-picker.vue')
-    // GPS 覆写与线路/车辆模拟是两类，因此有自己的属性和措辞。
-    expect(picker).toMatch(/data-anchor-gps-simulation/)
-    expect(picker).not.toMatch(/data-simulation-banner/)
-    expect(picker).toContain('模拟定位')
+  it('页面不再自带模拟定位说明：横幅删了，别让它悄悄长回来', () => {
+    const page = source('views/settings/anchor-detail.vue')
+    // 用户明确不要这一句。抓到的坐标是不是被模拟的，由别处（页面头部的模拟横幅）承担，
+    // 不在这张表单里再说一遍；两类模拟仍不得互相冒充。
+    expect(page).not.toMatch(/data-anchor-gps-simulation/)
+    expect(page).not.toMatch(/data-simulation-banner/)
+    expect(page).not.toContain('模拟定位')
   })
 })

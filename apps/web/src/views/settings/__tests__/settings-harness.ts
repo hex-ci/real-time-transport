@@ -1,4 +1,4 @@
-import { createRenderer, h, nextTick, ssrContextKey, type Component } from 'vue'
+import { createRenderer, h, nextTick, shallowRef, ssrContextKey, type Component } from 'vue'
 import type { Renderer } from 'vue'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { vi } from 'vitest'
@@ -101,6 +101,9 @@ export class HostElement {
     removeProperty(name: string): void { delete (this as any)[name] },
     getPropertyValue(name: string): string { return String((this as any)[name] ?? '') },
   }
+
+  /** 本宿主没有排版，故内容高度是一个数：展开/收起那两拍要读它。 */
+  scrollHeight = 240
 
   offsetParent: HostElement | null = null
 
@@ -439,6 +442,43 @@ export interface MountedHost {
   unmount(): void
 }
 
+/**
+ * 一个把路由参数当**响应式**传入的宿主：`/settings/lines/a` 与 `/settings/lines/b` 是**同一条**
+ * 路由记录，故 vue-router 复用同一个组件实例、只改 props —— 而根 props 在这个宿主里不是响应式的。
+ *
+ * 故「换了编的是哪一条」这件事只能用 `RouterView` 的真实形状来测：一个外层组件持有参数，模板把
+ * 它传给被测组件。`props.value` 一改，Vue 就按新 props 重渲染**同一个实例**（不卸载、不重挂载），
+ * 这正是那条路径。
+ */
+export interface ParamHost extends MountedHost {
+  setParam(value: string): Promise<void>
+}
+
+export async function mountWithParam(
+  component: Component,
+  paramName: string,
+  initial: string,
+  options: MountOptions = {},
+): Promise<ParamHost> {
+  const param = shallowRef(initial)
+  let captured: MountedHost | null = null
+  const wrapper: Component = {
+    setup() {
+      return () => h(component, { [paramName]: param.value })
+    },
+  }
+  const host = await mountComponent(wrapper, options)
+  captured = host
+  return {
+    ...host,
+    setParam: async (value) => {
+      param.value = value
+      await nextTick()
+      await captured!.flush()
+    },
+  }
+}
+
 export interface MountOptions {
   /** 路由，按顺序尝试（最后一个匹配胜出）。一个路由，或它们的一个列表。 */
   routes?: Route | Route[]
@@ -535,7 +575,8 @@ export async function mountComponent(component: Component, options: MountOptions
 
   const renderer = createHostRenderer(teleportTarget)
   const container = new HostElement('#root')
-  const app = renderer.createApp(component, options.props ?? {})
+  const initialProps = options.props ?? {}
+  const app = renderer.createApp(component, initialProps)
   app.use(pinia)
   for (const [name, registered] of Object.entries(options.components ?? {})) {
     app.component(name, registered)
@@ -564,6 +605,12 @@ export async function mountComponent(component: Component, options: MountOptions
         await nextTick()
         await Promise.resolve()
       }
+    },
+    setProps: async (next) => {
+      // 原地改的是**同一份**对象：`createApp` 的根 props 就是这个引用，故路由参数变化
+      // （同一条记录、复用实例）在这里是「改它，再让渲染落定」。
+      Object.assign(initialProps, next)
+      await nextTick()
     },
     unmount: () => app.unmount(),
   }
@@ -632,13 +679,5 @@ export async function type(host: MountedHost, element: HostElement, text: string
   element.value = text
   element.props.onInput?.({ type: 'input', target: element })
   element.dispatchEvent({ type: 'input', target: element })
-  await host.flush()
-}
-
-/** 选择原生 select 的一个选项，如选中一个所上报的那样。 */
-export async function choose(host: MountedHost, element: HostElement, value: string): Promise<void> {
-  element.value = value
-  element.props.onChange?.({ type: 'change', target: element })
-  element.dispatchEvent({ type: 'change', target: element })
   await host.flush()
 }

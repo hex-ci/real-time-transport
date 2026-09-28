@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
-import { DEFAULT_USER_ID, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { DEFAULT_USER_ID, REFRESH_MAX_LINES, vehicleProvenanceOf } from '@real-time-transport/shared'
 import { provenanceLabelOf } from '@/provenance-copy'
+import { announceRefreshCooldown, announceRefreshOutcome, dismissRefreshCooldown } from '@/refresh-toast'
 import { lineLoadStateOf, type LineLoadState } from '@/line-load-state'
 import type {
   CommuteChain,
@@ -80,6 +81,7 @@ export interface RefreshFreshness {
   time: string | null
   mark: string | null
   degraded: boolean
+  /** 那一行全文：时刻连同它是哪一类值。落在界面上的就是它，页面不拆它。 */
   text: string
 }
 
@@ -188,11 +190,10 @@ export function refreshFreshnessOf(reading: RefreshReading | null): RefreshFresh
 }
 
 /**
- * 状态那一行，按界面渲染它所需的两段。
+ * 一条提示的两个字段：`announcement` 是状态本身，`detail` 是它随附的那一段（冷却时就是倒计时）。
  *
- * `announcement` 是状态本身，永不携带秒数：文本每秒都变的 live region 会把一次十三秒的
- * 拒绝播报十三遍。`detail` 是那串倒计时、已经措辞好，使秒数留在 live region 之外，却仍读作
- * 一行。两者都出在这里而不是某个界面，于是没有哪个界面自己去措辞一个状态。
+ * 分成两段是因为冷却那条要按同一个身份逐秒改写自己，而变的是后一段；拼成一句话的那一处只有
+ * 提示模块一个地方，故界面从不自己措辞一个状态。
  */
 export interface RefreshStatusText {
   announcement: string
@@ -200,40 +201,35 @@ export interface RefreshStatusText {
 }
 
 /**
- * 控件就上一次尝试所说的那一行。
+ * 冷却那一条的话：秒数每数一秒都要重新说一次，故它单独一个函数。
  *
- * 三个结局必须都看得见，且任两个读起来不能一样：窗口上还剩等待的拒绝、来源什么都没答、请求
- * 没有到达服务端。后两个就是本应用对「连接断了」的报告 —— 它属于这个控件、属于用户正在看的
- * 地方，而不属于控制台。
+ * 拒绝从不沉默。它说出的秒数被服务端送来的时长托底（`refreshWaitUntilOf`），所以本机时钟看不见的
+ * 窗口仍是一个会被告知的窗口；当应答拒绝了这次按压却根本没有窗口，拒绝就照实说，而不是消失。
+ */
+export function refreshCooldownText(waitSeconds: number): RefreshStatusText {
+  return {
+    announcement: '刷新太频繁',
+    detail: waitSeconds > 0 ? ` · ${waitSeconds} 秒后可刷新` : ' · 请稍后再试',
+  }
+}
+
+/**
+ * 一次按下的结局，按提示要读出的那两段。
  *
- * 拒绝从不沉默。它说出的秒数被服务端送来的时长托底（`refreshWaitUntilOf`），所以本机时钟
- * 看不见的窗口仍是一个会被告知的窗口；当应答拒绝了这次按压却根本没有窗口，拒绝就照实说，而
- * 不是消失。窗口一开它就不再被报告，倒计时靠丢掉这次拒绝来结束它（`refreshTick`）。
+ * 四个结局必须都看得见，且任两个读起来不能一样：窗口上还剩等待的拒绝、来源什么都没答、请求
+ * 没有到达服务端。后两个就是本应用对「连接断了」的报告 —— 它属于用户按下过的地方，而不属于控制台。
  *
- * `wanted` 对 `covered` 使一次被截断的刷新保持诚实：端点限定了单次尝试能点名的线路条数，
- * 所以读得更多的界面只刷新了它最前面的几行，说出来就是「一次部分刷新」与「谎称一次完整刷新」
- * 的分别。
+ * `wanted` 对 `covered` 使一次被截断的刷新保持诚实：端点限定了单次尝试能点名的线路条数，所以读
+ * 得更多的界面只刷新了它最前面的几行，说出来就是「一次部分刷新」与「谎称一次完整刷新」的分别。
  *
- * `targetsRead` 是列表自己的状态，不是界面的：空的 `wanted` 既可能是列表答了却没点名任何
- * 可重读的线路，也可能是没人读过这个列表 —— 后者是关于没人取得过的行的主张。`false` 在这里
- * 什么都不陈述。
+ * 只有结局走到这里。一次没有发出请求的按压（已经有一次在进行，或界面没有点名任何线路）什么都不说。
  */
 export function refreshStatusTextOf(params: {
-  inFlight: boolean
-  outcome: RefreshOutcome | null
+  outcome: RefreshOutcome
   waitSeconds: number
   wanted: number
   covered: number
-  /** 这些目标所依据的列表是否真的被读过。 */
-  targetsRead: boolean
-}): RefreshStatusText | null {
-  if (params.inFlight) return { announcement: '正在刷新…', detail: '' }
-  // 列表里没有可重读的东西：控件照实说，而不是干占位置。
-  if (params.outcome === null && params.wanted === 0) {
-    return params.targetsRead
-      ? { announcement: '暂无正在读取车况的线路', detail: '' }
-      : null
-  }
+}): RefreshStatusText {
   switch (params.outcome) {
     case 'ok':
       return {
@@ -243,16 +239,11 @@ export function refreshStatusTextOf(params: {
         detail: '',
       }
     case 'throttled':
-      return {
-        announcement: '刷新太频繁',
-        detail: params.waitSeconds > 0 ? ` · ${params.waitSeconds} 秒后可刷新` : ' · 请稍后再试',
-      }
+      return refreshCooldownText(params.waitSeconds)
     case 'unavailable':
       return { announcement: '刷新失败 · 未能取到最新数据', detail: '' }
     case 'offline':
       return { announcement: '连接已断开 · 请检查网络', detail: '' }
-    default:
-      return null
   }
 }
 
@@ -395,11 +386,20 @@ export const useTransitStore = defineStore('transit', () => {
     const now = Date.now()
     // 每次 tick 都推动指针，等待不会冻在一个过期的秒数上。
     refreshNow.value = now
-    if (refreshCountdownOpen(refreshWaitUntil.value, now)) return
+    if (refreshCountdownOpen(refreshWaitUntil.value, now)) {
+      // 窗口还关着：那条驻留的提示改说下一秒，而不是让一个说死的秒数变成谎话。只有被拒的那次
+      // 按压有等待可言 —— 一次成功的刷新自己那条话已经说完了。
+      if (refreshOutcome.value === 'throttled') {
+        announceRefreshCooldown(refreshCooldownText(refreshWaitSecondsLeft.value))
+      }
+      return
+    }
     // 没有可数的了：窗口已开，所以 ticker 停下，而不是空转到下一次按压重启它。拒绝只在窗口
     // 关着时报告，所以是这里结束它 —— 读数结束不了，因为「已刷新」说的是界面仍持有的数据。
     refreshTick.pause()
     if (refreshOutcome.value === 'throttled') refreshOutcome.value = null
+    // 窗口一开，那条提示说的等待就不存在了，故它跟着消失。
+    dismissRefreshCooldown()
   }, 1000, { immediate: false })
 
   /**
@@ -416,24 +416,32 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
- * 手动刷新（F11）。两个入口都调用这一个 action：首页点名它每张卡片正在读的线路，线路页点名
- * 它显示的那一条。
- *
- * 解析为「这一次调用」是怎么结束的，或在一次请求都没发出时为 null —— 已经有一次在进行，或
- * 界面没有点名任何可重读的线路。
- *
- * 窗口是服务端的，所以一次被拒的按压像其他答案一样被报告，而不是在这里被拦下。没有读数会不
- * 经端点自己的说明就到达这一侧：时刻与种类都来自应答，到达时什么都不盖本机时钟的戳。
- */
+   * 手动刷新（F11）。三个入口都调用这一个 action：首页点名它每张卡片正在读的线路，链路页点名
+   * 屏幕上那些链路走过的段，线路页点名它显示的那一条。
+   *
+   * 解析为「这一次调用」是怎么结束的，或在一次请求都没发出时为 null —— 已经有一次在进行，或
+   * 界面没有点名任何可重读的线路。
+   *
+   * 覆盖范围也在这里定：端点限定了单次尝试能点名的条数，超出的线路等下一次按下，故这一次说出去的
+   * 是「刷新了其中几条」而不是「全部」。界面只交上来屏幕上有什么。
+   *
+   * 结局在这里说出去一次（`announceRefreshOutcome`）：三个入口共用同一条提示，且一次调用只推一次，
+   * 与界面重渲染无关。
+   *
+   * 窗口是服务端的，所以一次被拒的按压像其他答案一样被报告，而不是在这里被拦下。没有读数会不
+   * 经端点自己的说明就到达这一侧：时刻与种类都来自应答，到达时什么都不盖本机时钟的戳。
+   */
   async function refreshLive(targets: RefreshLiveTarget[]): Promise<RefreshOutcome | null> {
     if (refreshInFlight.value) return null
     if (targets.length === 0) return null
+    const asked = targets.slice(0, REFRESH_MAX_LINES)
     refreshInFlight.value = true
+    let outcome: RefreshOutcome
     try {
       const res = await fetch('/api/transit/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: DEFAULT_USER_ID, lines: targets }),
+        body: JSON.stringify({ userId: DEFAULT_USER_ID, lines: asked }),
       })
       const json = await res.json() as { success: boolean, data?: RefreshLiveResult }
       const result = json.data ?? null
@@ -444,16 +452,24 @@ export const useTransitStore = defineStore('transit', () => {
         refreshReading.value = refreshReadingOf(result, refreshReading.value)
         resumeRefreshTick()
       }
-      refreshOutcome.value = json.success ? 'ok' : res.status === 429 ? 'throttled' : 'unavailable'
+      outcome = json.success ? 'ok' : res.status === 429 ? 'throttled' : 'unavailable'
     }
     catch {
-      // 什么都没读到，窗口也无从得知：控件报连接断开，而不是报一个它看不见的状态。
-      refreshOutcome.value = 'offline'
+      // 什么都没读到，窗口也无从得知：报连接断开，而不是报一个看不见的状态。
+      outcome = 'offline'
     }
     finally {
       refreshInFlight.value = false
     }
-    return refreshOutcome.value
+    refreshOutcome.value = outcome
+    announceRefreshOutcome(outcome, refreshStatusTextOf({
+      outcome,
+      // 指针已在应答到达时推过，故这里读到的就是那个窗口还剩的秒数。
+      waitSeconds: refreshWaitSecondsLeft.value,
+      wanted: targets.length,
+      covered: asked.length,
+    }))
+    return outcome
   }
 
   /**

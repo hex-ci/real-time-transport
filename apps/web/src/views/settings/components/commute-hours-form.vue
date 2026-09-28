@@ -17,6 +17,7 @@
 import { onMounted, shallowRef } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
 import { DEFAULT_COMMUTE_HOURS, type UserSettings } from '@real-time-transport/shared'
+import { runWithFeedback } from '@/action-feedback'
 import { settingsReadOf } from '../index-summary'
 
 /**
@@ -66,19 +67,21 @@ async function saveSettings(): Promise<void> {
   settingsError.value = null
   settingsSaved.value = false
   try {
-    const res = await fetch('/api/transit/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settingsDraft.value),
+    await runWithFeedback('commute-hours-save', async () => {
+      const res = await fetch('/api/transit/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settingsDraft.value),
+      })
+      const json = await res.json()
+      if (!json.success) {
+        throw new Error(json.error || '保存失败')
+      }
+      settingsDraft.value = json.data as UserSettings
+      // 时段现已保存，故表单不再说它们从未被保存过。
+      hoursNeverSaved.value = false
+      settingsSaved.value = true
     })
-    const json = await res.json()
-    if (!json.success) {
-      throw new Error(json.error || '保存失败')
-    }
-    settingsDraft.value = json.data as UserSettings
-    // 时段现已保存，故表单不再说它们从未被保存过。
-    hoursNeverSaved.value = false
-    settingsSaved.value = true
   }
   catch (err) {
     settingsError.value = err instanceof Error ? err.message : '保存失败'
@@ -142,7 +145,7 @@ async function saveSettings(): Promise<void> {
     </div>
     <div class="flex flex-wrap items-center gap-3">
       <button
-        class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
+        class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:px-5 lg:text-base"
         :disabled="settingsSaving"
         @click="saveSettings"
       >

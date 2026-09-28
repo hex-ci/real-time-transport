@@ -11,7 +11,9 @@ import {
   CommuteChainSchema,
   CommuteChainPurposeSchema,
   UpdateCommuteChainSchema,
+  DEFAULT_CITY_CODE,
   groupLineSummaries,
+  type AnchorSource,
   type CommuteProfile,
   type UpdateSettings,
   type UserFavoriteLine,
@@ -87,6 +89,10 @@ type AnchorPatch = {
   homeLng?: number | null
   workLat?: number | null
   workLng?: number | null
+  homePlaceName?: string | null
+  workPlaceName?: string | null
+  homeAnchorSource?: AnchorSource | null
+  workAnchorSource?: AnchorSource | null
 }
 
 const ALREADY_FOLLOWED = '已关注'
@@ -126,10 +132,15 @@ function alreadyFollowedBody(row: UserFavoriteLine): {
   return { success: false, alreadyFollowed: true, error: ALREADY_FOLLOWED, data: row }
 }
 
-/** `/settings` 接受的锚点对：一对是最小的诚实写入，只写一个轴无从换算。 */
+/**
+ * `/settings` 接受的锚点对：一对是最小的诚实写入，只写一个轴无从换算。
+ *
+ * 每个锚点还带地点名与来源两列，它们描述**同一对坐标**，故跟着这一对一起走：
+ * 清空坐标时一并清空（名字与来源说的是一个不再存在的坐标对）。
+ */
 const ANCHOR_PAIRS = [
-  { label: '家', lat: 'homeLat', lng: 'homeLng' },
-  { label: '公司', lat: 'workLat', lng: 'workLng' },
+  { label: '家', lat: 'homeLat', lng: 'homeLng', placeName: 'homePlaceName', source: 'homeAnchorSource' },
+  { label: '公司', lat: 'workLat', lng: 'workLng', placeName: 'workPlaceName', source: 'workAnchorSource' },
 ] as const
 
 /**
@@ -137,6 +148,16 @@ const ANCHOR_PAIRS = [
  *
  * 这是锚点写路径，也是存储坐标换基准的唯一的地方：此后读存储锚点的一切都按 GCJ-02 用、
  * 不做换算。坐标在写入之前按数值校验；成对的 (0, 0) 作为一对拒绝，单轴为 0 合法。
+ *
+ * **按来源决定换不换算**（`docs/PRD.md` §5.4）：
+ *   - `device`（缺省）—— 浏览器上报的原始 WGS-84 设备定位，过 `deviceFixToGcj02` 一次；
+ *   - `search` —— 高德地点搜索返回的坐标，**本身就是 GCJ-02**，原样落库。
+ * 来源随坐标一起存，它就是这个判据的凭据：一次搜索来的坐标若也走换算，会被再挪约 500 m，
+ * 而存下来的仍是一个看着合理的坐标，界面上看不出来。
+ *
+ * 来源缺省（`undefined`）按 `device` 处理，且**据此写下 `device`**：013 之前的调用方
+ * （包括既有测试与任何未跟上的客户端）提交的都是原始设备定位，而一条 PATCH 必须留下
+ * 「这次的坐标是怎么来的」的记录 —— 不写就等于下一次读的人只能猜。
  */
 function anchorPatchToGcj02(body: UpdateSettings): { error: string } | { patch: AnchorPatch } {
   const patch: AnchorPatch = {}
@@ -148,13 +169,26 @@ function anchorPatchToGcj02(body: UpdateSettings): { error: string } | { patch: 
     // 会让另一个完全保持存储的样子。
     patch[pair.lat] = undefined
     patch[pair.lng] = undefined
-    if (lat === undefined && lng === undefined) continue
+    patch[pair.placeName] = undefined
+    patch[pair.source] = undefined
+    if (lat === undefined && lng === undefined) {
+      // 名字与来源描述的是那一对坐标，故没有坐标时它们无处可落。**说出来**而不是静静丢掉：
+      // 一个只带 `homePlaceName` 的 PATCH 若被无声接受，写入方会以为名字存下来了。
+      if (body[pair.placeName] !== undefined || body[pair.source] !== undefined) {
+        return { error: `${pair.label}位置的地点名与来源必须随一对经纬度一起提交` }
+      }
+      continue
+    }
 
     if (lat === null && lng === null) {
       // 显式的 null 对清空锚点。清空是真实操作
       // （用户搬家了），它保持成对的原因与设置相同。
       patch[pair.lat] = null
       patch[pair.lng] = null
+      // 名字与来源描述的是那一对坐标，故随它一起清空：留着一个属于已删坐标的名字，
+      // 会让索引行说出一个库里已不存在的地点。
+      patch[pair.placeName] = null
+      patch[pair.source] = null
       continue
     }
     if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -169,9 +203,14 @@ function anchorPatchToGcj02(body: UpdateSettings): { error: string } | { patch: 
       return { error: `${pair.label}位置坐标为 (0, 0)，通常是定位失败，请重新定位` }
     }
 
-    const converted = deviceFixToGcj02(lng, lat)
-    patch[pair.lat] = converted.lat
-    patch[pair.lng] = converted.lng
+    const source: AnchorSource = body[pair.source] ?? 'device'
+    const stored = source === 'search' ? { lng, lat } : deviceFixToGcj02(lng, lat)
+    patch[pair.lat] = stored.lat
+    patch[pair.lng] = stored.lng
+    patch[pair.source] = source
+    // 名字是搜索来的那一个（设备抓的位置没有名字），故只随 `search` 落库。
+    // 一次设备写入把名字清掉：旧名字会说出一个已被覆盖的坐标。
+    patch[pair.placeName] = source === 'search' ? (body[pair.placeName] ?? null) : null
   }
 
   return { patch }
@@ -348,6 +387,33 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
 
     const origin = deviceFixToGcj02(Number(lng), Number(lat))
     const result = await transitService.reverseGeocode(origin.lng, origin.lat)
+    return { success: true, data: result }
+  })
+
+  /**
+   * F2：地点搜索 —— 把自由文本变成若干候选地点，供「家 / 公司」的锚点页选择。
+   *
+   * 无坐标进出这个边界：`keywords` 是文本，返回的 `lng`/`lat` 是高德自己的 GCJ-02，
+   * 原样下发（客户端把它们原样存回，来源记为 `search`，见 §5.4）。
+   * key 只在服务端 —— 硬约束：绝不能把高德的凭据交给浏览器。
+   *
+   * 三种结局各说各的：
+   *   - `keywords` 为空 → 400。空关键词不是「搜索全部」，它是一次无法表达的搜索；
+   *   - 上游没答上来（无 key、网络、超时、QPS/配额）→ 502，且**不缓存**：一次失败不该
+   *     被读成「没有这个地方」；
+   *   - 上游答了但没有匹配 → 200 与一个空数组。空与失败必须分得开。
+   */
+  app.get('/api/transit/gis/place-search', async (req, reply) => {
+    const { keywords, cityCode } = req.query as Record<string, string>
+    const trimmed = (keywords ?? '').trim()
+    if (!trimmed) {
+      return reply.status(400).send({ success: false, error: 'keywords 不能为空' })
+    }
+
+    const result = await transitService.searchPlaces(trimmed, cityCode || DEFAULT_CITY_CODE)
+    if (result === null) {
+      return reply.status(502).send({ success: false, error: '地点搜索暂时不可用，请稍后重试' })
+    }
     return { success: true, data: result }
   })
 

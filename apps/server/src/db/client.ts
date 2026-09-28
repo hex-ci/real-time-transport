@@ -1,6 +1,7 @@
 import pg from 'pg'
 import { DEFAULT_USER_ID } from '@real-time-transport/shared'
 import type {
+  AnchorSource,
   CommuteChainPurpose,
   LineDetail,
   UserFavoriteLine,
@@ -14,6 +15,11 @@ const { Pool } = pg
  * 锚点在写入时已是 GCJ-02，此后读它的每一处都按 GCJ-02 用、不做换算。缺失的锚点是 `null`，
  * 绝不是 0：(0, 0) 是真实坐标，与用户存过的锚点无法区分。
  *
+ * 每个锚点还带两列描述**已存的坐标对**：地点名（搜索来的，供界面认人）与来源
+ * （`device` | `search`，写入时换不换算的凭据，见 `docs/PRD.md` §5.4）。
+ * 两者都可为 `null`，而 `null` 就是「没记过」—— 不是 `device`：读侧对「要不要换算」的
+ * 答案在两种情况下相同（存下来的锚点一律已是 GCJ-02），但那是读侧的默认，不是这一列的取值。
+ *
  * 用户从未选择过的时刻是 `null`。`null` 不是时间，也绝不能渲染成一个时间：只存锚点而创建的
  * 行不持有任何时段，读侧就按这样报告，而不是填上内置时段。
  */
@@ -26,12 +32,17 @@ export interface StoredUserSettings {
   homeLng: number | null
   workLat: number | null
   workLng: number | null
+  homePlaceName: string | null
+  workPlaceName: string | null
+  homeAnchorSource: AnchorSource | null
+  workAnchorSource: AnchorSource | null
 }
 
 /**
  * 从未保存过任何东西的用户起步的那一行：包括四个时刻在内，每个字段都是 null。
  *
  * 内置时段不能作为起点，否则只写了锚点的写入会把它存成用户自己选的样子。
+ * 地点名与来源同理：没有坐标就没有可描述的坐标对。
  */
 const EMPTY_USER_SETTINGS: StoredUserSettings = {
   morningStart: null,
@@ -42,6 +53,10 @@ const EMPTY_USER_SETTINGS: StoredUserSettings = {
   homeLng: null,
   workLat: null,
   workLng: null,
+  homePlaceName: null,
+  workPlaceName: null,
+  homeAnchorSource: null,
+  workAnchorSource: null,
 }
 
 /**
@@ -62,6 +77,29 @@ export function storedHHMM(value: unknown): string | null {
   if (value === null || value === undefined) return null
   const text = String(value)
   return text.length === 0 ? null : text.slice(0, 5)
+}
+
+/**
+ * 存储的锚点来源，或 null。**认不出的取值读成 null，绝不取整为 `device`**。
+ *
+ * 只有 013 的 CHECK 圈定的两个词是来源：认不出的值（手写进库的、或将来新增的第三个词）
+ * 说明写它的人用的是这一列当时还不认识的说法，而按 `device` 读它就会把一次搜索来的坐标
+ * 送进 `deviceFixToGcj02` —— 那正是 §5.4 要防的那次多余换算。导出原因同 `storedCoord`。
+ */
+export function storedAnchorSource(value: unknown): AnchorSource | null {
+  return value === 'device' || value === 'search' ? value : null
+}
+
+/**
+ * 存储的地点名，或 null。
+ *
+ * 空串读成 null：它不是「一个空的名字」，而是这一项没被写下（`TEXT` 列没有 CHECK 拦空串，
+ * 故读侧自己按「没有」读）。界面据此显示坐标，绝不显示一个空白的名字行。
+ */
+export function storedPlaceName(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  const text = String(value).trim()
+  return text === '' ? null : text
 }
 
 /**
@@ -648,7 +686,8 @@ export class Database {
       try {
         const res = await this.pool.query(
           `SELECT morning_start, morning_end, evening_start, evening_end,
-                  home_lat, home_lng, work_lat, work_lng
+                  home_lat, home_lng, work_lat, work_lng,
+                  home_place_name, work_place_name, home_anchor_source, work_anchor_source
              FROM user_settings WHERE user_id = $1`,
           [userId],
         )
@@ -665,6 +704,12 @@ export class Database {
           homeLng: storedCoord(row.home_lng),
           workLat: storedCoord(row.work_lat),
           workLng: storedCoord(row.work_lng),
+          // 地点名与来源描述的是**已存的坐标对**，故各自独立读取：名字为空就是没有名字
+          // （界面显示坐标），来源认不出就是没记过（读侧按不换算读，见 `storedAnchorSource`）。
+          homePlaceName: storedPlaceName(row.home_place_name),
+          workPlaceName: storedPlaceName(row.work_place_name),
+          homeAnchorSource: storedAnchorSource(row.home_anchor_source),
+          workAnchorSource: storedAnchorSource(row.work_anchor_source),
         }
       }
       catch {
@@ -691,8 +736,9 @@ export class Database {
       await this.pool.query(
         `INSERT INTO user_settings
            (user_id, morning_start, morning_end, evening_start, evening_end,
-            home_lat, home_lng, work_lat, work_lng, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            home_lat, home_lng, work_lat, work_lng,
+            home_place_name, work_place_name, home_anchor_source, work_anchor_source, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
          ON CONFLICT (user_id) DO UPDATE SET
            morning_start = EXCLUDED.morning_start,
            morning_end = EXCLUDED.morning_end,
@@ -702,6 +748,10 @@ export class Database {
            home_lng = EXCLUDED.home_lng,
            work_lat = EXCLUDED.work_lat,
            work_lng = EXCLUDED.work_lng,
+           home_place_name = EXCLUDED.home_place_name,
+           work_place_name = EXCLUDED.work_place_name,
+           home_anchor_source = EXCLUDED.home_anchor_source,
+           work_anchor_source = EXCLUDED.work_anchor_source,
            updated_at = NOW()`,
         [
           userId,
@@ -713,6 +763,10 @@ export class Database {
           merged.homeLng,
           merged.workLat,
           merged.workLng,
+          merged.homePlaceName,
+          merged.workPlaceName,
+          merged.homeAnchorSource,
+          merged.workAnchorSource,
         ],
       )
     }

@@ -40,7 +40,12 @@ function codeOf(source: string): string {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 }
 
-const CARD = read('../components/commute-chain-card.vue')
+/**
+ * 渲染这份列表的页面。拖动排序住在**列表页**（`/settings/chains`）上：编辑器搬到
+ * `/settings/chains/new` 与 `/settings/chains/:chainId` 之后，列表与它的拖动留在这里
+ * （见 `docs/PRD.md` §4.1「列表页与编辑页的分工」）。
+ */
+const LIST = read('../chains.vue')
 const ORDER_LIST = read('../components/drag-order-list.vue')
 
 function chain(id: string, displayOrder: number, name: string, createdAt = '2026-01-01T00:00:00.000Z'): CommuteChain {
@@ -127,14 +132,16 @@ describe('F10 链路列表由拖动排序', () => {
     host.unmount()
   })
 
-  it('手柄的触控目标不小于 44px，且在自己的行里是可命名的按钮', async () => {
+  it('手柄的触控目标不小于 44px，且是两个方向都够大的手指落点', async () => {
     const host = await mountChainList()
 
     // 必须先有手柄，下面每一条才有东西可量 —— 空循环会「通过」一个不存在的控件。
     const found = handles(host)
     expect(found, 'the rows render a drag handle, or this check has nothing to measure').toHaveLength(CHAINS.length)
     for (const handle of found) {
-      expect(handle.tag).toBe('button')
+      // 手柄不再是按钮：它是**行内**的一个手指落点，点它不做任何事（`@click.stop` 只是不让
+      // 那次按压冒泡成一次导航），而真正的导航由整行那个链接承担 —— 与关注线路列表同一套做法。
+      expect(handle.tag).toBe('span')
       const classes = String(handle.props.class ?? '')
       // 移动端只有手指：手柄是唯一的手指落点，故两个方向都要够大。
       expect(classes, `the drag handle is smaller than the house touch target: ${classes}`)
@@ -147,18 +154,25 @@ describe('F10 链路列表由拖动排序', () => {
     host.unmount()
   })
 
-  it('手柄的可访问名字里带着它做的事，不是只有图标', async () => {
+  it('手柄对读屏器是隐形的（拖动是纯指针手势），而行链接自己带着可访问名字', async () => {
+    // 手柄从可访问树里被移出：它做的是拖拽，而那是屏幕阅读器用户没有的手势；
+    // 把一个做不了的控件念出来只会多一个够不着的东西。这一行的名字由整行那个链接承担。
     const host = await mountChainList()
 
     const found = handles(host)
     expect(found, 'the rows render a drag handle, or this check has nothing to name').toHaveLength(CHAINS.length)
     for (const handle of found) {
-      const name = String(handle.props['aria-label'] ?? '')
-      expect(name, 'the drag handle has no accessible name').not.toBe('')
-      // 名字包含它印出（或标注）的文本，且说明这是拖动排序。
-      expect(name).toContain('拖动')
-      expect(name).toContain('排序')
+      expect(String(handle.props['aria-hidden'])).toBe('true')
+      // 指针用户仍要认得出它：`title` 说的是它做的事（「拖动调整顺序」），不是只有图标。
+      expect(String(handle.props.title)).toContain('拖动')
+      expect(String(handle.props.title)).toContain('顺序')
     }
+
+    // 行链接：每一行的 `li` 里那一个。页面上另有「新增链路」那个链接，故按行取而不是按全页取。
+    const rowLinks = host.nodes(item => item.tag === 'a' && item.parent?.tag === 'li')
+    expect(rowLinks.length, 'the rows render no link to open').toBe(CHAINS.length)
+    const names = rowLinks.map(link => host.textOf(link).trim())
+    expect(names.filter(name => name === ''), 'a row link has no accessible name').toEqual([])
     host.unmount()
   })
 
@@ -177,12 +191,13 @@ describe('F10 链路列表由拖动排序', () => {
 
   it('手柄由与关注线路列表共用的那一份拖动实现提供', async () => {
     // 一份实现：卡片经同一个组件渲染它的行，而不是自己再接一遍拖拽库。
-    expect(codeOf(CARD)).toContain('import DragOrderList from \'./drag-order-list.vue\'')
-    expect(codeOf(CARD)).toContain('<DragOrderList')
-    expect(codeOf(CARD)).toContain('@move="onReorder"')
+    expect(codeOf(LIST)).toContain('import { BackToSettings, DragOrderList } from \'./components\'')
+    expect(codeOf(LIST)).toContain('<DragOrderList')
+    expect(codeOf(LIST)).toContain('@move="onReorder"')
     // 关注线路列表引用的是同一个文件，不是第二份复制品。
-    expect(codeOf(read('../lines.vue'))).toContain('import { BackToSettings, DragOrderList, RemovalDialog, StationPinPicker } from \'./components\'')
-    expect(codeOf(read('../lines.vue'))).toContain('<DragOrderList :items="cityFavorites" @move="onReorder">')
+    expect(codeOf(read('../lines.vue'))).toContain('import { BackToSettings, DragOrderList } from \'./components\'')
+    expect(codeOf(read('../lines.vue'))).toContain('<DragOrderList')
+    expect(codeOf(read('../lines.vue'))).toContain('@move="onReorder"')
     expect(codeOf(ORDER_LIST)).toContain('handle="[data-drag-handle]"')
     expect(codeOf(ORDER_LIST)).toContain('VueDraggable')
   })
@@ -225,12 +240,13 @@ describe('F10 链路列表由拖动排序', () => {
   })
 
   it('被拒绝的顺序写入绝不沉默', async () => {
-    // 拖放由共用的容器发出、由卡片接住：那次写入的接线在卡片上，服务端的原因逐字留下并印出 ——
+    // 拖放由共用的容器发出、由卡片接住：那次写入的接线在卡片上，且经提示那一处接缝出去 ——
     // 写入被拒时列表已弹回存储顺序，一声不响会像那次拖拽从未发生。
-    const card = codeOf(CARD)
-    expect(card).toContain('await transitStore.moveCommuteChain(movedId, anchorId)')
-    expect(card).toContain('orderError.value = err instanceof Error ? err.message')
-    expect(card).toContain('v-if="orderError"')
+    const list = codeOf(LIST)
+    expect(list).toContain(`runWithFeedback('chain-reorder'`)
+    expect(list).toContain('() => transitStore.moveCommuteChain(movedId, anchorId)')
+    expect(list).toContain('orderError.value = err instanceof Error ? err.message')
+    expect(list).toContain('v-if="orderError"')
 
     // 而被拒的写入确实把顺序弹回存储里的那个（store 自己那一侧）。
     const host = await mountChainList()

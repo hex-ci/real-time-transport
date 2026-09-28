@@ -7,10 +7,10 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import LinesPage from '../lines.vue'
+import FavoriteEditorPage from '../favorite-editor.vue'
 
 /**
- * 关注线路页的上车点面板：一个方向的站点读取有三种事实，各说各的。
+ * 关注线路的**编辑页**（`/settings/lines/:favoriteId`）里的上车点面板：一个方向的站点读取有三种事实，各说各的。
  *
  * 这一页的读取由 `line-stops.ts` 拥有（设置的车链页共用它），所以状态也在那里判，而不是这一页
  * 从「站表长不长」反推。被判错的那一次是这样的：上游答了这条线路 —— 有线路名、没有站表，是
@@ -21,10 +21,13 @@ import LinesPage from '../lines.vue'
  *  - 读在路上：`正在加载站点…`（关于读取，不是关于这个方向）；
  *  - 读了、答的是空表：`该方向暂无站点数据，无法设置上车点`（与首页卡片对同一件事的说法
  *    「本方向暂无站点数据…」共用「暂无站点数据」这个事实子句，各自只说自己的后果）；
- *  - 没答上来：`未读到该方向的站点数据，暂时无法设置上车点`（未读到是这套应用对「读取没回答」
- *    的说法；这时也不能说这个方向没有数据 —— 那是关于上游数据的主张）。
+ *  - 没答上来：`未读到该方向的站点数据，暂时无法设置上车点`（未读到是这套应用对「读取没回答」的
+ *    说法；这时也不能说这个方向没有数据 —— 那是关于上游数据的主张）。
  *
  * 正对照一并钉住：真的答了站表的方向，选择器里的站点照旧列出来。
+ *
+ * 这一段原先住在列表行的展开区里，随「列表页 + 独立编辑页」搬到这一页：内容与三态判据一字未改，
+ * 变的只是它挂在哪一页上（挂载那一行也随之下移到 `mountEditor`）。
  */
 
 vi.mock('vue-router', () => ({
@@ -84,16 +87,13 @@ function routes(answer: Answer = { kind: 'empty' }): Route[] {
 }
 
 async function mountLines(answer: Answer = { kind: 'empty' }): Promise<MountedHost> {
-  const host = await mountComponent(LinesPage, {
+  const host = await mountComponent(FavoriteEditorPage, {
+    props: { favoriteId: FAVOURITE.id },
     routes: routes(answer),
     components: { RouterLink: { template: '<a><slot /></a>' } },
   })
   await host.flush()
-  // 展开那一行：面板只在展开时渲染。
-  await press(host, host.node(
-    item => item.tag === 'button' && host.textOf(item).includes('快线 1 路'),
-    'the followed-line row',
-  ))
+  // 编辑页没有展开态：面板就是这一页的内容，故这里不按任何东西。
   return host
 }
 

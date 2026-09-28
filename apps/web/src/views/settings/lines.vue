@@ -1,63 +1,49 @@
 <script setup lang="ts">
 /**
- * 关注线路：搜索一条线路、关注它，并编辑每条已关注线路自己的通勤方向与上车点。
+ * 关注线路：搜索一条线路、关注它，并在一屏里看到已关注的那些。
+ *
+ * 它是**列表页**：搜索、关注、拖动排序，以及每行一个进编辑页的入口。行内不放编辑控件 ——
+ * 方向与上车点在 `/settings/lines/:favoriteId` 那一页里改（见 `docs/PRD.md` §4.1
+ * 「列表页与编辑页的分工」）。就地展开会让页面高度随编辑态跳动、一次只能编一个，
+ * 而拖动排序还得跳过编辑中的那一行。
  *
  * 列表的措辞对它的读取可能留下的三种状态穷尽——空、仍在读取、以及带重试的失败状态
  * （`line-stops.ts` 的 `favoritesRead`）——「暂无关注线路」只有在读取真的作答后才可达。
  *
- * 它提供上车点的站点列表来自 `line-stops.ts`，与通勤链路共享，
- * 故一段链路绝不会被提供本卡片认为不可用的站点。
+ * 行印出的摘要是**存储值**：哪个方向的站、以及它在那个方向的站序（`favorite-slots.ts`），
+ * 与编辑页里说同一对站的那些句子共用同一份判断。
  */
 import { shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import {
-  AccordionContent,
-  AccordionHeader,
-  AccordionItem,
-  AccordionRoot,
-  AccordionTrigger,
-  RadioGroupItem,
-  RadioGroupRoot,
-} from 'reka-ui'
-import { ChevronDown, GripVertical, Info, MapPin, RefreshCw, TriangleAlert, X } from '@lucide/vue'
-import type { LineGroup, Station, UserFavoriteLine } from '@real-time-transport/shared'
-import {
-  commuteDirectionFor,
-  effectiveCommuteDirection,
-  isBidirectional,
-  placeBoardStop,
-  resolveBoardStopRef,
-} from '@real-time-transport/shared/line-group'
-import type { BoardStopPlacement } from '@real-time-transport/shared/line-group'
-import type { ReadValue } from '@/read-state'
+import { ChevronRight, GripVertical, MapPin, RefreshCw, TriangleAlert } from '@lucide/vue'
+import type { LineGroup, UserFavoriteLine } from '@real-time-transport/shared'
+import { isBidirectional } from '@real-time-transport/shared/line-group'
 import { followedLinesUnreadableText } from '@/read-state'
+import { runWithFeedback } from '@/action-feedback'
 import { useCityStore } from '@/stores/city.store'
 import { useTransitStore } from '@/stores/transit.store'
-import { BackToSettings, DragOrderList, RemovalDialog, StationPinPicker } from './components'
+import { BackToSettings, DragOrderList } from './components'
+import { useFavoriteSlots } from './favorite-slots'
 import { useLineStops } from './line-stops'
-import type { StationChoice } from './types'
 
 const transitStore = useTransitStore()
 const cityStore = useCityStore()
 const { favorites } = storeToRefs(transitStore)
 
+const stops = useLineStops()
+
 const {
   cityFavorites,
   favoritesRead,
   readFavorites,
-  stopsRead,
-  stopsOf,
-  directionLabels,
-  pinKey,
-  directionOptions,
-} = useLineStops()
+} = stops
+
+const { stopSummary } = useFavoriteSlots(stops)
 
 const searchKeyword = shallowRef('')
 const searchResults = shallowRef<LineGroup[]>([])
 const searched = shallowRef(false)
 const lastKeyword = shallowRef('')
-
-const pinError = shallowRef<string | null>(null)
 
 /**
  * 关注集合没有列表可展示时，本卡片说什么。
@@ -67,166 +53,6 @@ const pinError = shallowRef<string | null>(null)
  * 只有空状态是关于存了什么；失败状态是关于那次读取，并携带唯一能改变它的重试。
  */
 const unreadableNote = followedLinesUnreadableText('暂时无法显示已关注的线路')
-
-/** 该目的所乘坐的方向，由用户选定。在他们挑之前为 null。 */
-function chosenDirection(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
-  return commuteDirectionFor(fav, purpose)
-}
-
-/**
- * 选择器列出其站点的方向。
- *
- * 与其他每个视图同一条规则，故选择器的站点来源绝不会与首页卡为该目的渲染的内容不一致。
- */
-function pickerDirection(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): 0 | 1 | null {
-  return effectiveCommuteDirection(fav, purpose)
-}
-
-/** 某个目的所乘坐方向的站点；该方向作答前为空。 */
-function purposeStations(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): Station[] {
-  return stopsOfPurpose(fav, purpose) ?? []
-}
-
-/**
- * 这个目的所要的那个方向的读取状态，或 null（还没选方向：没有请求，也没有结果）。
- *
- * 面板的三种说法都从这里来，不再从「站表长不长」推：读在路上、读了但没有站、没答上来是三个
- * 不同的事实，各自的句子不同。先前用「长度是 0」当加载中，于是一个真的答了空表的方向永远停在
- * 「正在加载站点…」上 —— 那句话是关于读取的，不是关于这个方向的。
- */
-function purposeStopsRead(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): ReadValue<Station[]> | null {
-  const dir = pickerDirection(fav, purpose)
-  return dir === null ? null : stopsRead(fav, dir)
-}
-
-/** API 为该方向**作答**出的站点；尚未作答时为 null。 */
-function stopsOfPurpose(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): Station[] | null {
-  const dir = pickerDirection(fav, purpose)
-  return dir === null ? null : stopsOf(fav, dir)
-}
-
-/**
- * 该目的的方向是否没有站点可提供——因为 API 已作答且一个都没列。
- *
- * 只有**答案**为真：仍在途的读取与完全没作答的读取各保留自己的措辞。「这个方向暂无站点数据」
- * 是对该方向的断言，而在它线路的详情带着空站点列表到达之前，没人做过这个断言。
- */
-function stationsUnavailable(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): boolean {
-  const stops = stopsOfPurpose(fav, purpose)
-  return stops !== null && stops.length === 0
-}
-
-/**
- * 该目的已存的站落在选择器正在展示的那个方向的何处——或为何无法放在那里。
- *
- * 该站按它存储的那一对读取（站名 + 站序），并由唯一那条共享规则定位：已存的站序只定位它
- * 自己的站；而只留了站名的旧记录，仅当该站名在本方向只出现一次时才能定位，否则**不可用**
- * （绝不取首个匹配，那正是 第36站 变成 第1站 的来路）。
- * `undefined` 表示列表还没读到，那是未知而非无服务。
- */
-function boardStopPlacement(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): BoardStopPlacement {
-  const stop = resolveBoardStopRef(fav, purpose)
-  const dir = pickerDirection(fav, purpose)
-  if (dir === null || !fav.id) return placeBoardStop(undefined, stop)
-  // 该方向作答且没有站点：面板自己会这么说，
-  // 故此处不是声称该站无服务的地方。
-  if (stationsUnavailable(fav, purpose)) return placeBoardStop(undefined, stop)
-  // 读取没答上来时 `stopsOf` 给 null，`placeBoardStop` 把它读成 not-loaded（还没有这份事实），
-  // 只有真的答了才拿它那张表去定位这一对。
-  return placeBoardStop(stopsOf(fav, dir) ?? undefined, stop)
-}
-
-/**
- * 面板必须就这个已存的站说什么；没有可说时为 null。
- *
- * 每个原因一句话，因为它们是不同的原因，而其中只有一个是本方向不服务的站：出现两次的站名
- * **不是**用「不在本方向停靠」来回答的（它确实停那里——两次），而列表不再持有的已存站序
- * 是一次重编号，不是无服务的站。错误的原因会把用户送去修错的东西。
- */
-function boardStopNotice(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): string | null {
-  const placement = boardStopPlacement(fav, purpose)
-  if (placement.state === 'absent') return `「${placement.name}」不在本方向停靠，请重选`
-  if (placement.state === 'stale') {
-    return `「${placement.name} 第${placement.order}站」在本方向已不存在，请重选`
-  }
-  if (placement.state === 'ambiguous') {
-    return `「${placement.name}」在本方向有 ${placement.orders.length} 站同名，无法确定是哪一站，请重选`
-  }
-  return null
-}
-
-/**
- * 已存的站作为选择器自己的值：该行持有的那一对。
- *
- * 是这一对而不是站名：仅站名无法解析回列表，而选择器的触发器读站序来说**两个**同名站里被
- * 固定的是哪一个。旧记录的站序为 null，触发器就只渲染站名——而该站名出现两次时，渲染为
- * 琥珀色，并在旁边由 `boardStopNotice` 说明原因。
- */
-function pinnedChoice(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): StationChoice | null {
-  return resolveBoardStopRef(fav, purpose)
-}
-
-/**
- * 两个目的乘坐**同一**物理方向时的中性提示。
- *
- * 允许，而非阻止：线性线路上不可能（不能同时往两个方向走），但环线存在、用户可能有理由，
- * 而且下游没有东西假设两者不同。点名方向让这种重叠一眼可见，
- * 而不是留给用户去比对两个区块。
- *
- * 只有两个方向可选时才有此提示：单方向线路上同一个值就是唯一的值，
- * 故「选另一个方向」会是用户无法照做的建议。
- */
-function sameDirectionNote(fav: UserFavoriteLine): string | null {
-  if (directionOptions(fav).length < 2) return null
-  const morning = effectiveCommuteDirection(fav, 'morning')
-  const evening = effectiveCommuteDirection(fav, 'evening')
-  if (morning === null || morning !== evening) return null
-  const label = directionLabels.value[pinKey(fav.id!, morning)]
-  return label
-    ? `上班和下班都是「${label}」，返程通常应选另一个方向`
-    : '上班和下班是同一方向，返程通常应选另一个方向'
-}
-
-/**
- * 记录选择器报告的站。
- *
- * 值**就是**选择器挑的那一对（站名 + 站序），并按一对写入：仅站名无法定位回一个方向的
- * 站点列表。清空时把这一对作为 null 送出。
- */
-async function onPinChange(
-  fav: UserFavoriteLine,
-  purpose: 'morning' | 'evening',
-  choice: StationChoice | null,
-): Promise<void> {
-  pinError.value = null
-  try {
-    await transitStore.setBoardStop(fav.id!, purpose, choice)
-  }
-  catch (err) {
-    pinError.value = err instanceof Error ? err.message : '上车点保存失败'
-  }
-}
-
-/**
- * 记录某个目的所乘坐的方向。
- *
- * 新方向不服务该站时，上车点刻意保持不动：那是真实情况（站只在其中一个方向存在），
- * 而用户手打的选择值得保持可见、好让他自己判断，而不是在他脚下被删掉。随后
- * `boardStopNotice` 会标记它——而这一对是一个存储值，故新方向绝不会按站名重新解析它。
- */
-async function onDirectionChange(
-  fav: UserFavoriteLine,
-  purpose: 'morning' | 'evening',
-  direction: 0 | 1,
-): Promise<void> {
-  pinError.value = null
-  try {
-    await transitStore.updateCommuteSlot(fav.id!, purpose, { direction })
-  }
-  catch (err) {
-    pinError.value = err instanceof Error ? err.message : '方向保存失败'
-  }
-}
 
 /** 上一次排序写入的失败，好让被拒绝的拖放绝不沉默。 */
 const orderError = shallowRef<string | null>(null)
@@ -241,7 +67,7 @@ const orderError = shallowRef<string | null>(null)
 async function onReorder(movedId: string, anchorId: string): Promise<void> {
   orderError.value = null
   try {
-    await transitStore.moveFavorite(movedId, anchorId)
+    await runWithFeedback('favorite-reorder', () => transitStore.moveFavorite(movedId, anchorId))
   }
   catch (err) {
     orderError.value = err instanceof Error ? err.message : '顺序保存失败'
@@ -280,16 +106,26 @@ async function addFavorite(item: LineGroup): Promise<void> {
   if (!primary) return
   const other = item.up ? item.down : item.up
 
-  const followed = await transitStore.addFavorite({
-    lineId: primary.lineId,
-    lineName: item.lineName,
-    preferredDirection: primary.direction,
-    reverseLineId: other ? other.lineId : undefined,
-    cityCode: item.cityCode || cityStore.currentCode,
-  })
-  // 被拒绝的关注（该线路已关注：每条线路一行）必须把被搜索的那一行
-  // 留在屏幕上，好让它自己的控件陈述结果。
-  if (!followed) return
+  try {
+    // 被拒绝的关注（该线路已关注：每条线路一行）必须把被搜索的那一行
+    // 留在屏幕上，好让它自己的控件陈述结果。
+    if (!await runWithFeedback(
+      'favorite-add',
+      () => transitStore.addFavorite({
+        lineId: primary.lineId,
+        lineName: item.lineName,
+        preferredDirection: primary.direction,
+        reverseLineId: other ? other.lineId : undefined,
+        cityCode: item.cityCode || cityStore.currentCode,
+      }),
+      { name: item.lineName },
+    )) return
+  }
+  catch {
+    // 这一行没有内联的错误位：那一次失败由提示说出，而搜索结果照旧留在屏幕上 ——
+    // 一次被拒的写入绝不被当成「已经关注」而清掉用户刚搜到的那一行。
+    return
+  }
   searchResults.value = []
   searchKeyword.value = ''
   searched.value = false
@@ -302,75 +138,9 @@ watch(() => cityStore.currentCode, () => {
   searched.value = false
 })
 
-/**
- * 哪些关注项的站点编辑器是打开的，用单元素数组是因为 AccordionRoot 的单开模式以这种方式
- * 报告它的值。一次一个：每个展开的行携带两个组合框，
- * 让多个同时打开会重建紧凑行本来要避免的那堵控件墙。
- */
-const expandedFavorite = shallowRef<string[]>([])
-
-/** 排队等待移除的关注项，以及上一次尝试的失败。 */
-const pendingRemoval = shallowRef<UserFavoriteLine | null>(null)
-const removingFavorite = shallowRef(false)
-const removalError = shallowRef<string | null>(null)
-
-function requestRemoval(fav: UserFavoriteLine): void {
-  removalError.value = null
-  pendingRemoval.value = fav
-}
-
-/**
- * 取消关注排队的目标，并让对话框保持到请求落定。
- *
- * 确认控件是普通 button，不是 reka-ui 的 `AlertDialogAction`：后者**就是** `DialogClose`，
- * 它自己的点击处理会关闭对话框，而 Vue 在消费者的 fallthrough 处理之前运行组件自己的处理
- * ——关闭先清空了 `pendingRemoval`，故处理读到 `null` 并直接返回，永远没发出 DELETE。
- *
- * 显式关闭也让按钮的进行中状态诚实：请求在途时它保持禁用并显示「处理中…」，
- * 失败则让对话框带着原因开着，而不是在动作中途消失。
- */
-async function confirmRemoval(): Promise<void> {
-  const target = pendingRemoval.value
-  if (!target || removingFavorite.value) return
-  removalError.value = null
-  removingFavorite.value = true
-  try {
-    await transitStore.removeFavorite(target.id || target.lineId)
-    pendingRemoval.value = null
-  }
-  catch (err) {
-    removalError.value = err instanceof Error ? err.message : '取消关注失败'
-  }
-  finally {
-    removingFavorite.value = false
-  }
-}
-
-/**
- * 每个目的一行，使折叠的行仍回答它存在的那个问题：首页卡会报哪几个站。
- *
- * 它**不得**做的，是把本行自己的方向定位不到的站当成已定来印：「🏠 和平东桥」放在该站名
- * 出现两次的方向旁，会在卡片说不出可行动内容时告诉用户某个站已就绪。每个原因读作它自己，
- * 而这一对只在列表确实定位到它时才印出。
- */
-function stopSummaryPart(fav: UserFavoriteLine, purpose: 'morning' | 'evening'): string | null {
-  const mark = purpose === 'morning' ? '🏠' : '🏢'
-  const stop = resolveBoardStopRef(fav, purpose)
-  if (!stop) return null
-  const placement = boardStopPlacement(fav, purpose)
-  if (placement.state === 'placed') return `${mark} ${placement.name} 第${placement.order}站`
-  if (placement.state === 'ambiguous') return `${mark} ${placement.name}（同名${placement.orders.length}站）`
-  if (placement.state === 'stale') return `${mark} ${placement.name} 第${placement.order}站（站序已变）`
-  if (placement.state === 'absent') return `${mark} ${placement.name}（不在本方向）`
-  // 还没读到：站名是该行持有的内容，而它落在哪里一无所知。
-  return `${mark} ${stop.name}`
-}
-
-function stopSummary(fav: UserFavoriteLine): string {
-  const parts = (['morning', 'evening'] as const)
-    .map(purpose => stopSummaryPart(fav, purpose))
-    .filter((part): part is string => part !== null)
-  return parts.length > 0 ? parts.join(' · ') : '未设置上车点'
+/** 一条关注行的编辑页地址。**绝不发明默认值**：认不出的 id 由那一页自己说不存在。 */
+function editorHref(item: UserFavoriteLine): string {
+  return `/settings/lines/${item.id}`
 }
 </script>
 
@@ -447,7 +217,7 @@ function stopSummary(fav: UserFavoriteLine): string {
             </div>
           </div>
           <button
-            class="min-h-[44px] shrink-0 rounded-lg bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-cyan-500 hover:text-slate-950 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
+            class="min-h-[44px] shrink-0 rounded-lg bg-slate-800 px-4 text-xs text-slate-200 transition hover:bg-cyan-500 hover:text-slate-950 active:scale-95 lg:px-5 lg:text-base"
             :disabled="isRouteFollowed(item)"
             @click="addFavorite(item)"
           >
@@ -459,175 +229,50 @@ function stopSummary(fav: UserFavoriteLine): string {
         在 {{ cityStore.currentCityName }} 未找到匹配「{{ lastKeyword }}」的线路
       </p>
 
-      <!-- 已关注列表：紧凑行，一次展开一行。AccordionRoot（单开）拥有展开状态与触发器/
-           内容的 ARIA 接线，故一次只有一行的编辑器可以打开。
+      <!-- 已关注列表：紧凑行，**整行是进编辑页的链接**。方向与上车点不在这一行上改（见文件头），
+           故行里没有组合框，也没有展开态 —— 页面高度因此与编辑状态无关。
 
            各行是**存储**顺序，而这份列表正是编辑那个顺序的地方，故它经拖拽容器渲染，
            而不是直接读 store 的数组：那个数组携带首页的呈现方式，而被拖动的行必须从它
-           实际持有的位置离开——并落在那里。 -->
-      <AccordionRoot
+           实际持有的位置离开——并落在那里。
+
+           拖拽手柄与链接是**两个**元素：手柄自己吃掉按压，点行才进编辑。手柄若长在链接里，
+           一次抓取会同时被读成一次导航。 -->
+      <DragOrderList
         v-if="cityFavorites.length > 0"
-        v-model="expandedFavorite"
-        type="single"
-        collapsible
-        class="mt-3 rounded-xl border border-slate-800 bg-slate-950"
+        :items="cityFavorites"
+        tag="ul"
+        class="mt-3 divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-950"
+        @move="onReorder"
       >
-        <DragOrderList :items="cityFavorites" @move="onReorder">
-          <AccordionItem
-            v-for="item in cityFavorites"
-            :key="item.id || item.lineId"
-            :value="item.id || item.lineId"
+        <li v-for="item in cityFavorites" :key="item.id || item.lineId" class="flex items-center">
+          <!-- 拖拽唯一可以开始的地方。整行任意位置都响应按压的行会吞掉翻页的滑动、
+               并与进入编辑页的点击相争；touch-none 阻止浏览器认领手柄自己的手势。
+               它是本行的手指落点，故两个方向都是 44px。 -->
+          <span
+            data-drag-handle
+            aria-hidden="true"
+            title="拖动调整顺序"
+            class="-ml-0.5 flex h-11 w-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-300 active:cursor-grabbing"
+            @click.stop
           >
-            <AccordionHeader as-child>
-              <!-- 纵向内边距如此设置，好让折叠的行在只带一行文字时仍满足 44px 触点目标。 -->
-              <AccordionTrigger
-                class="group flex w-full items-center gap-2.5 px-3 py-3.5 text-left transition hover:bg-slate-900/60"
-              >
-                <!-- 拖拽唯一可以开始的地方。整行任意位置都响应按压的行会吞掉翻页的滑动、
-                     并与打开该行的点击相争；touch-none 阻止浏览器认领手柄自己的手势，
-                     而被吞掉的点击则让抓取不会切换该行。 -->
-                <span
-                  data-drag-handle
-                  aria-hidden="true"
-                  title="拖动调整顺序"
-                  class="-ml-1 flex h-9 w-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-300 active:cursor-grabbing"
-                  @click.stop
-                >
-                  <GripVertical class="h-4 w-4" />
-                </span>
-                <span
-                  class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
-                  :class="(item.lineName || '').length > 4 ? 'text-xs min-w-[54px]' : 'text-xs min-w-[36px]'"
-                >
-                  {{ item.lineName || '线路' }}
-                </span>
-                <span class="min-w-0 flex-1 truncate text-xs text-slate-300 lg:text-base">{{ stopSummary(item) }}</span>
-                <!-- data-state 来自 reka-ui，故箭头无需本地状态绑定。 -->
-                <ChevronDown
-                  class="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180"
-                />
-              </AccordionTrigger>
-            </AccordionHeader>
-
-            <!-- reka-ui 在关闭时仍保留面板挂载，并把测得的高度暴露为
-                 --reka-accordion-content-height；这些工具类据此值动画，故该行滑动而不是突跳。
-                 border/padding 放在内层元素上：在 border-box 计量下，height:0 的盒子仍会渲染
-                 自己的边框与内边距，折叠时会留下一条多余的线。 -->
-            <AccordionContent
-              class="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
+            <GripVertical class="h-4 w-4" />
+          </span>
+          <RouterLink
+            :to="editorHref(item)"
+            class="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 py-2 pr-3 transition hover:bg-slate-900/60"
+          >
+            <span
+              class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 font-mono font-bold whitespace-nowrap text-cyan-400"
+              :class="(item.lineName || '').length > 4 ? 'text-xs min-w-[54px]' : 'text-xs min-w-[36px]'"
             >
-              <div class="border-t border-slate-800/60 space-y-4 px-3 pt-3 pb-3">
-                <div
-                  v-for="purpose in (['morning', 'evening'] as const)"
-                  :key="`${item.id}_${purpose}`"
-                  class="space-y-2"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs font-medium text-slate-300 lg:text-sm">
-                      {{ purpose === 'morning' ? '🏠 上班' : '🏢 下班' }}
-                    </span>
-                    <span
-                      v-if="purposeStopsRead(item, purpose)?.state === 'reading'"
-                      class="text-xs text-slate-400"
-                    >
-                      正在加载站点…
-                    </span>
-                  </div>
-
-                  <!-- 方向在前：一个站的含义（它的编号、是否真被停靠）取决于车的行驶方向，
-                       故先挑站再挑方向会展示一条用户并不乘坐的线路上的编号。 -->
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-xs text-slate-400">方向</span>
-                    <template v-if="directionOptions(item).length > 1">
-                      <RadioGroupRoot
-                        :model-value="chosenDirection(item, purpose) ?? undefined"
-                        class="flex flex-wrap gap-2"
-                        @update:model-value="(v) => onDirectionChange(item, purpose, Number(v) as 0 | 1)"
-                      >
-                        <RadioGroupItem
-                          v-for="opt in directionOptions(item)"
-                          :key="`${purpose}_${opt.direction}`"
-                          :value="opt.direction"
-                          class="min-h-11 rounded-lg border px-3 text-xs transition"
-                          :class="chosenDirection(item, purpose) === opt.direction
-                            ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
-                            : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500/40'"
-                        >
-                          {{ opt.label ?? `方向 ${opt.direction}` }}
-                        </RadioGroupItem>
-                      </RadioGroupRoot>
-                    </template>
-                    <span v-else class="text-xs text-slate-400">
-                      {{ directionOptions(item)[0]?.label ?? '方向未知' }}
-                    </span>
-                  </div>
-
-                  <div v-if="chosenDirection(item, purpose) === null && directionOptions(item).length > 1" class="text-xs text-slate-400">
-                    请先选择方向
-                  </div>
-                  <template v-else>
-                    <!-- 该方向完全没有站点：此处放一个选择器会永远为空，
-                         故说明原因而不是展示它。 -->
-                    <p
-                      v-if="stationsUnavailable(item, purpose)"
-                      class="text-xs text-slate-400 lg:text-base"
-                    >
-                      该方向暂无站点数据，无法设置上车点
-                    </p>
-                    <!-- 读取没答上来：这也是一个自己的事实，不是「这个方向没有站」，也不是
-                         「还在读」。同样不摆一个永远空的 picker，并说清这一屏现在缺的是哪一步。 -->
-                    <p
-                      v-else-if="purposeStopsRead(item, purpose)?.state === 'unreadable'"
-                      class="text-xs text-slate-400 lg:text-base"
-                    >
-                      未读到该方向的站点数据，暂时无法设置上车点
-                    </p>
-                    <template v-else>
-                      <StationPinPicker
-                        :model-value="pinnedChoice(item, purpose)"
-                        :stations="purposeStations(item, purpose)"
-                        :direction-label="purpose === 'morning' ? '上班' : '下班'"
-                        @update:model-value="(choice) => onPinChange(item, purpose, choice)"
-                      />
-                      <p
-                        v-if="boardStopNotice(item, purpose)"
-                        class="flex items-start gap-1.5 text-xs text-amber-400"
-                      >
-                        <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                        <span>{{ boardStopNotice(item, purpose) }}</span>
-                      </p>
-                    </template>
-                  </template>
-                </div>
-
-                <!-- 中性提示，不是警告：同向的选择是允许的，用户也可能就是那个意思
-                     （环线、只坐一站）。每条线路只放一次，在两个方向区块之后，
-                     因为它描述的是这一**对**，而不是任一目的本身。 -->
-                <p
-                  v-if="sameDirectionNote(item)"
-                  class="flex items-start gap-1.5 text-xs text-slate-400"
-                >
-                  <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{{ sameDirectionNote(item) }}</span>
-                </p>
-
-                <p v-if="pinError" class="flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
-                  <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-                  <span>{{ pinError }}</span>
-                </p>
-
-                <button
-                  class="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 text-xs text-rose-400 transition hover:bg-rose-500/20 active:scale-95 lg:gap-2 lg:px-3.5 lg:text-base"
-                  @click="requestRemoval(item)"
-                >
-                  <X class="h-3.5 w-3.5 shrink-0" />
-                  <span>取消关注</span>
-                </button>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </DragOrderList>
-      </AccordionRoot>
+              {{ item.lineName || '线路' }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-xs text-slate-300 lg:text-base">{{ stopSummary(item) }}</span>
+            <ChevronRight class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+          </RouterLink>
+        </li>
+      </DragOrderList>
 
       <!-- 读取**失败**：这是它自己的成因，并带着唯一能修好它的重试——
            绝不是下面的空状态，那种状态声称的是存了什么。 -->
@@ -665,16 +310,5 @@ function stopSummary(fav: UserFavoriteLine): string {
         <span>{{ orderError }}</span>
       </p>
     </section>
-
-    <!-- 取消关注确认。取消关注在界面上不可逆（必须重新搜索该线路），故它要求显式确认，
-         而不是在展开行内单击即触发。 -->
-    <RemovalDialog
-      :open="pendingRemoval !== null"
-      :line-name="pendingRemoval?.lineName ?? null"
-      :removing="removingFavorite"
-      :error="removalError"
-      @confirm="confirmRemoval"
-      @cancel="pendingRemoval = null"
-    />
   </div>
 </template>

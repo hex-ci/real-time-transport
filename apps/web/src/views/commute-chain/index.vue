@@ -3,15 +3,16 @@ import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useIntervalFn } from '@vueuse/core'
 import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
-import { RefreshCw, TriangleAlert } from '@lucide/vue'
-import { DEFAULT_USER_ID, REFRESH_MAX_LINES } from '@real-time-transport/shared'
+import { TriangleAlert } from '@lucide/vue'
+import { DEFAULT_USER_ID } from '@real-time-transport/shared'
 import type {
   CommuteChainDeductions,
   CommuteChainPurpose,
   RefreshLiveTarget,
   UserSettings,
 } from '@real-time-transport/shared'
-import { refreshFreshnessOf, refreshStatusTextOf, useTransitStore } from '@/stores/transit.store'
+import { RefreshControl } from '@/components/refresh-control'
+import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 import { commutePurposeOf } from '@/commute-purpose'
 import { ChainEmptyState, ChainLoadState, TransferCard } from './components'
@@ -33,12 +34,6 @@ const transitStore = useTransitStore()
 const cityStore = useCityStore()
 
 const { commuteProfile } = storeToRefs(transitStore)
-const {
-  refreshInFlight,
-  refreshOutcome,
-  refreshWaitSecondsLeft,
-  refreshReading,
-} = storeToRefs(transitStore)
 
 /** 两个通勤目的，用与首页相同的词。 */
 const PURPOSES: PurposeOption[] = [
@@ -59,17 +54,6 @@ const autoPurpose = computed<CommuteChainPurpose>(() =>
  * 「已经点过」是一页访问内的事实，不是一个能被后到的读数翻掉的默认。
  */
 const purpose = computed<CommuteChainPurpose>(() => manualPurpose.value ?? autoPurpose.value)
-
-const autoPurposeLabel = computed(() => {
-  const follow = autoPurpose.value === 'evening' ? '下班' : '上班'
-  const windowState = commuteProfile.value?.windowState
-  // 四种事实，四句话：未被读过的 profile 也不得记功给通勤时段——那是对一行已存记录的断言，
-  // 只有答案能支持它。载荷说明是哪种事实（windowState），故此处不从 mode 推断：
-  // 'auto' 同时表示「时段之外」与「未配置时段」，而 unchosen 与 unset 同句（没有窗口可跟随）。
-  if (windowState === 'stored') return `默认按通勤时段选定：${follow}`
-  if (windowState === 'unset' || windowState === 'unchosen') return `通勤时段未设置，默认：${follow}`
-  return `默认：${follow}`
-})
 
 function onPickPurpose(value: unknown): void {
   // 只记这一次选择：显示的目的由它推出，故页签与屏幕上的答案不可能来自两个不同的选择。
@@ -202,45 +186,25 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => {
   return targets
 })
 
-/** 一次按下能真正点名的线路数：端点限定了单次尝试覆盖的上限。 */
-const refreshNamed = computed(() => refreshTargets.value.slice(0, REFRESH_MAX_LINES))
-
-/**
- * 按钮下的状态行。
- *
- * 目标取自本页读到的链路，故那次读取是否**已作答**是本页要交出的事实（targetsRead）：
- * 链路仍在到达时本页还不知道自己在显示什么。store 报告的其余状态都照原样渲染，按下从不会被沉默作答。
- */
-const refreshStatus = computed(() => refreshStatusTextOf({
-  inFlight: refreshInFlight.value,
-  outcome: refreshOutcome.value,
-  waitSeconds: refreshWaitSecondsLeft.value,
-  wanted: refreshTargets.value.length,
-  covered: refreshNamed.value.length,
-  targetsRead: !loading.value,
-}))
-
-const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
-
-/** 状态行的色调。词承载状态，色调只作辅助，故此处绝不是任何东西的唯一信号。 */
-const refreshStatusClass = computed(() => {
-  if (refreshOutcome.value === 'throttled') return 'text-amber-400'
-  if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
-    return 'text-rose-400'
-  }
-  if (refreshOutcome.value === 'ok') return 'text-emerald-400'
-  return 'text-slate-400'
-})
-
-const refreshDescribedBy = computed(() => refreshStatus.value
-  ? 'refresh-freshness refresh-status'
-  : 'refresh-freshness')
-
 /**
  * 一次按下的全程为 true：花掉窗口的那次请求，以及展示它取得之物的那次重读。
  * 落在两者之间的按下会在刚花掉的窗口内再问服务端一次。
  */
 const refreshing = shallowRef(false)
+
+/**
+ * 交给共用控件的那几样。一次按下的结局由全局提示承载，故这里没有读数那一半。
+ *
+ * 同一页有两处入口（桌面那一份、窄屏那一份），故这份值只有一处 —— 两份入口说的是同一件事。
+ *
+ * `disabled` 是**本页**的事实，而不是「正在刷新」：屏幕上没有可点名的线路时，按下什么都不
+ * 会问到，故控件从第一次渲染起就这么说。
+ */
+const refreshControl = computed(() => ({
+  refreshing: refreshing.value,
+  disabled: refreshTargets.value.length === 0,
+  label: '刷新最新车况',
+}))
 
 /**
  * 按下：经由拥有冷却期的那**一个**请求去问，然后重读答案以展示它取得之物。
@@ -249,7 +213,7 @@ const refreshing = shallowRef(false)
 async function onRefresh(): Promise<void> {
   refreshing.value = true
   try {
-    const outcome = await transitStore.refreshLive(refreshNamed.value)
+    const outcome = await transitStore.refreshLive(refreshTargets.value)
     if (outcome === 'ok') await loadChains()
   }
   finally {
@@ -282,75 +246,82 @@ onMounted(() => {
 
 <template>
   <div class="space-y-2.5 pb-12 sm:space-y-5">
-    <div class="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5">
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
-          <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-          换乘链路
-        </span>
-        <span class="text-xs text-slate-400">{{ cityStore.currentCityName }}</span>
-      </div>
-      <h2 class="mt-1.5 text-lg font-bold tracking-tight text-white sm:text-xl">
-        能不能赶上换乘点那班车
-      </h2>
-      <p class="mt-1 text-xs text-slate-400 lg:text-base">
-        逐段给出站台等待与余量，到末段下车站为止
-      </p>
+    <!-- 信息区两块互斥：窄屏那一块在文档里靠前（e2e 量高度的就是页面的第一块），宽屏那一块在后。
+         两块各自持有自己那一档的排布，没有一处靠断点前缀替另一档拼行。 -->
+    <!-- 窄屏（768 以下）：一行 —— 目的页签占满余量、刷新贴在它后面。 -->
+    <div
+      data-info-area="narrow"
+      class="md:hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 px-2.5 py-2 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5"
+    >
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <!-- 装不下时整体换行，而不是把某一项压到它的字以下：容器与每一项都带最小内容宽度的下限。 -->
+        <div
+          data-toolbar="narrow"
+          class="flex min-w-0 flex-wrap items-center gap-2"
+        >
+          <RadioGroupRoot
+            aria-label="通勤目的"
+            :model-value="purpose"
+            class="flex h-11 min-w-max-content flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0"
+            @update:model-value="onPickPurpose"
+          >
+            <RadioGroupItem
+              v-for="option in PURPOSES"
+              :key="option.purpose"
+              :value="option.purpose"
+              class="inline-flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2.5 text-xs font-medium whitespace-nowrap text-slate-300 transition data-[state=checked]:bg-cyan-500/20 data-[state=checked]:text-cyan-300"
+            >
+              {{ option.label }}
+            </RadioGroupItem>
+          </RadioGroupRoot>
 
-      <div class="mt-2.5 flex flex-wrap items-center gap-2">
+          <!-- 一次按下的结局由全局提示说；本页没有读数那一半，故按钮不描述任何东西。 -->
+          <RefreshControl
+            v-bind="refreshControl"
+            variant="button"
+            :has-reading="false"
+            class="ms-auto shrink-0"
+            @refresh="onRefresh"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- 宽屏（768 起）：一行 —— 目的页签在左，刷新那枚图标按钮贴着卡片右内边。 -->
+    <div
+      data-info-area="wide"
+      class="hidden md:block rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5"
+    >
+      <div
+        data-toolbar="wide"
+        class="flex min-w-0 items-center gap-3"
+      >
         <RadioGroupRoot
           aria-label="通勤目的"
           :model-value="purpose"
-          class="flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 p-1"
+          class="flex h-11 shrink-0 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0"
           @update:model-value="onPickPurpose"
         >
           <RadioGroupItem
             v-for="option in PURPOSES"
             :key="option.purpose"
             :value="option.purpose"
-            class="inline-flex min-h-11 items-center rounded-lg px-2.5 text-xs font-medium text-slate-300 transition data-[state=checked]:bg-cyan-500/20 data-[state=checked]:text-cyan-300"
+            class="inline-flex h-11 items-center rounded-lg px-2.5 text-xs font-medium text-slate-300 transition data-[state=checked]:bg-cyan-500/20 data-[state=checked]:text-cyan-300"
           >
             {{ option.label }}
           </RadioGroupItem>
         </RadioGroupRoot>
-        <span id="purpose-default" class="text-xs text-slate-400">{{ autoPurposeLabel }}</span>
+
+        <!-- 刷新那枚停在行尾：`ms-auto` 把行里剩下的余量全部落在它前面。 -->
+        <RefreshControl
+          v-bind="refreshControl"
+          variant="button"
+          :has-reading="false"
+          class="ms-auto shrink-0"
+          @refresh="onRefresh"
+        />
       </div>
     </div>
-
-    <!-- 两个屏幕经同一个请求索要，故一次按下花掉的窗口是共享的。 -->
-    <section
-      aria-label="数据刷新"
-      class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:rounded-3xl sm:p-4"
-    >
-      <div class="min-w-0">
-        <p id="refresh-freshness" class="text-xs text-slate-400 lg:text-base">
-          {{ refreshFreshness.text }}
-        </p>
-        <!-- 状态行。只有粗粒度状态坐在 live region 里：秒数渲染在它旁边，
-         因为 live region 里的倒计时会按秒排队播报。region 在没有话可说时就渲染，
-         与第一个词一同创建的 region 在某些屏幕阅读器上根本不播报。 -->
-        <p
-          id="refresh-status"
-          class="text-xs lg:text-base"
-          :class="[refreshStatusClass, refreshStatus ? 'mt-0.5' : '']"
-        >
-          <span role="status" aria-live="polite">{{ refreshStatus?.announcement }}</span><span>{{ refreshStatus?.detail }}</span>
-        </p>
-      </div>
-      <button
-        class="flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-xs font-semibold text-cyan-400 transition active:scale-95 disabled:opacity-60 sm:w-auto sm:px-4 lg:min-h-11 lg:text-base"
-        :disabled="refreshing || refreshNamed.length === 0"
-        :aria-describedby="refreshDescribedBy"
-        @click="onRefresh"
-      >
-        <RefreshCw
-          class="h-3.5 w-3.5 shrink-0"
-          :class="refreshing ? 'animate-spin' : ''"
-          aria-hidden="true"
-        />
-        <span>刷新最新车况</span>
-      </button>
-    </section>
 
     <!-- 屏幕上仍有旧答案时失败的重读：答案留着，陈述失败而不是让页面变空。 -->
     <p

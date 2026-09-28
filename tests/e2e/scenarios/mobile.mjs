@@ -51,12 +51,12 @@ const MEASURE = `JSON.stringify((() => {
   }
 })())`
 
-/** 每页的主控件：本仓写死 ≥44px 的那些动作（按可见文字点名）。 */
+/** 每页的主控件：本仓写死 ≥44px 的那些动作。按可见文字点名，图标按钮则按它的可访问名。 */
 const PRIMARY = {
   home: ['刷新最新车况'],
   line: ['刷新最新车况'],
-  platform: ['刷新车况数据'],
-  chain: ['上班', '下班'],
+  platform: ['刷新车况数据', '定位最近站台'],
+  chain: ['刷新最新车况', '上班', '下班'],
   settings: ['关注线路', '通勤时段', '位置锚点', '通勤链路'],
 }
 
@@ -68,7 +68,7 @@ export async function run({ check, equal, note, fixtures }) {
     { key: 'home', url: `${WEB_ORIGIN}/`, wait: 'JSON.stringify(document.querySelectorAll(\'main\').length > 0)' },
     { key: 'line', url: `${WEB_ORIGIN}/line/${encodeURIComponent(lineId)}?direction=0&cityCode=${fixtures.city}`, wait: 'JSON.stringify(document.body.innerText.includes(\'开往\'))' },
     { key: 'platform', url: `${WEB_ORIGIN}/platform`, wait: 'JSON.stringify(document.querySelectorAll(\'main select\').length > 0)' },
-    { key: 'chain', url: `${WEB_ORIGIN}/commute-chain`, wait: 'JSON.stringify(document.body.innerText.includes(\'能不能赶上换乘点那班车\'))' },
+    { key: 'chain', url: `${WEB_ORIGIN}/commute-chain`, wait: 'JSON.stringify(document.body.innerText.includes(\'换乘链路\'))' },
     { key: 'settings', url: `${WEB_ORIGIN}/settings`, wait: 'JSON.stringify(document.querySelectorAll(\'main a[href^="/settings/"]\').length === 4)' },
   ]
 
@@ -110,7 +110,7 @@ export async function run({ check, equal, note, fixtures }) {
       note(`${page.key} 名字与可见文字不同的控件（名字说的是动作）：${JSON.stringify(relabelled.map(c => `${c.visible}→${c.explicit}`))}`)
     }
 
-    const primary = measured.controls.filter(c => PRIMARY[page.key].some(name => c.visible.includes(name)))
+    const primary = measured.controls.filter(c => PRIMARY[page.key].some(name => (c.visible || c.explicit).includes(name)))
     check(`${page.key} 的主控件都在屏上被量到了`, primary.length >= PRIMARY[page.key].length, JSON.stringify(primary.map(c => c.visible)))
     for (const control of primary) {
       check(
@@ -125,6 +125,97 @@ export async function run({ check, equal, note, fixtures }) {
       note(`${page.key} 的次要控件（<44px）：${JSON.stringify(small.map(c => `${c.visible || c.explicit}:${c.width}×${c.height}`))}`)
     }
   }
+
+  // 顶部是工具栏：一行控件（模式/目的、定位、刷新），读数在下面一行小字；没有展开/收起。
+  // 视口在这里显式定住，并等到该页特征出现再量 —— 固定 sleep 会让还没导航完的那一页被量成上一页。
+  await cli(['resize', '375', '667'])
+  for (const area of [
+    { name: '首页', url: `${WEB_ORIGIN}/`, ready: text => String(text).includes('自动'), hasLocate: true, switches: ['自动', '上班', '下班', '附近'] },
+    { name: '链路页', url: `${WEB_ORIGIN}/commute-chain`, ready: text => !String(text).includes('自动') && String(text).includes('上班'), hasLocate: false, switches: ['上班', '下班'] },
+  ]) {
+    await goto(area.url)
+    await waitForValue(
+      `JSON.stringify([...document.querySelectorAll('[data-toolbar]')].find(el => el.getBoundingClientRect().height > 1)?.innerText ?? '')`,
+      area.ready,
+      { what: `${area.name} 的工具栏就位`, timeout: 20_000 },
+    )
+    const bar = await pageEval(`JSON.stringify((() => {
+      const bar = [...document.querySelectorAll('[data-toolbar]')].find(el => el.getBoundingClientRect().height > 1)
+      if (!bar) return { missing: true }
+      const card = bar.closest('[class*=rounded-2xl]')
+      const controls = [...bar.querySelectorAll('button,[role=radio]')].filter(el => el.getBoundingClientRect().width > 0)
+      return {
+        slot: bar.getAttribute('data-toolbar'),
+        controls: controls.map(el => ({
+          name: el.getAttribute('aria-label') || el.innerText.trim(),
+          w: Math.round(el.getBoundingClientRect().width),
+          h: Math.round(el.getBoundingClientRect().height),
+        })),
+        toggles: controls.filter(el => el.getAttribute('aria-controls')).length,
+        hasLocate: controls.some(el => (el.getAttribute('aria-label') || '').includes('定位')),
+        switchWords: ${JSON.stringify(area.switches)}.filter(word => bar.innerText.includes(word)),
+        hasFreshness: /最后更新/.test(bar.innerText),
+        tops: [...new Set(controls.map(el => Math.round(el.getBoundingClientRect().top)))],
+        rowHeight: Math.round(bar.getBoundingClientRect().height),
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+      }
+    })())`)
+
+    check(`${area.name} 窄屏用的是窄档工具栏`, bar.slot === 'narrow', JSON.stringify(bar))
+    const undersized = (bar.controls ?? []).filter(c => c.w < 44 || c.h < 44)
+    check(`${area.name} 工具栏可见控件都不小于 44`, (bar.controls ?? []).length > 0 && undersized.length === 0, JSON.stringify(undersized))
+    check(`${area.name} 切换控件直接在工具栏里（无需展开）`, (bar.switchWords ?? []).length >= 2, JSON.stringify(bar.switchWords))
+    check(`${area.name} 定位按钮${area.hasLocate ? '在' : '不在'}`, bar.hasLocate === area.hasLocate, JSON.stringify(bar))
+    check(`${area.name} 已无展开/收起开关`, bar.toggles === 0, JSON.stringify(bar.toggles))
+    check(`${area.name} 工具栏里不再有读数文案`, bar.hasFreshness === false, JSON.stringify(bar))
+    check(
+      `${area.name} 工具栏是一行（所有控件同一条水平线）`,
+      (bar.tops ?? []).length === 1 && bar.rowHeight <= 46,
+      JSON.stringify({ tops: bar.tops, rowHeight: bar.rowHeight }),
+    )
+    check(`${area.name} 窄屏没有横向溢出`, bar.overflow === false, JSON.stringify(bar))
+    note(`${area.name} 工具栏控件：${JSON.stringify(bar.controls)}`)
+  }
+
+  // 按下刷新要有回话：成功说「已刷新」，窗口没走完说剩余多少秒。
+  await goto(`${WEB_ORIGIN}/`)
+  await cli(['resize', '375', '667'])
+  // 窄档那一枚要真的在屏上（宽档那份同时存在于 DOM 里，但 375 下不可见、点不到）。
+  await waitForValue(
+    `JSON.stringify(document.querySelector('[data-toolbar="narrow"] button[aria-label="刷新最新车况"]')?.getBoundingClientRect().width ?? 0)`,
+    width => typeof width === 'number' && width > 0,
+    { what: '窄档刷新按钮可见', timeout: 20_000 },
+  )
+  // 连按两次：第一次说「已刷新」，第二次必须在窗口没走完时说出「刷新太频繁 · N 秒后可刷新」——
+  // 冷却期按钮按不动就等于把这句话藏起来，那正是它该出现的时候。
+  await cli(['click', '[data-toolbar="narrow"] button[aria-label="刷新最新车况"]'])
+  await delay(1200)
+  const toast = await pageEval(`JSON.stringify([...document.querySelectorAll('[data-sonner-toast]')].map(el => el.innerText.replace(/\\n/g, ' ')))`)
+  check(
+    '按下刷新后页面上出现了回话',
+    (toast ?? []).some(t => t.includes('已刷新') || t.includes('刷新太频繁') || t.includes('刷新失败')),
+    JSON.stringify(toast),
+  )
+
+  await cli(['click', '[data-toolbar="narrow"] button[aria-label="刷新最新车况"]'])
+  await delay(1200)
+  const second = await pageEval(`JSON.stringify([...document.querySelectorAll('[data-sonner-toast]')].map(el => el.innerText.replace(/\\n/g, ' ')))`)
+  check(
+    '窗口没走完时再按一次会说出剩余秒数',
+    (second ?? []).some(t => t.includes('刷新太频繁')),
+    JSON.stringify(second),
+  )
+
+  // 按下定位也要有回话：这台上是开发模拟（说「开发模拟」），真实环境里则是不支持或被拒 ——
+  // 无论哪一种，按下一个没有回声的按钮都是缺陷。
+  await cli(['click', '[data-toolbar="narrow"] button[aria-label="定位最近站"]'])
+  await delay(1200)
+  const locateToast = await pageEval(`JSON.stringify([...document.querySelectorAll('[data-sonner-toast]')].map(el => el.innerText.replace(/\\n/g, ' ')))`)
+  check(
+    '按下定位后页面上出现了回话',
+    (locateToast ?? []).some(t => t.includes('位置') || t.includes('定位')),
+    JSON.stringify(locateToast),
+  )
 
   // 一屏的内容也要能在 375 宽里读完：首页没有一个容器横向被裁切。
   await goto(`${WEB_ORIGIN}/`)

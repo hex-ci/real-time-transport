@@ -49,6 +49,7 @@ import {
   arrivalTrust,
   deduceCommuteChain,
   departureAdvice,
+  getCityAdcode,
   operatingDaySecondsOf,
   operatingStatusOf,
   statedArrivalMinutes,
@@ -79,6 +80,10 @@ const UNCONFIGURED_COMMUTE_WINDOW = {
   homeLng: null,
   workLat: null,
   workLng: null,
+  homePlaceName: null,
+  workPlaceName: null,
+  homeAnchorSource: null,
+  workAnchorSource: null,
 } satisfies StoredUserSettings
 
 /**
@@ -663,6 +668,19 @@ export class TransitService {
   /** 一个 GCJ-02 点的地标（该点已在 HTTP 边界换算）。 */
   async reverseGeocode(lng: number, lat: number) {
     return this.amap.reverseGeocode(lng, lat)
+  }
+
+  /**
+   * 地点搜索：把自由文本变成若干候选地点（`lng`/`lat` 是 GCJ-02，原样交出）。
+   *
+   * `cityCode` 是应用自己的城市码，`adcode` 是给高德的城市限定 —— 两个不同的东西，
+   * 在 `getCityAdcode` 里完成这一次换算，故调用方不必知道这件事。
+   *
+   * `null` 是「上游没答上来」，`[]` 是「答了，但确实没有匹配的地点」：两者由调用方分别
+   * 作答（502 与空列表），绝不合并。
+   */
+  async searchPlaces(keywords: string, cityCode: string) {
+    return this.amap.searchPlaces(keywords, getCityAdcode(cityCode))
   }
 
   /**

@@ -2,23 +2,21 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { House, LocateFixed, Building2, Wand2, TriangleAlert, RefreshCw } from '@lucide/vue'
+import { House, LocateFixed, Building2, Wand2, TriangleAlert } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
 import {
-  refreshFreshnessOf,
-  refreshStatusTextOf,
   useTransitStore,
 } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { commutePurposeOf } from '@/commute-purpose'
+import { RefreshControl } from '@/components/refresh-control'
 import { CardGrid, EmptyState } from './components'
 import { commuteLegStateOf, commuteStopOf } from './commute-leg'
 import { nearbyLocationStateOf } from './nearby-notice'
 import type { NearbyLocationState } from './nearby-notice'
 import type { ArrivalsFeed, ArrivalsRead, CardRow, MiniCardConfig, OverviewMode } from './types'
 import type { LineDetail, RefreshLiveTarget, UserFavoriteLine } from '@real-time-transport/shared'
-import { REFRESH_MAX_LINES } from '@real-time-transport/shared'
 import {
   effectiveCommuteDirection,
   favoriteDirections,
@@ -28,6 +26,7 @@ import {
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
 import type { ReadState } from '@/read-state'
+import { runWithFeedback } from '@/action-feedback'
 
 const router = useRouter()
 const transitStore = useTransitStore()
@@ -35,21 +34,8 @@ const locationStore = useLocationStore()
 const cityStore = useCityStore()
 
 const { commuteProfile, favorites } = storeToRefs(transitStore)
-const {
-  refreshInFlight,
-  refreshOutcome,
-  refreshWaitSecondsLeft,
-  refreshReading,
-} = storeToRefs(transitStore)
 
-const currentTimeStr = shallowRef('')
-
-function updateTime(): void {
-  const now = new Date()
-  currentTimeStr.value = now.toLocaleTimeString('zh-CN', { hour12: false })
-}
-
-useIntervalFn(updateTime, 1000)
+/** 到站数据每 10 秒重读一次；本页不渲染当前时刻，也不渲染上一次读数取到的时刻。 */
 useIntervalFn(refreshAllArrivals, 10000)
 
 /** 首页标签显示哪个视图。「nearby」由 GPS 驱动，另外两个走推导出的方向。 */
@@ -118,11 +104,19 @@ const isManual = computed(() => modeOverride.value?.slot === currentSlot.value)
 const currentMode = computed<OverviewMode>(() =>
   isManual.value && modeOverride.value ? modeOverride.value.mode : autoMode.value)
 
-/** 自动规则解析出的东西的人话标签，显示在自动按钮上。 */
+/**
+ * 自动规则解析出的东西的人话标签，显示在自动按钮上。
+ *
+ * 「当前非通勤时段」是在说本机时钟落在两个已配置窗口之外，故只有**读到过**窗口的 profile 才配说它：
+ * 一份没答上来的 profile（`commuteProfile` 仍为 null）与一份没设过窗口的 profile 都不许为一个不存在
+ * 或被没人看过的窗口记功。
+ */
 const autoModeLabel = computed(() => (
   commuteWindowUnset.value
     ? '未设置通勤时段'
-    : autoMode.value === 'morning' ? '上班' : autoMode.value === 'evening' ? '下班' : '当前非通勤时段'
+    : commuteProfile.value === null
+      ? '未读到通勤时段'
+      : autoMode.value === 'morning' ? '上班' : autoMode.value === 'evening' ? '下班' : '当前非通勤时段'
 ))
 
 function setMode(mode: OverviewMode): void {
@@ -204,7 +198,12 @@ async function onTogglePin(card: MiniCardConfig): Promise<void> {
   pinError.value = null
   pinningFavoriteId.value = favoriteId
   try {
-    await transitStore.togglePin(favoriteId)
+    await runWithFeedback(
+      // 卡片上此刻是不是钉住的，决定这次按下是钉还是解 —— 与那枚按钮自己的措辞同源。
+      card.isPinned ? 'favorite-unpin' : 'favorite-pin',
+      () => transitStore.togglePin(favoriteId),
+      { name: card.lineName },
+    )
   }
   catch (err) {
     pinError.value = err instanceof Error ? err.message : '置顶设置失败'
@@ -557,55 +556,33 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => {
 })
 
 /**
- * 一次按压实际可以点名的线路。端点限定了条数，所以本屏最前面的几行会去，其余等下一次按压 ——
- * `covered` 对 `wanted` 会在控件上报告，因为「刷新了屏幕的一部分」不能被读成「刷新了全部」。
+ * 刷新图标按钮的可访问名。它是图标按钮，没有可见文字，故那个词由本页给出 —— 一次，
+ * 不随状态变。
  */
-const refreshNamed = computed(() => refreshTargets.value.slice(0, REFRESH_MAX_LINES))
-
-/**
- * 按钮下面那一行状态 —— 它的粗粒度状态（live region 播报的就是它），以及旁边的秒数（完全不
- * 播报）。没有东西可报时为 null。
- */
-const refreshStatus = computed(() => refreshStatusTextOf({
-  inFlight: refreshInFlight.value,
-  outcome: refreshOutcome.value,
-  waitSeconds: refreshWaitSecondsLeft.value,
-  wanted: refreshTargets.value.length,
-  covered: refreshNamed.value.length,
-  // 这些目标是关注线路的到站行，所以列表自己的三态由本屏陈述：一份读不到的列表与一份答了但为
-  // 空的列表留下的是同一个空数组，而控件不能声称一份没人读过的列表里没有可重读的线路。读取还
-  // 没回来时同理 —— 本屏还不知道自己在显示什么。
-  targetsRead: favouritesRead.value === 'read',
-}))
-
-/** 上一次刷新取到的读数，按新鲜度那一行报告的方式。 */
-const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
-
-/**
- * 状态那一行的色调。话本身携带状态；色调只是给它们撑腰，所以这里没有任何东西是任何信息的
- * 唯一信号。
- */
-const refreshStatusClass = computed(() => {
-  if (refreshOutcome.value === 'throttled') return 'text-amber-400'
-  if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
-    return 'text-rose-400'
-  }
-  if (refreshOutcome.value === 'ok') return 'text-emerald-400'
-  return 'text-slate-400'
-})
-
-/**
- * 按钮指向的 id，使状态与控件一起被读出，而不是另一个要去找的东西。
- */
-const refreshDescribedBy = computed(() => refreshStatus.value
-  ? 'refresh-freshness refresh-status'
-  : 'refresh-freshness')
+const REFRESH_LABEL = '刷新最新车况'
 
 /**
  * 一次按压的全程都为真：花掉窗口的那个请求，以及显示它取到了什么的卡片重读。落在两者之间的
  * 一次按压会在第一个刚花掉的窗口里再问服务端一次，并因此被拒。
  */
 const refreshing = shallowRef(false)
+
+/**
+ * 交给共用控件的那几样。一次按下的结局由全局提示承载，故这里没有读数那一半。
+ *
+ * 同一页有两处入口（桌面那一份、移动端那一份），故这份值只有一处 —— 两份入口说的是同一件事。
+ */
+const refreshControl = computed(() => ({
+  refreshing: refreshing.value,
+  /**
+   * 页面自己的禁用条件：屏幕上没有可重读的线路。
+   *
+   * 窗口还关着**不**禁用：那时按下要走完一次请求，由 store 报出「刷新太频繁 · N 秒后可刷新」——
+   * 把一个按不动的按钮摆在用户面前，等于把「为什么按不动」也一起藏起来。
+   */
+  disabled: refreshTargets.value.length === 0,
+  label: REFRESH_LABEL,
+}))
 
 /**
  * 按下：通过共享请求要一次重读，然后重读卡片，使它们显示那个请求取到的东西。
@@ -615,7 +592,7 @@ const refreshing = shallowRef(false)
 async function onRefresh(): Promise<void> {
   refreshing.value = true
   try {
-    const outcome = await transitStore.refreshLive(refreshNamed.value)
+    const outcome = await transitStore.refreshLive(refreshTargets.value)
     if (outcome === 'ok') await refreshAllArrivals()
   }
   finally {
@@ -671,7 +648,6 @@ watch(
 )
 
 onMounted(() => {
-  updateTime()
   void cityStore.fetchCities()
   transitStore.fetchCommuteProfile()
   void reloadForCurrentCity()
@@ -681,120 +657,160 @@ onMounted(() => {
 
 <template>
   <div class="space-y-2.5 sm:space-y-5 pb-12">
-    <!-- 智能场景横幅 -->
-    <div class="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5 md:p-6">
-      <div class="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
-        <!-- 左列：模式角标、时间、标题 -->
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-400">
-              <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-              {{ commuteWindowUnset ? '未设置通勤时段' : commuteProfile?.mode === 'work' ? '早通勤' : commuteProfile?.mode === 'home' ? '晚通勤' : '非通勤' }}
-            </span>
-            <span class="font-mono text-xs text-slate-400">{{ currentTimeStr }}</span>
-            <span class="text-xs text-slate-400">· {{ cityStore.currentCityName }}</span>
-          </div>
-          <h2 class="mt-1.5 text-xl font-bold tracking-tight text-white sm:mt-2 md:text-2xl">
-            {{ commuteProfile?.description || `${cityStore.currentCityName}通勤实时态势监控` }}
-          </h2>
-          <!-- 说出卡片做什么，然后停下。被它替换掉的那句话点名了一个数据源、描述了数字怎么算出来，
-             还借用了产品并没有的大屏语域 —— 同时宣称了一种 F4 禁止为地铁线路宣称的数据。 -->
-          <p class="mt-1 hidden text-xs text-slate-400 md:block lg:text-base">
-            点击卡片查看该线路的在途车辆与到站时刻
-          </p>
-        </div>
-
-        <!-- 右列：模式切换（自动/上班/下班/附近）+ 定位。手机上占满整行（切换器与定位竖排），
-             md 起改为行内。 -->
-        <div class="flex w-full shrink-0 flex-col gap-1.5 md:w-auto md:flex-row md:items-center md:gap-2">
-          <div
-            v-if="canSwitchAny"
-            class="flex h-10 w-full items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 p-1 shadow-sm md:w-auto"
-          >
-            <!-- 自动：把控制权交回配置的通勤时段。用户没有为当前时段钉住模式时它处于选中态。 -->
-            <button
-              class="flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium whitespace-nowrap transition md:flex-none md:px-2.5"
-              :class="!isManual ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
-              :title="`自动：按通勤时段判断（当前 ${autoModeLabel}）`"
-              @click="useAutoMode"
-            >
-              <Wand2 class="h-3.5 w-3.5 shrink-0" />
-              <span>自动</span>
-            </button>
-            <button
-              class="flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium whitespace-nowrap transition md:flex-none md:px-2.5"
-              :class="currentMode === 'morning' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
-              @click="setMode('morning')"
-            >
-              <House class="h-3.5 w-3.5 shrink-0" />
-              <span>上班</span>
-            </button>
-            <button
-              class="flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium whitespace-nowrap transition md:flex-none md:px-2.5"
-              :class="currentMode === 'evening' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
-              @click="setMode('evening')"
-            >
-              <Building2 class="h-3.5 w-3.5 shrink-0" />
-              <span>下班</span>
-            </button>
-            <button
-              class="flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium whitespace-nowrap transition md:flex-none md:px-2.5"
-              :class="currentMode === 'nearby' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
-              @click="setMode('nearby')"
-            >
-              <LocateFixed class="h-3.5 w-3.5 shrink-0" />
-              <span>附近</span>
-            </button>
-          </div>
+    <!-- 信息区两块互斥：窄屏那一块在文档里靠前（e2e 量高度的就是页面的第一块），宽屏那一块在后。
+         两块各自持有自己那一档的排布，没有一处靠断点前缀替另一档拼行。 -->
+    <!-- 窄屏（<768）：一行 —— 模式容器吃满余量、定位与刷新贴在它后面。分段项不带图标（带图标时
+         这一行在 375 装不下），故一行放得下；装不下时换行，而不是把某一项压到它的字以下。 -->
+    <div
+      data-info-area="narrow"
+      class="md:hidden relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 px-2.5 py-2 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5"
+    >
+      <div
+        data-toolbar="narrow"
+        class="flex min-w-0 flex-wrap items-center gap-2"
+      >
+        <!-- 模式切换（自动/上班/下班/附近）。 -->
+        <div
+          v-if="canSwitchAny"
+          class="flex h-11 min-w-max-content flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0 shadow-sm"
+        >
+          <!-- 自动：把控制权交回配置的通勤时段。用户没有为当前时段钉住模式时它处于选中态。 -->
           <button
-            class="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2.5 text-xs font-medium whitespace-nowrap text-cyan-400 shadow-sm transition hover:bg-cyan-500/20 active:scale-95 md:w-auto md:px-3 lg:min-h-11 lg:gap-2 lg:px-3.5 lg:text-base"
-            @click="locationStore.requestLocation({ userInitiated: true })"
+            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            :class="!isManual ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            :title="`自动：按通勤时段判断（当前 ${autoModeLabel}）`"
+            @click="useAutoMode"
           >
-            <LocateFixed class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
-            <span>定位最近站</span>
+            <span>自动</span>
+          </button>
+          <button
+            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'morning' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('morning')"
+          >
+            <span>上班</span>
+          </button>
+          <button
+            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'evening' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('evening')"
+          >
+            <span>下班</span>
+          </button>
+          <button
+            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'nearby' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('nearby')"
+          >
+            <span>附近</span>
           </button>
         </div>
+
+        <!-- 从未存过通勤时段的用户：只说这一句，且它不是可点之物。存过即无。 -->
+        <p
+          v-if="commuteWindowUnset"
+          class="shrink-0 text-xs font-medium text-amber-400"
+        >
+          ⚠ 未设置通勤时段
+        </p>
+
+        <button
+          type="button"
+          aria-label="定位最近站"
+          class="ms-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 shadow-sm transition hover:bg-cyan-500/20 active:scale-95"
+          @click="locationStore.requestLocation({ userInitiated: true })"
+        >
+          <LocateFixed class="h-4 w-4 shrink-0" aria-hidden="true" />
+        </button>
+
+        <!-- F11：首页的刷新入口，与另两页共用同一个控件、同一个 store 动作、同一个冷却端点，
+             而结局由全局提示说。本页没有读数那一半，故按钮不描述任何东西。 -->
+        <RefreshControl
+          v-bind="refreshControl"
+          variant="button"
+          :has-reading="false"
+          class="shrink-0"
+          @refresh="onRefresh"
+        />
       </div>
     </div>
 
-    <!-- F11：首页唯一的刷新入口。两块界面通过同一个请求发问，所以一次按压花掉的窗口是共享的，
-         而不是每屏一个。状态那一行是这个控件的另一项职责：带剩余等待的拒绝、一次失败、或连接
-         断了，都在这里报告 —— 就在用户看着的地方。 -->
-    <section
-      aria-label="数据刷新"
-      class="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:rounded-3xl sm:p-4"
+    <!-- 宽屏（≥768）：一行 —— 模式与提示在左，定位与刷新两枚图标按钮贴着卡片右内边。 -->
+    <div
+      data-info-area="wide"
+      class="hidden md:block relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5 md:p-6"
     >
-      <div class="min-w-0">
-        <!-- 读数自己的时刻，以及它是哪一类值。从未取到的读数根本不报时间。 -->
-        <p id="refresh-freshness" class="text-xs text-slate-400 lg:text-base">
-          {{ refreshFreshness.text }}
-        </p>
-        <!-- 状态那一行。只有粗粒度状态坐在 live region 里：秒数渲染在它旁边，因为 live region 里的
-             倒计时会为等待的每一秒排一条播报。这个 region 在还没有话可说时就已经渲染 —— 与它
-             第一句话一起创建的 region，某些读屏软件根本不播报。两个 span 紧挨着，所以这一行读
-             起来仍像一个元素说出来的。 -->
-        <p
-          id="refresh-status"
-          class="text-xs lg:text-base"
-          :class="[refreshStatusClass, refreshStatus ? 'mt-0.5' : '']"
-        >
-          <span role="status" aria-live="polite">{{ refreshStatus?.announcement }}</span><span>{{ refreshStatus?.detail }}</span>
-        </p>
-      </div>
-      <button
-        class="flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-xs font-semibold text-cyan-400 transition active:scale-95 disabled:opacity-60 sm:w-auto sm:px-4 lg:min-h-11 lg:text-base"
-        :disabled="refreshing || refreshNamed.length === 0"
-        :aria-describedby="refreshDescribedBy"
-        @click="onRefresh"
+      <div
+        data-toolbar="wide"
+        class="flex min-w-0 items-center gap-3"
       >
-        <RefreshCw
-          class="h-3.5 w-3.5 shrink-0"
-          :class="refreshing ? 'animate-spin' : ''"
-          aria-hidden="true"
+        <div
+          v-if="canSwitchAny"
+          class="flex h-11 shrink-0 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0 shadow-sm"
+        >
+          <button
+            class="flex h-11 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium whitespace-nowrap transition"
+            :class="!isManual ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            :title="`自动：按通勤时段判断（当前 ${autoModeLabel}）`"
+            @click="useAutoMode"
+          >
+            <Wand2 class="h-3.5 w-3.5 shrink-0" />
+            <span>自动</span>
+          </button>
+          <button
+            class="flex h-11 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'morning' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('morning')"
+          >
+            <House class="h-3.5 w-3.5 shrink-0" />
+            <span>上班</span>
+          </button>
+          <button
+            class="flex h-11 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'evening' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('evening')"
+          >
+            <Building2 class="h-3.5 w-3.5 shrink-0" />
+            <span>下班</span>
+          </button>
+          <button
+            class="flex h-11 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium whitespace-nowrap transition"
+            :class="currentMode === 'nearby' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
+            @click="setMode('nearby')"
+          >
+            <LocateFixed class="h-3.5 w-3.5 shrink-0" />
+            <span>附近</span>
+          </button>
+        </div>
+
+        <!-- 从未存过通勤时段的用户：只说这一句，且它不是可点之物。存过即无。 -->
+        <p
+          v-if="commuteWindowUnset"
+          class="shrink-0 text-xs font-medium text-amber-400"
+        >
+          ⚠ 未设置通勤时段
+        </p>
+
+        <button
+          type="button"
+          aria-label="定位最近站"
+          class="ms-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 shadow-sm transition hover:bg-cyan-500/20 active:scale-95"
+          @click="locationStore.requestLocation({ userInitiated: true })"
+        >
+          <LocateFixed class="h-4 w-4 shrink-0" aria-hidden="true" />
+        </button>
+
+        <!-- 两枚动作停在行尾：`ms-auto` 把行里剩下的余量全部落在它们前面。本页没有读数那一半，
+             故按钮不描述任何东西。 -->
+        <RefreshControl
+          v-bind="refreshControl"
+          variant="button"
+          :has-reading="false"
+          class="shrink-0"
+          @refresh="onRefresh"
         />
-        <span>刷新最新车况</span>
-      </button>
-    </section>
+      </div>
+    </div>
 
     <!-- 一次失败的置顶写入：store 已经把卡片回滚了，所以原因就是唯一剩下要说的话。
          role="alert" 把它作为状态消息播报，而不是让它等着被注意到。 -->

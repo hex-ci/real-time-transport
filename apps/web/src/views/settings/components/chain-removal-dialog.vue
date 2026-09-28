@@ -17,7 +17,7 @@ import {
 } from 'reka-ui'
 
 defineProps<{
-  /** 对话框是否显示；由卡片持有（它跟踪目标）。 */
+  /** 对话框是否显示；由渲染它的页面持有（编辑页跟踪要删的那一条）。 */
   open: boolean
   /** 正在删除的链路名。 */
   chainName: string | null
@@ -49,10 +49,10 @@ const emit = defineEmits<{
             保留
           </AlertDialogCancel>
           <!-- 普通 button，刻意不用 AlertDialogAction：后者是 DialogClose，它自己的点击
-               处理会先关闭对话框，卡片随后读到已清空的目标，永远发不出 DELETE。 -->
+               处理会先关闭对话框，页面随后读到已清空的目标，永远发不出 DELETE。 -->
           <button
             type="button"
-            class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95"
             :disabled="removing"
             @click="emit('confirm')"
           >

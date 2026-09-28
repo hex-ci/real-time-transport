@@ -43,6 +43,9 @@
 | 只给一个轴（或只清一个轴）被拒 | `api/f2-…` ·「只给一个轴（或只清一个轴）被拒」 | 400；成对 null 才清空 | 2 |
 | WGS-84 只换算一次，站点坐标原样转发 | `api/f2-…` ·「原始 WGS-84 只换算一次」「GIS 边界：设备定位换算一次，站点坐标原样转发」 | 换算调用计数/入参 | 1+2 |
 | 浏览器侧不做换算 | `web/__tests__/anchor-capture.test.ts` ·「returns the fix exactly as the browser reported it, converted by nobody」 | 浏览器上报值原样透传 | 1 |
+| **搜索来源不换算**（`search` 的坐标已是 GCJ-02，原样落库） | `api/f2-anchor-source-and-place-search.test.ts` ·「搜索来的坐标原样落库：一次换算都不做」；`web/views/settings/__tests__/anchor-place-search.test.ts` ·「选了之后保存按钮可点，按下写一次库：坐标 + 名字 + 来源 search」 | 落库值**逐字等于**高德给的那一对（并断言它不等于换算一次的结果）；PATCH 体里 `homeAnchorSource === 'search'` 且坐标未被动过 | 1+2 |
+| **地点名落库**（名字供界面认人，没有名字时显示坐标） | `api/f2-anchor-source-and-place-search.test.ts` ·「搜索来的坐标原样落库…」（`home_place_name` 逐字落库）·「设备路径把上一个搜索来的名字清掉」；`web/views/settings/__tests__/anchor-place-search.test.ts` ·「设备抓来的锚点没有名字：摘要显示坐标，不编造一个名字」 | 名字与坐标同行落库；设备路径写入后名字为 `null`；位置锚点索引页的两行对「有名字 / 没名字 / 没坐标」三种情形各说各的 | 1+2 |
+| 地点搜索接口的三种结局分得开（空词 400 / 上游失败 502 / 答了没有匹配 200+空） | `api/f2-anchor-source-and-place-search.test.ts` ·「空 keywords → 400：空词不是「搜索全部」」「上游失败 → 502，不是「没有这个地方」」「上游答了但没有匹配 → 200 与空数组」 | 三种状态码与形状互不相同；且 400 时**没有**发出上游调用 | 2 |
 | 早用「家」、晚用「公司」（方向由时段定） | `web/__tests__/reference-line.test.ts` ·「names 公司 for the evening leg」；`web/views/commute-chain/__tests__/chain-purpose-default.test.ts` ·「早上…默认上班」「傍晚…默认下班」 | 早晚两个锚点给出不同答案 | 1 |
 
 ## F3 · 收班与末班表达
@@ -256,8 +259,35 @@
 | 6 | `api/test-db-script.test.ts` | `test-db.sh` 不再采信 `TEST_DB_NAME`（退回只按开发库名派生） | 2 failed / 2 passed | 脚本没造出点名的库（`测试库 transit_gap_test …` 而非 `…script_peg_test`）；不合规的库名被接受 |
 | 7 | `web/views/line-detail/__tests__/route-board-shaping.test.ts` | `use-route-layout.ts` 折返同站插值 `p2.x - p1.x` → `Math.abs(p2.x - p1.x)`（永远向右） | 1 failed / 6 passed | 「折返的第二行沿它自己的方向走」：`expected 326.25 to be less than 282.5` |
 | 8 | `apps/web/tests/install-promise.test.ts` | `public/manifest.webmanifest` 的 `start_url` 改成 `/platform` | 1 failed / 6 passed | 「start_url 指的就是应用自己的首页」（`expected '/platform' to be '/'`） |
+| 9 | `api/f2-anchor-source-and-place-search.test.ts` | `app.ts` 的 `anchorPatchToGcj02` 把来源判断去掉（`search` 也走 `deviceFixToGcj02`） | 4 failed / 28 passed | 「搜索来的坐标原样落库」：落库值 ≠ 高德给的那一对（且等于换算一次的结果） |
+| 10 | `api/f2-anchor-source-and-place-search.test.ts` | `anchorPatchToGcj02` 里 `patch[pair.placeName] = null`（名字永不落库） | 2 failed / 30 passed | 「搜索来的坐标原样落库」的 `home_place_name` 逐字断言；「设备路径把上一个搜索来的名字清掉」的反向对照 |
+| 11 | `api/f2-anchor-source-and-place-search.test.ts` | `place-search` 的空 keywords 检查短路（`if (false)`） | 2 failed / 30 passed | 「空 keywords → 400」：`expected 200 to be 400` |
+| 12 | `api/f2-anchor-source-and-place-search.test.ts` | 地点名/来源的「必须随坐标一起提交」检查短路 | 2 failed / 30 passed | 「单独提交被拒」：`expected 200 to be 400` |
+| 13 | `migration-013-anchor-place.test.ts` | 013 的 `home_anchor_source` 加 `NOT NULL DEFAULT 'device'` | 1 failed / 7 passed | 「来源列可空、无默认值」：NOT NULL 与 DEFAULT 各判一次 |
+| 14 | `web/views/settings/__tests__/anchor-place-search.test.ts` | `anchor-detail.vue` 加一条 `watch(keyword, …)`（逐字搜索） | 23 failed / 8 passed | 「逐字输入一个请求都不发」：打字之后请求数 ≠ 0 |
+| 15 | `web/views/settings/__tests__/anchor-place-search.test.ts` | 保存时来源恒为 `device`（搜索来的也按设备定位提交） | 2 failed / 29 passed | 「坐标 + 名字 + 来源 search」：`homeAnchorSource` 不是 `search` |
+| 16 | `web/views/settings/__tests__/anchor-place-search.test.ts` | `anchors.ts` 的 `anchorSummaryOf` 退回「已设置 / 未设置」（丢掉名字与坐标） | 6 failed / 25 passed | 「有名字说名字、没名字说坐标」与「设备抓来的锚点没有名字：摘要显示坐标」 |
+| 17 | `web/views/settings/__tests__/settings-index.test.ts` | 路由参数正则去掉（`anchors/:anchor`） | 1 failed / 21 passed | 「参数用正则圈死 home\|work」的结构断言 |
 
-八支都被抓住，无需补断言。生产文件复原后的 `sha256`：
+九次变异（9–17）全部被对应 spec 抓住，无需补断言。**被改的五个生产文件，每次改坏前先备份、复原后比对 `sha256`，九次全部一致**（脚本对每个文件都打印 `restore=ok`）。这五个文件复原后的摘要（`sha256sum` 实跑）：
+
+- `apps/server/src/app.ts` → `877be6d6fe26db593aa533db1617e314fdcfb766caf9661cb62afe3ef369fef8`
+- `migrations/013_user-settings-anchor-place.sql` → `6bdd0140fa85c73c5e8094837a9f84a0f076518315e6ac13c1c70375e6818174`
+- `apps/web/src/views/settings/anchor-detail.vue` → `49f36dfac6dabd83b1316f74b6c628d9c828c8785f5f540745cc83e69898d552`
+- `apps/web/src/views/settings/anchors.ts` → `211c10d410f60538af20bc53b9fc4d60d6ae05c484cdd6d098899e2a6c003661`
+- `apps/web/src/router/index.ts` → `0dfe19c49ad69f5fa72b70cef68eadf0e812c636e9d159568bc15fbcbc44b58e`
+
+本轮其余生产文件（未被变异，但同属这次改动）的复原后摘要：
+
+- `apps/server/src/db/client.ts` → `1ec9a67eb726974d1b2f63ba29010eff39635643391296e9d8915cc54ad6fe47`
+- `apps/server/src/services/transit.service.ts` → `9e7233056e9973916d7dcdd63441ca4c25f3fb2070e99fc6aac77141052f0f41`
+- `packages/shared/src/schemas/api.ts` → `151a937d09e5a7270caffaa41442a442ae7a59a37c7ad18afb84f0cd4bd37942`
+- `packages/shared/src/schemas/gis.ts` → `653cbc34a00b881d6fb8b08332d050f8e247e44154c3a4c3884e3fc3afd65870`
+- `packages/shared/src/geo.ts` → `e83cb7318185aa256a9ea69a077d45c3e59824c4de5df52bd905b8ecf52532a0`
+- `packages/transit-adapter/src/services/amap-gis.service.ts` → `67989bbc4c07364305ae67ea2db6e089c46f3ae403f3627daf6b254355d4e3b4`
+
+前一批（1–8）的复原摘要 —— 那是**当时那一版**文件，此后这些文件又被本轮改动过，故
+`apps/server/src/db/client.ts` 的摘要与本轮那一份不同（同一路径、不同版本，不是不一致）：
 
 - `apps/server/src/db/client.ts` → `4a92784b52d4ba9bb2c9fde0b31df0fec175cc906c0bfe8b45a2de88ad8a699c`
 - `packages/transit-adapter/src/providers/chelaile.ts` → `962aa133ee7aa36c6fcec8fb4c16821e75e61cdd6659ae4504f0285c09380b9f`

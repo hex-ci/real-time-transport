@@ -62,6 +62,9 @@ const purposeBadge = computed(() => purposeBadgeOf(props.activePurpose))
       >
         {{ purposeBadge.text }}
       </span>
+
+      <!-- 屏幕自己的动作落点：md 起这一行是本页唯一的桌面动作行，桌面端的刷新入口挂在这里。 -->
+      <slot name="actions"></slot>
     </div>
   </div>
 </template>

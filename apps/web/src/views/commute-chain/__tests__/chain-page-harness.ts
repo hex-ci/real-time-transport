@@ -13,8 +13,9 @@ import { useCityStore } from '@/stores/city.store'
  * 渲染出的树、子组件发出的事件、以及它发出的请求——不新增依赖、不设全局测试装置。
  *
  * 提供两个全局是因为页面的单选组是 reka-ui（面向真实 DOM 编写）：`Element`（其 `forwardRef`
- * 检测 `ref instanceof Element`）与 `localStorage`（city store 在创建时读取它）。两者在此打桩；
- * 测试文件负责取消打桩。
+ * 检测 `ref instanceof Element`）与 `localStorage`（city store 在创建时读取它，信息区的展开态也
+ * 记在其中）。信息区没有记忆时的默认态还要问一次断点，故 `window` 同样在此按测试给的那个宽度作答。
+ * 三者都由本装置打桩；测试文件负责取消打桩。
  *
  * `fetch` 是接缝。页面与它调用的 store 都经由它，故本装置记录每个请求（url、method、解析后的 body）
  * 并按键由测试提供的 responder 作答。responder 可交回一个 `deferred()`，使测试能挂起一个答案、
@@ -32,6 +33,10 @@ export class HostElement {
   children: HostElement[]
   parent: HostElement | null
   nodeType = 1
+  /** 内联样式：展开/收起那两拍会往里写高度。 */
+  style: Record<string, string> = {}
+  /** 本宿主没有排版，故内容高度是一个数：高度过渡的另一拍要读它。 */
+  scrollHeight = 240
   private readonly listeners = new Map<string, Set<(event: any) => void>>()
 
   constructor(tag: string, text = '') {
@@ -66,11 +71,20 @@ export class HostElement {
   }
 
   /**
-   * reka-ui 的单选在点击目标上派发自己的 `CustomEvent` 并就地监听，
-   * 故一次点击需要一个能持有监听器的目标。
+   * 在此节点上触发一个事件，如浏览器投递事件那样：经 `addEventListener` 注册的监听器会收到携带
+   * target 的事件（未给就是本节点），以及一个可关闭层或 `v-model` 处理器所取用的三个方法。
    */
-  dispatchEvent(event: { type: string }): boolean {
-    for (const handler of [...(this.listeners.get(event.type) ?? [])]) handler(event)
+  dispatchEvent(event: { type: string, target?: unknown, [key: string]: unknown }): boolean {
+    let prevented = false
+    const delivered = {
+      ...event,
+      target: event.target ?? this,
+      currentTarget: this,
+      preventDefault: () => { prevented = true },
+      stopPropagation: () => {},
+      get defaultPrevented() { return prevented },
+    }
+    for (const handler of [...(this.listeners.get(event.type) ?? [])]) handler(delivered)
     return true
   }
 
@@ -201,8 +215,8 @@ export class MockServer {
   }
 }
 
-/** 恰好够 city store 用的 `localStorage`，它在创建时读取。 */
-function createMemoryStorage(): Storage {
+/** 恰好够 city store 用的 `localStorage`，它在创建时读取；信息区的展开态也记在这里。 */
+export function memoryStorage(): Storage {
   const entries = new Map<string, string>()
   return {
     get length() { return entries.size },
@@ -212,6 +226,38 @@ function createMemoryStorage(): Storage {
     removeItem: (key: string) => { entries.delete(key) },
     setItem: (key: string, value: string) => { entries.set(key, String(value)) },
   } as Storage
+}
+
+/**
+ * 那个按宽度作答的 `matchMedia`。
+ *
+ * 只答 `(min-width: Npx)`：本仓的断点只问这一句。它与 `document` 无关，故本装置仍旧不需要
+ * 一个 DOM —— 那个宽度是测试给的一个数，不是一台机器的属性。
+ */
+function createWindowStub(width: number): Window {
+  return {
+    innerWidth: width,
+    matchMedia: (query: string) => {
+      const min = /min-width:\s*(\d+)px/.exec(query)
+      const max = /max-width:\s*(\d+)px/.exec(query)
+      return {
+        matches: min ? width >= Number(min[1]) : max ? width <= Number(max[1]) : false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => true,
+      }
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    setTimeout: (handler: TimerHandler, timeout?: number, ...args: any[]) => setTimeout(handler, timeout, ...args),
+    clearTimeout: (handle?: number) => clearTimeout(handle),
+    setInterval: (handler: TimerHandler, timeout?: number, ...args: any[]) => setInterval(handler, timeout, ...args),
+    clearInterval: (handle?: number) => clearInterval(handle),
+  } as unknown as Window
 }
 
 /** Vue 的 runtime-core，渲染进 `HostElement` 而非 document。 */
@@ -264,6 +310,10 @@ export interface MountedChainPage {
   server: MockServer
   store: ReturnType<typeof useTransitStore>
   city: ReturnType<typeof useCityStore>
+  /** 本装置给出的那份 `localStorage`：页面自己写下什么，从这里读回来。 */
+  storage: Storage
+  /** 挂载时的视口宽度：断点断言与「哪一处入口看得见」都以它为准。 */
+  viewport: number
   /** 页面的可见文本，已归一化空白。 */
   text(): string
   /** 某个渲染节点的可见文本，方式相同。 */
@@ -280,6 +330,15 @@ export interface MountedChainPage {
 export interface MountOptions {
   /** 路由，按顺序尝试（最后一个匹配胜出）。一个路由，或它们的一个列表。 */
   routes?: Route | Route[]
+  /**
+   * 视口的宽度，即 `matchMedia` 所回答的那个数。默认 1280（本仓的桌面断点之上）。
+   */
+  viewport?: number
+  /**
+   * 使用者那台机器上的记忆。默认每次挂载都是一份全新的 —— 记忆跨不跨挂载正是被测的事，
+   * 故需要跨挂载的用例自己把同一份交给两次挂载。
+   */
+  storage?: Storage
 }
 
 /** 一个路由：它应答的请求，以及它给出的答案。 */
@@ -300,8 +359,10 @@ function routeList(routes: Route | Route[] | undefined): Route[] {
 export async function mountChainPage(options: MountOptions = {}): Promise<MountedChainPage> {
   const server = new MockServer()
   for (const [pattern, respond] of routeList(options.routes)) server.on(pattern, respond)
+  const storage = options.storage ?? memoryStorage()
   vi.stubGlobal('fetch', server.handle)
-  vi.stubGlobal('localStorage', createMemoryStorage())
+  vi.stubGlobal('localStorage', storage)
+  vi.stubGlobal('window', createWindowStub(options.viewport ?? 1280))
   vi.stubGlobal('Element', HostElement)
   // reka-ui 的单选会在被点击元素上派发其中一个。
   vi.stubGlobal('CustomEvent', class {
@@ -312,6 +373,8 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
       this.detail = init?.detail
     }
   })
+  // 本宿主没有动画帧；照设置页的装置那样用一次定时调用顶上（reka-ui 的弹层与过渡都要它）。
+  vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => setTimeout(() => callback(Date.now()), 0))
 
   const pinia: Pinia = createPinia()
   setActivePinia(pinia)
@@ -336,6 +399,8 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
     server,
     store: useTransitStore(),
     city: useCityStore(),
+    storage,
+    viewport: options.viewport ?? 1280,
     text: () => textOf(container),
     textOf: node => textOf(node),
     nodes: where => walk(container).filter(where),
@@ -358,17 +423,44 @@ export async function mountChainPage(options: MountOptions = {}): Promise<Mounte
 }
 
 /**
- * 刷新控件：本页唯一的 F11 入口。
+ * 刷新按钮：本视口看得见的那一枚。
  *
- * 按它所在的 section 而非某个 class 定位，使该选择器不会被页面日后长出的其他 44px 控件满足
- * （目的单选本身也是各自带触摸目标高度的按钮）。
+ * 按它自己的可访问名定位而非某个 class —— 它是图标按钮，名字由页面给出，故这里读的是页面交出的
+ * 那个词。一页两处入口（桌面那一份、窄屏那一份）各一枚，故取**本视口看得见的那一个** —— 与使用者
+ * 按下的是同一处。
  */
 export function refreshButton(page: MountedChainPage): HostElement {
-  const section = page.node(item => item.props['aria-label'] === '数据刷新', 'refresh section')
-  const button = walk(section).find(item => item.tag === 'button')
-  if (!button) throw new Error('the refresh section holds no button')
-  return button
+  const buttons = page.nodes(item => item.tag === 'button'
+    && item.props['aria-label'] === '刷新最新车况'
+    && !hiddenAt(item, page.viewport))
+  if (buttons.length !== 1) {
+    throw new Error(`the page renders ${buttons.length} refresh entries at ${page.viewport}`)
+  }
+  return buttons[0]!
 }
+
+/**
+ * 一个节点在给定宽度下是否被 CSS 藏起来。
+ *
+ * 「按断点成立」不能停在「类名里有 md:」上：`hidden md:flex` 在 375 与 1280 上的答案相反。故这里
+ * 把本仓用到的两种写法按宽度求值 —— `hidden`（窄屏藏；宽屏由同一元素的 `md:` 显示项翻回来）与
+ * `md:hidden`（宽屏藏）。本装置没有样式引擎，故这条规则只认这两种写法；页面改用别的写法藏东西时
+ * 这里会漏判（漏判是看得见，不是藏）。
+ */
+export function hiddenAt(node: HostElement, width: number): boolean {
+  for (let current: HostElement | null = node; current; current = current.parent) {
+    const tokens = String(current.props.class ?? '').split(/\s+/).filter(Boolean)
+    if (width >= WIDE_AT) {
+      if (tokens.includes('md:hidden')) return true
+      continue
+    }
+    if (tokens.includes('hidden')) return true
+  }
+  return false
+}
+
+/** 本仓的桌面断点。 */
+export const WIDE_AT = 768
 
 /**
  * 点击一个渲染元素，带真实点击所携带的事件形状：reka-ui 的单选会从它读取 `target`、

@@ -71,7 +71,7 @@ export async function run({ check, note, fixtures }) {
     { what: '站台大屏渲染出行', timeout: 30_000 },
   )
 
-  const station = await pageEval('JSON.stringify(document.querySelector("main select")?.value ?? null)')
+  const station = await pageEval(`JSON.stringify(document.querySelector('main button[aria-label="选择站台"]')?.innerText.trim() ?? null)`)
   check('站台选择器选中了一个站', typeof station === 'string' && station.length > 0, `实际 ${JSON.stringify(station)}`)
 
   const favs = await storedFavorites()
@@ -241,4 +241,50 @@ export async function run({ check, note, fixtures }) {
   )
   const rowsAfter = await pageEval(ROW_TEXTS)
   check('刷新之后屏上的行数与内容仍成立', (rowsAfter ?? []).length === tagged, `${(rowsAfter ?? []).length} 行`)
+
+  // ---- 站台选择器是带搜索的下拉，不是原生 select ---------------------------------
+  const nativeSelects = await pageEval(`JSON.stringify([...document.querySelectorAll('main select')].length)`)
+  check('站台大屏上不再有原生 select', nativeSelects === 0, `还有 ${nativeSelects} 个`)
+
+  await cli(['click', `getByRole('button', { name: '选择站台' })`])
+  await waitForValue(
+    `JSON.stringify([...document.querySelectorAll('input[role=combobox]')].length)`,
+    count => count === 1,
+    { what: '选择器打开后出现搜索框', timeout: 10_000 },
+  )
+  const optionCount = () => pageEval(`JSON.stringify([...document.querySelectorAll('[role=listbox] [role=option]')].filter(el => el.getBoundingClientRect().width > 0).length)`)
+  const all = await optionCount()
+  check('打开后列出了可选站台', all > 1, `列出 ${all} 项`)
+
+  await cli(['fill', 'input[role=combobox]', 'zzz'])
+  await delay(400)
+  const none = await optionCount()
+  const empty = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=listbox]')].map(el => el.innerText).join('|'))`)
+  check('输入不匹配的内容时列表清空并给出空态', none === 0 && String(empty).includes('未找到匹配'), `${none} 项，面板文本 ${JSON.stringify(empty)}`)
+
+  // 清掉输入（用事件驱动 v-model）：列表应当回到全部 —— 输入整串站名只会剩它一个。
+  await pageEval(`(() => { const el = document.querySelector('input[role=combobox]'); el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); return 'cleared' })()`)
+  await delay(400)
+  const back = await optionCount()
+  check('清掉输入后列表回到全部', back === all, `${all} → ${back}`)
+
+  // 选一个与屏上不同的站：选中之后必须重读车况（否则换站只是换了个名字）。
+  const others = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=listbox] [role=option]')]
+    .filter(el => el.getBoundingClientRect().width > 0).map(el => el.innerText.trim()).filter(name => name !== ${JSON.stringify(station)}))`)
+  check('列表里存在另一个站可用于切换', (others ?? []).length > 0, JSON.stringify(others))
+  const target = others[0]
+  await clearRecordedRequests()
+  await cli(['click', `getByRole('option', { name: ${JSON.stringify(target)} })`])
+  await waitForValue(
+    `JSON.stringify([...document.querySelectorAll('input[role=combobox]')].length)`,
+    count => count === 0,
+    { what: '选中后面板关闭', timeout: 10_000 },
+  )
+  await waitForValue(
+    `JSON.stringify((window.__e2eFetch || []).filter(r => r.url.includes('/live?')).length)`,
+    count => typeof count === 'number' && count > 0,
+    { what: '换站后真的重读了实时数据', timeout: 20_000 },
+  )
+  const movedTo = await pageEval(`JSON.stringify(document.querySelector('main button[aria-label="选择站台"]')?.innerText.trim() ?? null)`)
+  check('选择器显示换过去的那个站', movedTo === target, `期望 ${JSON.stringify(target)}，实际 ${JSON.stringify(movedTo)}`)
 }

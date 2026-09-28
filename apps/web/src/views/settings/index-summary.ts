@@ -95,6 +95,10 @@ export function hoursText(value: SettingsSummaryValue<UserSettings>): string {
 /**
  * 每个锚点自己的状态：两者都是设置记录，一个词覆盖这一对，
  * 就会对其中的另一个说错。
+ *
+ * 这一行按 PRD §4.1 的口径给「已设置 / 未设置」（这一行陈述的是**该域是否配置过**）。
+ * 名字与坐标是位置锚点**索引页**（`/settings/anchors`）那两行的事，两者刻意不同：
+ * 设置索引只报「这一域现在是什么样」，点进去才看具体是哪个地点。
  */
 export function anchorsText(value: SummaryValue<StoredAnchors>): string {
   if (value.state === 'reading') return reading()

@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DataSourceTypeSchema } from '@real-time-transport/shared'
-import { refreshStatusTextOf } from '@/stores/transit.store'
 import {
   AA_NORMAL_TEXT,
   PAGE_BASE,
@@ -21,7 +20,6 @@ import {
   refreshButton,
   refreshedLines,
   type Deferred,
-  type MountedChainPage,
   type Responder,
 } from './chain-page-harness'
 import { OPERATING, READ_AT, chainView, conclusion, leg, refusal, refreshAnswer } from './chain-fixtures'
@@ -84,11 +82,6 @@ function chainsOf(chains: Array<ReturnType<typeof chainView>>, purpose = 'mornin
 /** 设置行 `设置` 自己的响应，只含页面读取的字段。 */
 function settings(coords: Record<string, number> = {}): unknown {
   return { success: true, data: coords }
-}
-
-/** 状态行，如页面所渲染。 */
-function statusLineOf(page: MountedChainPage): string {
-  return page.textOf(page.node(item => item.props.id === 'refresh-status', 'state line'))
 }
 
 afterEach(() => {
@@ -203,13 +196,20 @@ describe('F11 has one entry here, and what it names comes from the answers on sc
   })
 })
 
-describe('the state line is the store\'s, and it is announced without the seconds', () => {
+/**
+ * 一次按下的结局由全局提示承载（`__tests__/refresh-toast.test.ts` 评判它推了什么），故本页既不再
+ * 印那个词，也不再有一条常驻的 live region —— 两处都留着会让一次拒绝同时被说两遍。
+ *
+ * 刷新读数那一行也不再印：它随这次改动从两档工具栏里撤掉了。store 仍记着它（线路页的抽屉与首页的
+ * 卡片各有自己的一半），而本页一个字都不说它。
+ */
+describe('结局由全局提示说，页面上没有读数那一行', () => {
   const withChains: [RegExp, Responder] = [
     /commute-chains\/deductions/,
     () => chainsOf([chainView(conclusion([leg({ seq: 0 })]))]),
   ]
 
-  it('prints every outcome in the store\'s own words, and never a second vocabulary', async () => {
+  it('按下之后 store 记下了这次结局，而页面上找不到那个词', async () => {
     const cases: Array<{ name: string, outcome: string, respond: Responder }> = [
       { name: 'ok', outcome: 'ok', respond: () => ({ success: true, data: refreshAnswer() }) },
       {
@@ -228,69 +228,29 @@ describe('the state line is the store\'s, and it is announced without the second
       await pressRefresh(page)
 
       expect(page.store.refreshOutcome, scenario.name).toBe(scenario.outcome)
-      const expected = refreshStatusTextOf({
-        inFlight: false,
-        outcome: page.store.refreshOutcome,
-        waitSeconds: page.store.refreshWaitSecondsLeft,
-        // 一条线路，端点的上限覆盖它。
-        wanted: 1,
-        covered: 1,
-        // 本次按下可能时，本页读取的链路都已作答。
-        targetsRead: true,
-      })
-      expect(expected, scenario.name).not.toBeNull()
-      expect(statusLineOf(page), scenario.name).toBe(`${expected!.announcement}${expected!.detail}`)
+      // 页面不印结局：它是提示的，措辞只出在一个地方（store + 提示模块）。
+      expect(page.text(), scenario.name).not.toContain('刷新太频繁')
+      expect(page.text(), scenario.name).not.toContain('已刷新')
+      expect(page.text(), scenario.name).not.toContain('连接已断开')
+      expect(page.nodes(item => item.props.role === 'status'), scenario.name).toHaveLength(0)
       page.unmount()
     }
   })
 
-  it('announces the state from a live region and renders the seconds outside it', async () => {
-    const page = await mountChainPage({
-      routes: [
-        withChains,
-        [/api\/transit\/refresh$/, () => httpStatus(429, {
-          success: false,
-          data: refreshAnswer({ throttled: true, retryAfterSeconds: 13 }),
-        })],
-      ],
-    })
-    await pressRefresh(page)
-
-    const region = page.node(item => item.props.role === 'status', 'live region')
-    // 文本每秒都变的 live region 会把拒绝播报十三次，故倒计时渲染在状态旁，而非其中。
-    expect(page.textOf(region)).toBe('刷新太频繁')
-    expect(page.textOf(region)).not.toMatch(/\d/)
-    expect(statusLineOf(page)).toContain('13 秒后可刷新')
-    page.unmount()
-  })
-
-  it('says nothing about a list it has not read, and names the list once it has', async () => {
-    const first = deferred<unknown>()
-    const page = await mountChainPage({
-      routes: [/commute-chains\/deductions/, () => first.promise],
-    })
-
-    // store 的「暂无正在读取车况的线路」对**已**读取且未点名任何线路的列表为真。链路仍在到达时，
-    // 本页尚未得知它在显示什么，故交 `targetsRead: false`，控件什么都不陈述。
-    expect(statusLineOf(page)).toBe('')
-
-    first.resolve(chainsOf([]))
-    await page.flush()
-
-    expect(statusLineOf(page)).toBe('暂无正在读取车况的线路')
-    page.unmount()
-  })
-
-  it('states the reading the last press obtained, in the store\'s freshness line', async () => {
+  it('store 仍记下这次按下取到的读数，而本页一行字都不印它', async () => {
     const page = await mountChainPage({
       routes: [withChains, [/api\/transit\/refresh$/, () => ({ success: true, data: refreshAnswer() })]],
     })
 
-    expect(page.text()).toContain('尚未获取到数据')
+    expect(page.store.refreshReading).toBeNull()
     await pressRefresh(page)
 
+    // 读数确实被记下了：它是刷新那一处唯一的事实，别的表面（线路页抽屉）由它取字。
+    expect(page.store.refreshReading).not.toBeNull()
+    // ……而本页不再有那一行：两档工具栏里都没有这个 id，也没有它那句库存措辞。
+    expect(page.nodes(item => typeof item.props.id === 'string' && item.props.id.endsWith('refresh-freshness')))
+      .toHaveLength(0)
     expect(page.text()).not.toContain('尚未获取到数据')
-    expect(page.text()).toContain('最后更新')
     page.unmount()
   })
 })
@@ -549,27 +509,38 @@ describe('the house design rules', () => {
 
     const group = page.node(item => item.props.role === 'radiogroup', 'purpose radio group')
     expect(group.props['aria-label']).toBe('通勤目的')
+    // 页签在本页出现两处：宽屏那块卡片一处、窄屏那条收展面板一处，各自一组两项。
     const radios = purposeRadios(page)
-    expect(radios).toHaveLength(2)
-    expect(radios.filter(radio => radio.props['aria-checked'] === true)).toHaveLength(1)
+    expect(radios).toHaveLength(4)
+    expect(new Set(radios.filter(radio => radio.props['aria-checked'] === true).map(radio => radio.props.value)))
+      .toEqual(new Set(['morning']))
 
     await pickPurpose(page, 'evening')
 
-    // 点击其一即切换目的，该组也如此陈述。
-    const after = purposeRadios(page)
-    expect(after.filter(radio => radio.props['aria-checked'] === true).map(radio => radio.props.value)).toEqual(['evening'])
+    // 点击其一即切换目的，两处都如此陈述：一个页面不能同时选中两个目的。
+    const after = purposeRadios(page).filter(radio => radio.props['aria-checked'] === true)
+    expect(new Set(after.map(radio => radio.props.value))).toEqual(new Set(['evening']))
     page.unmount()
   })
 
-  it('gives the purpose radios the repo\'s 44px mobile touch target (min-h-11), as 设置\'s own controls do', async () => {
-    // 本仓库移动端触摸目标的约定是 44px（`settings/index.vue` 引 Apple HIG）；
-    // WCAG 2.2 SC 2.5.8 的 24px 下限无论如何都满足。
+  it('gives the purpose tabs the container/item rhythm of the house controls (44 in a 44)', async () => {
+    // 本仓库的控件是 44 那一档（`settings/index.vue` 引 Apple HIG 的 44）；WCAG 2.2 SC 2.5.8 的
+    // 24px 下限无论如何都满足。项与容器同高，故容器不带内边距：带了就会在选中项外面留出一圈，
+    // 而那一圈属于容器、项永远填不满它。
     const page = await mountChainPage({
       routes: [/commute-chains\/deductions/, () => chainsOf([])],
     })
 
+    for (const group of page.nodes(item => item.props.role === 'radiogroup')) {
+      const classes = String(group.props.class)
+      expect(classes, 'a purpose container is not h-11').toContain('h-11')
+      expect(classes, 'a purpose container keeps an inner ring the tabs cannot fill').toContain('p-0')
+      // 项与容器同高时，被裁掉的只能是选中项自己那一圈圆角。
+      expect(classes, 'a purpose container does not clip its tabs').toContain('overflow-hidden')
+    }
     for (const radio of purposeRadios(page)) {
-      expect(String(radio.props.class), 'a purpose radio is smaller than the house touch target').toContain('min-h-11')
+      expect(String(radio.props.class), 'a purpose tab is not the 44 its container is')
+        .toMatch(/(?:^|\s)(?:min-)?h-11(?:\s|$)/)
     }
     expect(String(refreshButton(page).props.class)).toContain('h-11')
     page.unmount()
@@ -637,7 +608,9 @@ describe('the house design rules', () => {
     const pill = audit.surfaces.find(surface =>
       surface.layers.some(layer => layer.startsWith('data-[state=checked]:bg-')))
     expect(pill, 'the checked pill is a surface this page paints and the audit must composite it').toBeDefined()
-    const card = audit.surfaces.find(surface => surface.layers.at(-1) === 'from-slate-900')
+    // 页头那张卡片的渐变层：工具栏这一版里没有哪一行字直接坐在卡片上（读数由共用控件渲染，
+    // 模块不在本页的 SFC 集合里），故它现在是作为**祖先层**被合成的 —— 该渐变改了，这些表面都会变。
+    const card = audit.surfaces.find(surface => surface.layers.includes('from-slate-900'))
     expect(card, 'the header card surface is not audited').toBeDefined()
     expect(luminance(rgbaOf(pill!.hex))).toBeGreaterThan(luminance(rgbaOf(card!.hex)))
 
@@ -647,87 +620,5 @@ describe('the house design rules', () => {
 
     // 页面不得漂移成的颜色：slate-500 即使在本页涂绘的最暗表面上，12px 也不合格，故没有表面能救它。
     expect(contrastOfHex('#64748b', PAGE_BASE)).toBeLessThan(AA_NORMAL_TEXT)
-  })
-})
-
-/**
- * 默认用途芯片，按其可陈述的三个事实守住。
- *
- * 它曾在 profile 未上报晚间段时就说「默认按通勤时段选定：上班」——这包括从未保存过任何通勤时段的
- * 用户，以及一个没人读过的 profile。两者都为一个不存在（或从未被看过）的存储窗口记功，而载荷携带了
- * 它究竟是哪个事实（`windowState`），故三者在此分别陈述，而非从 mode 推断。
- */
-describe('默认用途芯片说的是它读到的事实', () => {
-  /** 芯片的文本，按页面给它的 id 找到。 */
-  function chipText(page: MountedChainPage): string {
-    return page.textOf(page.node(item => item.props.id === 'purpose-default', 'the default-purpose chip'))
-  }
-
-  /** 由 profile 路由应答用例所需内容的页面。 */
-  async function mountedWithProfile(profile: unknown | (() => never)): Promise<MountedChainPage> {
-    return mountChainPage({
-      routes: [
-        [/commute-chains\/deductions/, () => chainsOf([])],
-        [/commute-profile/, () => {
-          if (typeof profile === 'function') return profile()
-          return profile
-        }],
-      ],
-    })
-  }
-
-  it('没有存过的通勤时段：说「未设置」，不把它算成「按通勤时段选定」', async () => {
-    const page = await mountedWithProfile({
-      success: true,
-      data: { mode: 'auto', description: '未设置通勤时段', windowState: 'unset' },
-    })
-
-    const text = chipText(page)
-    expect(text).toContain('未设置')
-    expect(text, 'the chip credits a commute window nobody configured').not.toContain('按通勤时段选定')
-    // 默认仍是真正的默认，也如实地陈述。
-    expect(text).toContain('上班')
-    page.unmount()
-  })
-
-  it('行在、时段没选过：同样说「未设置」，不把它算成「按通勤时段选定」', async () => {
-    // T2 的第三种事实：行在（锚点可能已存），四个时刻是 NULL，服务端报
-    // `windowState: 'unchosen'`。没有任何窗口可跟随，所以它和「没有这一行」一样不许
-    // credit 一个窗口 —— 一个只认 'unset' 的芯片会把这一团印成「默认：上班」，听起来
-    // 就像有一个按窗口选定的默认。
-    const page = await mountedWithProfile({
-      success: true,
-      data: { mode: 'auto', description: '未设置通勤时段', windowState: 'unchosen' },
-    })
-
-    const text = chipText(page)
-    expect(text).toContain('未设置')
-    expect(text, 'the chip credits a commute window whose hours were never chosen').not.toContain('按通勤时段选定')
-    expect(text).toContain('上班')
-    page.unmount()
-  })
-
-  it('读到的通勤时段：仍然按窗口选定，和今天的说法一致', async () => {
-    const page = await mountedWithProfile({
-      success: true,
-      data: { mode: 'home', description: '晚通勤时段', windowState: 'stored' },
-    })
-
-    const text = chipText(page)
-    expect(text).toContain('按通勤时段选定')
-    expect(text).toContain('下班')
-    page.unmount()
-  })
-
-  it('没读到的通勤时段：不声称窗口选定了它', async () => {
-    // 第三种事实。从未作答的 profile 既非已存储也非已设置，此处为一个窗口记功的芯片
-    // 是在对一行没人读过的东西作断言。
-    const page = await mountedWithProfile({ success: false, error: '读取失败' })
-
-    const text = chipText(page)
-    expect(text).toContain('上班')
-    expect(text, 'the chip credits a window nobody read').not.toContain('按通勤时段选定')
-    expect(text).not.toContain('未设置')
-    page.unmount()
   })
 })

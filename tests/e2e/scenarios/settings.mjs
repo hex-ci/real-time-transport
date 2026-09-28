@@ -12,7 +12,7 @@ import { storedChains, lineDetail, favorites as storedFavorites } from '../fixtu
 export const name = '设置页'
 
 const CHAIN_NAMES = `JSON.stringify([...document.querySelectorAll('[data-drag-handle]')]
-  .map(handle => handle.closest('li')?.innerText.split('\\n')[0] ?? null))`
+  .map(handle => handle.closest('li')?.querySelector('a')?.innerText.split('\\n')[0] ?? null))`
 
 /** 拖拽抓手与目标行的中心点（视口坐标）。 */
 const HANDLE_POINTS = `JSON.stringify([...document.querySelectorAll('[data-drag-handle]')].map(handle => {
@@ -45,7 +45,7 @@ export async function run({ check, equal, note, fixtures }) {
   )
   const rows = await pageEval(`JSON.stringify([...document.querySelectorAll('main a[href^="/settings/"]')]
     .map(a => ({ href: a.getAttribute('href'), text: a.innerText.split('\\n')[0] })))`)
-  equal('索引列出四个域', rows.map(r => r.href), ['/settings/lines', '/settings/schedule', '/settings/anchors', '/settings/chains'])
+  equal('索引列出四个域（通勤链路紧跟关注线路）', rows.map(r => r.href), ['/settings/lines', '/settings/chains', '/settings/schedule', '/settings/anchors'])
   note(`四个域：${JSON.stringify(rows.map(r => r.text))}`)
 
   const EXPECTED_HEADING = {
@@ -97,19 +97,105 @@ export async function run({ check, equal, note, fixtures }) {
   equal('服务端存下的顺序也是新顺序', stored.map(c => c.name), [fixtures.chains.evening.name, fixtures.chains.morning.name])
   equal('拖动只改顺序，没碰链路的别的内容', stored.map(c => c.purpose).sort(), ['evening', 'morning'])
 
+  // ---- 两个域都是「列表页 + 独立编辑页」 ------------------------------------------
+  // 这一层真正会坏的是**入口的形状**：行不再是就地展开，而是一条通往自己那一页的链接；
+  // 行内一旦又长出编辑控件，界面就回到了搬动之前的样子。
+  const ROW_SHAPE = `JSON.stringify([...document.querySelectorAll('main ul > li')].map(li => ({
+    href: li.querySelector('a')?.getAttribute('href') ?? null,
+    controls: li.querySelectorAll('input, [role=combobox], [data-chain-leg]').length,
+    handleInsideLink: (() => {
+      const handle = li.querySelector('[data-drag-handle]')
+      const link = li.querySelector('a')
+      return handle && link ? link.contains(handle) : null
+    })(),
+  })))`
+
+  await goto(`${WEB_ORIGIN}/settings/lines`)
+  const favRows = await waitForValue(
+    ROW_SHAPE,
+    rows => Array.isArray(rows) && rows.length === 3,
+    { what: '关注线路的三行', timeout: 25_000 },
+  )
+  check('关注行整行是通往自己那一页的链接', favRows.every(r => r.href?.startsWith('/settings/lines/')), JSON.stringify(favRows.map(r => r.href)))
+  check('关注行里没有编辑控件（编辑器搬到了独立页）', favRows.every(r => r.controls === 0), JSON.stringify(favRows.map(r => r.controls)))
+  check('拖拽手柄不在链接里（点行才进编辑）', favRows.every(r => r.handleInsideLink === false), JSON.stringify(favRows.map(r => r.handleInsideLink)))
+  const favListText = await pageEval(`JSON.stringify(document.querySelector('main').innerText)`)
+  check('取消关注不在列表页上', !String(favListText).includes('取消关注'), '列表页出现了取消关注')
+
+  await goto(`${WEB_ORIGIN}${favRows[0].href}`)
+  const favEditor = await waitForValue(
+    `JSON.stringify(document.querySelector('main').innerText)`,
+    text => String(text).includes('编辑 '),
+    { what: '关注线路的编辑页', timeout: 25_000 },
+  )
+  check('关注编辑页有保存与取消关注', String(favEditor).includes('保存') && String(favEditor).includes('取消关注'), String(favEditor).slice(0, 120))
+  check('关注编辑页有回到列表的出路', String(favEditor).includes('返回关注线路'), String(favEditor).slice(0, 120))
+
+  // 认不出的 id 不发明默认值：不说成某一条，也不渲染成列表。
+  await goto(`${WEB_ORIGIN}/settings/lines/not-a-real-favorite`)
+  const favMissing = await waitForValue(
+    `JSON.stringify(document.querySelector('main').innerText)`,
+    text => String(text).includes('不存在'),
+    { what: '认不出的关注 id 的答复', timeout: 20_000 },
+  )
+  check('认不出的关注 id 说「这条关注不存在」', String(favMissing).includes('这条关注不存在'), String(favMissing).slice(0, 120))
+
+  await goto(`${WEB_ORIGIN}/settings/chains`)
+  const chainRows = await waitForValue(
+    ROW_SHAPE,
+    rows => Array.isArray(rows) && rows.length === 2,
+    { what: '通勤链路的两行', timeout: 25_000 },
+  )
+  check('链路行整行是通往自己那一页的链接', chainRows.every(r => r.href?.startsWith('/settings/chains/')), JSON.stringify(chainRows.map(r => r.href)))
+  check('链路行里没有表单控件（表单搬到了独立页）', chainRows.every(r => r.controls === 0), JSON.stringify(chainRows.map(r => r.controls)))
+  const chainListText = await pageEval(`JSON.stringify(document.querySelector('main').innerText)`)
+  check('删除链路不在列表页上', !String(chainListText).includes('删除链路'), '列表页出现了删除链路')
+
+  // 编辑页：保存与删除同一行，删除在保存右侧。
+  await goto(`${WEB_ORIGIN}${chainRows[0].href}`)
+  await waitForValue(
+    `JSON.stringify(document.querySelector('main').innerText)`,
+    text => String(text).includes('编辑 '),
+    { what: '链路的编辑页', timeout: 25_000 },
+  )
+  const ACTIONS = `JSON.stringify([...document.querySelectorAll('main form button')]
+    .filter(b => /保存链路|删除链路|取消/.test(b.innerText))
+    .map(b => {
+      const rect = b.getBoundingClientRect()
+      return { text: b.innerText.trim(), width: Math.round(rect.width), height: Math.round(rect.height), top: Math.round(rect.top) }
+    }))`
+  const actions = await pageEval(ACTIONS)
+  note(`链路编辑页的动作：${JSON.stringify(actions)}`)
+  equal('链路编辑页只有保存与删除两枚动作', actions.map(a => a.text), ['保存链路', '删除链路'])
+  check('删除在保存右侧且同一行', actions[1].top === actions[0].top && actions[1].width > 0, JSON.stringify(actions))
+  check('两枚动作都 ≥44 高', actions.every(a => a.height >= 44), JSON.stringify(actions.map(a => a.height)))
+
+  // 新建页：没有删除（一条还不存在的链路没什么可删的）。
+  await goto(`${WEB_ORIGIN}/settings/chains/new`)
+  const createActions = await waitForValue(
+    ACTIONS,
+    list => Array.isArray(list) && list.length > 0,
+    { what: '新建页的动作', timeout: 20_000 },
+  )
+  equal('新建页只有保存', createActions.map(a => a.text), ['保存链路'])
+
+  // 收尾回到列表页：下面那一段从列表页上的「新增链路」进录入表单。
+  await goto(`${WEB_ORIGIN}/settings/chains`)
+
   // ---- 站点选择器：直线距离与「最近」 --------------------------------------------
-  await cli(['click', `getByRole('button', { name: '新增链路' })`])
-  const selectValues = await waitForValue(
-    `JSON.stringify([...document.querySelectorAll('main select')].map(s => [...s.options].map(o => o.value)))`,
-    groups => Array.isArray(groups) && groups.length > 0 && groups[0].length > 0,
+  // 「新增链路」是一个**链接**（新页面），不是按钮：它指向 `/settings/chains/new`。
+  await cli(['click', `getByRole('link', { name: '新增链路' })`])
+  // 「线路与方向」现在也是共用下拉（不带搜索框）：它没有原生 select 的 value，故按可见文字认那一行。
+  await cli(['click', `[aria-label="线路与方向"]`])
+  const lineOptions = await waitForValue(
+    `JSON.stringify([...document.querySelectorAll('[role=option]')].map(o => o.innerText.trim()))`,
+    list => Array.isArray(list) && list.length > 0,
     { what: '录入表单的线路选择器', timeout: 20_000 },
   )
-  note(`线路选择器选项：${JSON.stringify(selectValues[0])}`)
+  note(`线路选择器选项：${JSON.stringify(lineOptions)}`)
 
-  // 选项的值是「收藏行 + 方向」（站表按它取），故选的是夹具 A 的那个方向。
-  const favId = fixtures.favorites.a.favorite.id
-  const value = selectValues[0].find(v => v.startsWith(favId)) ?? selectValues[0][1]
-  await cli(['select', 'main select', value])
+  const wantedLine = lineOptions.find(text => text.includes(fixtures.favorites.a.line.lineName)) ?? lineOptions[0]
+  await cli(['click', `getByRole('option', { name: ${JSON.stringify(wantedLine)} })`])
   await delay(2000)
 
   const OPTIONS = `JSON.stringify([...document.querySelectorAll('[role=option]')].map(o => o.innerText.trim()))`

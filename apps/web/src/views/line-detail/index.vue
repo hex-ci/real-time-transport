@@ -10,10 +10,7 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import {
-  RefreshCw,
-  X,
-} from '@lucide/vue'
+import { X } from '@lucide/vue'
 import {
   DialogClose,
   DialogContent,
@@ -26,11 +23,12 @@ import {
 import { useEventListener, useIntervalFn } from '@vueuse/core'
 import {
   refreshFreshnessOf,
-  refreshStatusTextOf,
   useTransitStore,
 } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
+import { RefreshControl } from '@/components/refresh-control'
+import { runWithFeedback } from '@/action-feedback'
 import { useGis } from '@/composables/use-gis'
 import {
   DesktopActionBar,
@@ -102,8 +100,6 @@ const { nearestStation } = storeToRefs(locationStore)
 const { isLoading, loadFailure, isRefreshingLive } = storeToRefs(transitStore)
 const {
   refreshInFlight,
-  refreshOutcome,
-  refreshWaitSecondsLeft,
   refreshReading,
 } = storeToRefs(transitStore)
 
@@ -170,40 +166,25 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => [{
   cityCode: currentCityCode.value,
 }])
 
-/** 按钮下的状态行：粗粒度状态（live region 播报的那个）与其旁的秒数；无可报告时为 null。 */
-const refreshStatus = computed(() => refreshStatusTextOf({
-  inFlight: refreshInFlight.value,
-  outcome: refreshOutcome.value,
-  waitSeconds: refreshWaitSecondsLeft.value,
-  // 只问了一条线路，故被上限截断的情形是本页不可能处的状态。
-  wanted: refreshTargets.value.length,
-  covered: refreshTargets.value.length,
-  // 本页唯一的目标就是路由里的那条线路，故没有「读取仍未结束」的列表：刷新对话框挂在报站板上，而报站板只为已加载的线路渲染。
-  targetsRead: true,
-}))
-
 /**
    * 按钮正在做什么。按下的一半仍在途时它都让开——花掉窗口的请求，或展示它的回读——
    * 因为其间第二次按下是关于另一个时刻的答案。
    */
 const refreshing = computed(() => refreshInFlight.value || isRefreshingLive.value)
 
+/** 本页唯一留在屏幕上的刷新字句：上一次按下取到的读数。 */
 const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
 
-/** 状态行的色调。词承载状态，色调只作辅助，故此处绝不是任何东西的唯一信号。 */
-const refreshStatusClass = computed(() => {
-  if (refreshOutcome.value === 'throttled') return 'text-amber-400'
-  if (refreshOutcome.value === 'unavailable' || refreshOutcome.value === 'offline') {
-    return 'text-rose-400'
-  }
-  if (refreshOutcome.value === 'ok') return 'text-emerald-400'
-  return 'text-slate-400'
-})
-
-/** 按钮指向的 id，使状态与控件一起被读出，而不是另一件要去找的东西。 */
-const refreshDescribedBy = computed(() => refreshStatus.value
-  ? 'refresh-freshness refresh-status'
-  : 'refresh-freshness')
+/**
+ * F11 在本页的两处入口共用这一份参数：桌面动作行与移动端抽屉各挂一个实例，词都由本页算好，
+ * 控件不改写一个字。桌面那个另给一个 id 前缀 —— 抽屉在 md 以下可能同时开着，两个实例的 id
+ * 与各自的描述不得互相遮挡。
+ */
+const refreshControl = computed(() => ({
+  refreshing: refreshing.value,
+  freshness: refreshFreshness.value.text,
+  label: '刷新最新车况',
+}))
 
 /**
    * 按下：经共享请求索要一次重读，然后把线路读回来，使报站板显示该请求取得之物。
@@ -488,14 +469,16 @@ async function toggleBoardStop(purpose: 'morning' | 'evening'): Promise<void> {
   const station = selectedStation.value
   const dir = favoriteDirection.value
   if (!fav?.id || !station || dir === null) return
+  // 在闭包里读到的 id 不再是被守卫过的那个属性，故先取出它。
+  const favoriteId = fav.id
 
   stopSaving.value = true
   stopError.value = null
   try {
     const clearing = stationPurpose.value === purpose
-    await transitStore.updateCommuteSlot(fav.id, purpose, clearing
+    await runWithFeedback('favorite-board-stop', () => transitStore.updateCommuteSlot(favoriteId, purpose, clearing
       ? { stop: null }
-      : { stop: { name: station.name, order: station.order }, direction: dir })
+      : { stop: { name: station.name, order: station.order }, direction: dir }))
   }
   catch (err) {
     stopError.value = err instanceof Error ? err.message : '上车点保存失败'
@@ -713,7 +696,16 @@ onUnmounted(() => {
       :is-active-tab="isActiveTab"
       :active-purpose="activePurpose"
       @switch-direction="switchDirection"
-    />
+    >
+      <!-- F11：桌面端的刷新入口。md 以下这一行整条不播，故移动端仍只在抽屉里那一个。 -->
+      <template #actions>
+        <RefreshControl
+          v-bind="refreshControl"
+          id-prefix="desktop-"
+          @refresh="onRefresh"
+        />
+      </template>
+    </DesktopActionBar>
 
     <!-- 桌面端线路横幅（md 及以上） -->
     <LineHero
@@ -782,27 +774,37 @@ onUnmounted(() => {
       >
         <!-- 头部 -->
         <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div class="flex items-center gap-2">
+          <div class="flex min-w-0 items-center gap-2">
             <span
-              class="flex h-8 items-center rounded-lg border px-2.5 font-mono text-sm font-bold"
+              class="flex h-8 shrink-0 items-center rounded-lg border px-2.5 font-mono text-sm font-bold whitespace-nowrap"
               :class="badgeAccent.lineName"
             >
               {{ currentLineDetail.lineName }}
             </span>
-            <DialogTitle class="text-sm font-bold text-white">
+            <DialogTitle class="min-w-0 truncate text-sm font-bold text-white">
               {{ currentLineDetail.directionName }}
             </DialogTitle>
           </div>
-          <DialogClose as-child>
-            <button
-              type="button"
-              class="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-400 active:scale-95"
-              aria-label="关闭线路信息"
-            >
-              <X class="h-4 w-4" />
-            </button>
-          </DialogClose>
+          <div class="flex shrink-0 items-center gap-1.5">
+            <!-- F11：移动端的刷新入口，坐在关闭按钮左边——常规位置，不再占内容末尾的一整行。
+                 它是本控件的一半，另一半（那两行字）跟在头部下方，故两者共用同一个 idPrefix。 -->
+            <RefreshControl v-bind="refreshControl" variant="button" @refresh="onRefresh" />
+            <DialogClose as-child>
+              <button
+                type="button"
+                class="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-400 active:scale-95"
+                aria-label="关闭线路信息"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </DialogClose>
+          </div>
         </div>
+
+        <!-- F11：头部那枚按钮说明的那两行字。它经拥有冷却期的那个请求索要，故与桌面动作行
+             以及首页的那一次按下共用同一个窗口；它报告该请求的答案：拒绝剩下的等待、失败，以及
+             所取得读取的时刻。 -->
+        <RefreshControl v-bind="refreshControl" variant="reading" />
         <DialogDescription class="sr-only">
           线路概况与行驶方向配置
         </DialogDescription>
@@ -874,38 +876,6 @@ onUnmounted(() => {
               选中站点
             </span>
           </div>
-        </div>
-
-        <!-- F11：本页唯一的刷新入口。它经拥有冷却期的那个请求索要，故此处一次按下与首页一次按下
-             共用同一个窗口；它报告该请求的答案：拒绝剩下的等待、失败，以及所取得读取的时刻。 -->
-        <div class="pt-1">
-          <button
-            class="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-semibold text-cyan-400 transition active:scale-95 disabled:opacity-60 lg:gap-2.5 lg:py-3.5 lg:text-base"
-            :disabled="refreshing"
-            :aria-describedby="refreshDescribedBy"
-            @click="onRefresh"
-          >
-            <RefreshCw
-              class="h-3.5 w-3.5 shrink-0"
-              :class="refreshing ? 'animate-spin' : ''"
-              aria-hidden="true"
-            />
-            <span>刷新最新车况</span>
-          </button>
-          <!-- 读取自己的时刻，以及它是哪种值。从未取得的读取不报任何时间。 -->
-          <p id="refresh-freshness" class="mt-2 text-xs text-slate-400 lg:text-base">
-            {{ refreshFreshness.text }}
-          </p>
-          <!-- 状态行。只有粗粒度状态坐在 live region 里：秒数渲染在它旁边，因为 live region 里的
-               倒计时会按秒排队播报。region 在没有话可说时就渲染——与第一个词一同创建的 region 在某些
-               屏幕阅读器上根本不播报。两个 span 紧挨着，故这一行读起来仍像一个元素。 -->
-          <p
-            id="refresh-status"
-            class="text-xs lg:text-base"
-            :class="[refreshStatusClass, refreshStatus ? 'mt-1' : '']"
-          >
-            <span role="status" aria-live="polite">{{ refreshStatus?.announcement }}</span><span>{{ refreshStatus?.detail }}</span>
-          </p>
         </div>
       </DialogContent>
     </DialogPortal>

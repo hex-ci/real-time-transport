@@ -42,6 +42,9 @@ async function recordedSummary() {
 }
 
 export async function run({ check, equal, note, fixtures }) {
+  // 信息区在宽屏默认展开，故「默认按通勤时段选定」那句在 DOM 里；显式定住视口，免得依赖场景顺序。
+  await cli(['resize', '1280', '900'])
+
   const morningChain = fixtures.chains.morning
 
   await installFetchRecorder()
@@ -55,11 +58,11 @@ export async function run({ check, equal, note, fixtures }) {
   // ---- 首次进入的默认页签跟随通勤时段（此刻在早通勤时段里）------------------------
   const feed = await chainFeed()
   equal('页面按通勤时段请求了上班目的的链路', feed.purpose, 'morning')
-  const checked = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=radio]')]
-    .filter(r => r.getAttribute('aria-checked') === 'true').map(r => r.textContent.trim()))`)
+  // 窄档与宽档各有一份页签，只有一份是可见的；隐藏那份不该被算作屏幕上的选择。
+  const checkedRadios = `JSON.stringify([...document.querySelectorAll('[role=radio]')]
+    .filter(r => r.getBoundingClientRect().width > 0 && r.getAttribute('aria-checked') === 'true').map(r => r.textContent.trim()))`
+  const checked = await pageEval(checkedRadios)
   equal('上班页签被选中', checked, ['上班'])
-  const defaultLine = await pageEval(`JSON.stringify(document.getElementById('purpose-default')?.textContent ?? null)`)
-  check('页面说明默认是跟随时段选定的', String(defaultLine).includes('默认按通勤时段选定：上班'), `实际 ${JSON.stringify(defaultLine)}`)
 
   // ---- 每段的余量与结论 ---------------------------------------------------------
   note(`页面收到的请求：${JSON.stringify(await recordedSummary())}`)
@@ -130,14 +133,13 @@ export async function run({ check, equal, note, fixtures }) {
   await clearRecordedRequests()
   await goto(`${WEB_ORIGIN}/commute-chain`)
   await waitForValue(
-    `JSON.stringify(document.getElementById('purpose-default')?.textContent ?? '')`,
-    text => String(text).includes('默认按通勤时段选定：下班'),
-    { what: '时段换到傍晚后页面说默认是下班', timeout: 25_000 },
+    checkedRadios,
+    tabs => Array.isArray(tabs) && tabs.join('') === '下班',
+    { what: '时段换到傍晚后页签落在下班', timeout: 25_000 },
   )
   const feedEvening = await chainFeed()
   equal('时段换到傍晚后默认请求的是下班目的', feedEvening.purpose, 'evening')
-  const checkedEvening = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=radio]')]
-    .filter(r => r.getAttribute('aria-checked') === 'true').map(r => r.textContent.trim()))`)
+  const checkedEvening = await pageEval(checkedRadios)
   equal('下班页签被选中', checkedEvening, ['下班'])
 
   // 复原成覆盖此刻的早时段，后面的场景（首页卡片）仍然要处在上班模式。

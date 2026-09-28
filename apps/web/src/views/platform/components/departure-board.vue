@@ -183,7 +183,7 @@ function markOf(item: DepartureItem): string | null {
       <div class="flex justify-center border-t border-slate-800/60 p-2.5">
         <button
           type="button"
-          class="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:opacity-60 lg:text-base"
+          class="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:text-base"
           :disabled="refreshing"
           @click="$emit('refresh')"
         >

@@ -13,26 +13,31 @@ import {
 import type { RefreshReading, RefreshStatusText } from '../stores/transit.store'
 
 /**
- * F11 的刷新入口，如两个屏幕所渲染。
+ * F11 的刷新入口，如三页所渲染。
  *
- * 三件事必须可见：刷新正在进行、它被拒绝以及窗口关闭多久、以及它失败了。它们旁边是刷新所拥有的唯一
- * 事实——它取得的那次读数被取得的瞬间——而支配该事实的规则是本项目最严的：生成或降级的读数绝不得被
- * 呈现为平白取得的，而从未取得的读数根本不给时间。
+ * 四件事必须可见：刷新被拒以及窗口关闭多久、它失败了、连接断了、以及它成功了。它们旁边是刷新所拥有
+ * 的唯一留在屏幕上的事实——它取得的那次读数被取得的瞬间——而支配该事实的规则是本项目最严的：生成或
+ * 降级的读数绝不得被呈现为平白取得的，而从未取得的读数根本不给时间。
  *
- * 措辞是纯逻辑，故在此测试而非浏览器（本应用无 DOM 测试台）。末尾的源码守卫钉单元测试看不到的接线：
- * 两个屏幕都按拥有冷却的那个端点，且它们渲染的倒计时在播报它的 live region 之外。
+ * 措辞是纯逻辑，故在此测试而非浏览器（本应用无 DOM 测试台）。一次按下的结局如何被推给用户由
+ * `refresh-toast.test.ts` 评判；此处评判的是那句话本身，以及末尾那些单元测试看不到的接线：三页都按
+ * 拥有冷却的那一个端点，且覆盖范围由 store 决定。
  */
+
+/**
+ * 本文件评判的是那句话与那次请求。提示那一侧（推几条、什么身份、驻留多久）由 `refresh-toast.test.ts`
+ * 评判，故此处把库换成空实现 —— 本应用没有 DOM 测试台，而它的撤销要用到 `requestAnimationFrame`。
+ */
+vi.mock('vue-sonner', () => ({
+  toast: Object.assign(() => {}, { dismiss: () => {}, custom: () => {} }),
+}))
 
 /** 夹具报告为取得的瞬间。2023-11-14T22:13:20Z。 */
 const OBTAINED_AT = 1_700_000_000_000
 
-/**
- * 状态行，如屏幕所渲染：状态，然后是秒数。
- *
- * 两部分由两个屏幕从同一行渲染（下面的源码守卫守住这一点），故这是用户读到的文本——而文本正是评判措辞的依据。
- */
-function lineOf(status: RefreshStatusText | null): string | null {
-  return status === null ? null : status.announcement + status.detail
+/** 一句话，如提示所读出的：状态，然后是随附的那一段。 */
+function lineOf(status: RefreshStatusText): string {
+  return status.announcement + status.detail
 }
 
 /** 一次读数，如刷新响应所上报：一个瞬间，及其种类。 */
@@ -143,15 +148,11 @@ describe('the freshness line never dresses a reading as something it is not', ()
   })
 })
 
-describe('the three states the control has to state', () => {
-  const idle = { inFlight: false, outcome: null, waitSeconds: 0, wanted: 0, covered: 0, targetsRead: true }
-
-  it('says a refresh is running', () => {
-    expect(lineOf(refreshStatusTextOf({ ...idle, inFlight: true }))).toBe('正在刷新…')
-  })
+describe('the conclusion the store has to state', () => {
+  const idle = { waitSeconds: 0, wanted: 1, covered: 1 }
 
   it('says the refresh landed', () => {
-    expect(lineOf(refreshStatusTextOf({ ...idle, outcome: 'ok', wanted: 1, covered: 1 })))
+    expect(lineOf(refreshStatusTextOf({ ...idle, outcome: 'ok' })))
       .toBe('已刷新')
   })
 
@@ -194,53 +195,13 @@ describe('the three states the control has to state', () => {
     expect(covered).toContain('8')
   })
 
-  it('says nothing before the first attempt', () => {
-    expect(lineOf(refreshStatusTextOf({ ...idle, wanted: 1, covered: 1 }))).toBeNull()
-  })
-
-  it('says there is nothing to re-read rather than sitting dead', () => {
-    // 卡片完全不读任何线路的屏幕（尚未选上车点）没有可请求的东西，
-    // 而一次静默什么都不做的按下是控件不得给出的那一个答案。
-    expect(lineOf(refreshStatusTextOf({ ...idle, wanted: 0, covered: 0 })))
-      .toBe('暂无正在读取车况的线路')
-  })
-
-  it('names the list it is about — never the screen the control sits on', () => {
-    // 句子的主语是目标所取自的列表，不是屏幕。上班/下班模式为每条关注线路显示一张卡，无论它们是否
-    // 已有可重读的到站行（尚未为该用途选上车点），故「屏幕上暂无可刷新的线路」在本页看不见的屏幕上
-    // 声称什么都没有，而用户正看着四张卡。
-    const line = lineOf(refreshStatusTextOf({ ...idle, wanted: 0, covered: 0 }))!
-    expect(line).toBe('暂无正在读取车况的线路')
-    expect(line, 'the sentence claims something about the screen').not.toContain('屏幕上')
-  })
-
-  it('says nothing when the list the targets come from was never read', () => {
-    // **失败**的读取留下与已作答空读取相同的空数组（read-state.ts），故此处不得陈述「没有线路在被读取」：
-    // 决定有何可刷新的那个列表从未取得，而该句子会是关于没人读过的行的断言。
-    // 该失败由屏幕自己陈述，并附能改变它的重试。
-    expect(lineOf(refreshStatusTextOf({
-      ...idle, wanted: 0, covered: 0, targetsRead: false,
-    }))).toBeNull()
-
-    // 已**作答**却未产出行的列表仍如此陈述：那种情形是关于已存内容的事实，也是控件必须解释的那一种。
-    expect(lineOf(refreshStatusTextOf({
-      ...idle, wanted: 0, covered: 0, targetsRead: true,
-    }))).toBe('暂无正在读取车况的线路')
-  })
-
-  it('announces the state once, not once per second of the wait', () => {
-    // 拒绝是唯一一个站立期间其行会改变的已陈述状态：秒数取自倒计时。它们被携带在 live region 所读取的
-    // 状态**之外**，否则一个 13 秒的窗口会把一次拒绝排入十三条播报。
-    const twelve = refreshStatusTextOf({
-      ...idle, outcome: 'throttled', waitSeconds: 12, wanted: 1, covered: 1,
-    })!
-    const eleven = refreshStatusTextOf({
-      ...idle, outcome: 'throttled', waitSeconds: 11, wanted: 1, covered: 1,
-    })!
+  it('keeps the countdown out of the state word', () => {
+    // 冷却那条在窗口关闭期间一直站着，而它每秒都在改写自己：状态词是同一个，动的只有秒数那一段。
+    const twelve = refreshStatusTextOf({ ...idle, outcome: 'throttled', waitSeconds: 12 })
+    const eleven = refreshStatusTextOf({ ...idle, outcome: 'throttled', waitSeconds: 11 })
     expect(twelve.announcement).toBe('刷新太频繁')
     expect(eleven.announcement).toBe(twelve.announcement)
     expect(eleven.announcement).not.toContain('11')
-    // 可见行仍会移动，故倒计时即便从不被播报也仍被读到。
     expect(eleven.detail).not.toBe(twelve.detail)
     expect(lineOf(eleven)).not.toBe(lineOf(twelve))
   })
@@ -414,28 +375,21 @@ describe('one press, one request', () => {
     // 故状态行再无可报，并停止描述一个不再关闭的窗口。
     expect(refreshWaitSeconds(store.refreshWaitUntil, store.refreshNow)).toBe(0)
     expect(store.refreshOutcome).toBeNull()
-    expect(lineOf(refreshStatusTextOf({
-      inFlight: false,
-      outcome: store.refreshOutcome,
-      waitSeconds: store.refreshWaitSecondsLeft,
-      wanted: 1,
-      covered: 1,
-      targetsRead: true,
-    }))).toBeNull()
+    // 窗口开了就再没有等待可说，故提示也不会留在屏幕上。
+    expect(wordingOf(store)).toBeNull()
   })
 })
 
 /**
- * 控件渲染的状态行，取自 store 自己的时钟：等待按两个屏幕派生它的方式派生，故这是用户所见的。
+ * store 现在会说出的那句话：结局取自它，等待取自它自己的时钟。没有结局可陈述时为 null。
  */
-function statusOf(store: ReturnType<typeof useTransitStore>): string | null {
+function wordingOf(store: ReturnType<typeof useTransitStore>): string | null {
+  if (store.refreshOutcome === null) return null
   return lineOf(refreshStatusTextOf({
-    inFlight: store.refreshInFlight,
     outcome: store.refreshOutcome,
     waitSeconds: store.refreshWaitSecondsLeft,
     wanted: 1,
     covered: 1,
-    targetsRead: true,
   }))
 }
 
@@ -491,11 +445,11 @@ describe('a refusal is never silent', () => {
     expect(store.refreshNow).toBeGreaterThan(deadline)
 
     // 服务端陈述了还剩 1 秒窗口；拒绝如实陈述，而非让这次按下完全没有答案。
-    expect(statusOf(store)).toBe('刷新太频繁 · 1 秒后可刷新')
+    expect(wordingOf(store)).toBe('刷新太频繁 · 1 秒后可刷新')
 
     // ……而那一秒被数过并结束，而非永远站着。
     vi.advanceTimersByTime(1_000)
-    expect(statusOf(store)).toBeNull()
+    expect(wordingOf(store)).toBeNull()
   })
 
   it('states the wait for a device whose clock runs ahead of the server', async () => {
@@ -527,33 +481,20 @@ describe('a refusal is never silent', () => {
     expect(await store.refreshLive([{ lineId: 'line_a', direction: 0 }])).toBe('throttled')
 
     // 服务端发送的时长不受该差异影响，故拒绝由它陈述，而非由这个时钟丢失的截止时刻陈述。
-    expect(statusOf(store)).toBe('刷新太频繁 · 13 秒后可刷新')
+    expect(wordingOf(store)).toBe('刷新太频繁 · 13 秒后可刷新')
 
     vi.advanceTimersByTime(13_000)
-    expect(statusOf(store)).toBeNull()
+    expect(wordingOf(store)).toBeNull()
   })
 })
 
-/** live region 所携带的状态，仅取自 store 自己的状态，别无其他。 */
-function announcementOf(store: ReturnType<typeof useTransitStore>): string | null {
-  const status = refreshStatusTextOf({
-    inFlight: store.refreshInFlight,
-    outcome: store.refreshOutcome,
-    waitSeconds: store.refreshWaitSecondsLeft,
-    wanted: 1,
-    covered: 1,
-    targetsRead: true,
-  })
-  return status === null ? null : status.announcement
-}
-
 /**
- * 每次状态变化一次播报，绝不每秒一次。
+ * 冷却那条站立期间每秒都改写自己，而它的**身份**不变。
  *
- * 倒计时是状态站立期间行中唯一会移动的部分，它坐在 live region 之外正因如此：若秒数在区域内同行，
- * 一次 13 秒的拒绝会播报十三次，而最需要听到该拒绝的用户正是它不停打断的那位。
+ * 同一条提示改说下一秒，而不是每秒新推一条：屏幕上是一条在数，不是一叠各说一个秒数的通知。
+ * （它逐秒改写的后果由 `refresh-toast.test.ts` 从提示那一侧评判。）
  */
-describe('one state, one announcement', () => {
+describe('the countdown rewrites one statement, not one per second', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -563,7 +504,7 @@ describe('one state, one announcement', () => {
     vi.useRealTimers()
   })
 
-  it('announces a refusal once across the whole window it counts down', async () => {
+  it('says the same state word all the way down the window it counts', async () => {
     vi.useFakeTimers()
     const store = useTransitStore()
     const start = Date.now()
@@ -578,16 +519,30 @@ describe('one state, one announcement', () => {
 
     await store.refreshLive([{ lineId: 'line_a', direction: 0 }])
 
-    // 在窗口关闭期间每秒采样一次，即 live region 重读自身文本的方式。
-    const announced: Array<string | null> = [announcementOf(store)]
-    for (let second = 0; second < 5; second++) {
-      vi.advanceTimersByTime(1_000)
-      announced.push(announcementOf(store))
+    // 在窗口关闭期间每秒采样一次，即那条提示改写自己的方式。
+    const words: Array<string | null> = []
+    const seconds: number[] = []
+    for (let second = 0; second <= 5; second++) {
+      const outcome = store.refreshOutcome
+      if (outcome === null) {
+        words.push(null)
+      }
+      else {
+        words.push(refreshStatusTextOf({
+          outcome,
+          waitSeconds: store.refreshWaitSecondsLeft,
+          wanted: 1,
+          covered: 1,
+        }).announcement)
+        seconds.push(store.refreshWaitSecondsLeft)
+      }
+      if (second < 5) vi.advanceTimersByTime(1_000)
     }
 
-    // 一次五秒拒绝期间只说了两件事——它被拒绝，以及它结束了——而非等待中每秒一个词。
-    expect(announced.filter((text, index) => text !== announced[index - 1]))
-      .toEqual(['刷新太频繁', null])
+    // 一次五秒拒绝期间状态词只说两件事——被拒，以及窗口开了——而不是等待中每秒钟一个词。
+    expect(words.filter((word, index) => word !== words[index - 1])).toEqual(['刷新太频繁', null])
+    // 而被改写的那个数确实在往下走，故它读起来是一个倒计时。
+    expect(seconds).toEqual([5, 4, 3, 2, 1])
   })
 })
 
@@ -606,6 +561,8 @@ describe('both screens come through the one request that owns the window', () =>
   const store = read('../stores/transit.store.ts')
   const overview = read('../views/overview/index.vue')
   const detail = read('../views/line-detail/index.vue')
+  const chain = read('../views/commute-chain/index.vue')
+  const control = read('../components/refresh-control/main.vue')
 
   it('posts the manual refresh to the endpoint that owns the cooldown, with a JSON body', () => {
     const request = codeOf(store)
@@ -644,32 +601,34 @@ describe('both screens come through the one request that owns the window', () =>
     expect(store).toContain('尚未获取到数据')
   })
 
-  it('hands the read state in, so an unreadable list states nothing about itself', () => {
-    // 目标所取自的列表是否被**读取**，是只有屏幕持有的事实（read-state.ts），故由屏幕交出而非 store 假定：
-    // 首页从它自己的三态说明，链路页从它自己的加载说明。停止传递它的屏幕会对一个没人读过的列表
-    // 答「没有线路在被读取」。
-    expect(codeOf(overview)).toContain('targetsRead: favouritesRead.value === \'read\'')
-    const chain = read('../views/commute-chain/index.vue')
-    expect(codeOf(chain)).toContain('targetsRead: !loading.value')
+  it('decides the coverage itself, from every target the screen hands in', () => {
+    // 端点限定了单次尝试能点名的条数，故「这一次刷新了几条」是 store 的事实：由它切片与计数，
+    // 界面只交上来屏幕上有什么。把切片留在页面的那一版会让两个数字从两处漂开。
+    const request = codeOf(store)
+    expect(request).toContain('REFRESH_MAX_LINES')
+    expect(request).toMatch(/slice\(0, REFRESH_MAX_LINES\)/)
+    for (const [name, source] of Object.entries({ overview, detail, chain })) {
+      const code = codeOf(source)
+      expect(code, `${name} slices its targets itself`).not.toContain('REFRESH_MAX_LINES')
+      expect(code, `${name} presses a refresh without naming a line`)
+        .not.toMatch(/refreshLive\(\s*\)/)
+    }
   })
 
-  it('renders a live region that stands before its state, with the seconds outside it', () => {
-    for (const [name, source] of Object.entries({ overview, detail })) {
-      const code = codeOf(source)
-      const container = code.match(/<p[^>]*id="refresh-status"[^>]*>/)
-      expect(container, `${name} has no state line`).not.toBeNull()
-      // 与其第一个词一同创建的 live region 在某些屏幕阅读器上根本不被播报，
-      // 故携带 role="status" 的元素无论有没有状态可陈述都被渲染。
-      expect(container![0], `${name} renders its state line only once it has one`)
-        .not.toContain('v-if')
-
-      const line = code.match(/<p[^>]*id="refresh-status"[\s\S]*?<\/p>/)![0]
-      const region = line.match(/<span[^>]*role="status"[^>]*>([\s\S]*?)<\/span>/)
-      expect(region, `${name} announces its state from a live region`).not.toBeNull()
-      // 区域内只有粗粒度状态：秒数坐在兄弟节点上，故倒计时跳动时区域文本不变。
-      expect(region![1], `${name} announces its countdown`).toContain('announcement')
-      expect(region![1], `${name} announces its countdown`).not.toContain('detail')
-      expect(line, `${name} does not render the countdown`).toContain('refreshStatus?.detail')
-    }
+  it('leaves no state line behind in the control', () => {
+    // 一次按下的结局由全局提示承载，故控件里不再有那一行，也不再有一条常驻的 live region：
+    // 两处都留着会让一次拒绝同时被说两遍。
+    const code = codeOf(control)
+    expect(code).not.toContain('refresh-status')
+    expect(code).not.toContain('role="status"')
+    expect(code).not.toContain('announcement')
+    // 它仍旧不改写一个字：新鲜度行的词来自 store。
+    expect(code, 'the control words a state itself').not.toContain('刷新太频繁')
+    expect(code, 'the control words a freshness line itself').not.toContain('最后更新')
+    // 而两半都还在，且由共用的那一个前缀说明它们是一件事。
+    expect(code).toContain('refresh-freshness')
+    expect(code).toContain(`'full'`)
+    expect(code).toContain(`'button'`)
+    expect(code).toContain(`'reading'`)
   })
 })

@@ -18,6 +18,8 @@ import { computed, shallowRef } from 'vue'
 import { Trash2 } from '@lucide/vue'
 import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
 import type { Station } from '@real-time-transport/shared'
+import { SearchableCombobox } from '@/components/searchable-combobox'
+import type { ComboboxOption, SelectedText } from '@/components/searchable-combobox'
 import StationPinPicker from './station-pin-picker.vue'
 import {
   LAST_LEG_REASON,
@@ -51,6 +53,25 @@ const emit = defineEmits<{
 }>()
 
 const option = computed(() => optionOfLeg(props.leg, props.lines))
+
+/**
+ * 每个线路+方向一个选项，顺序就是 `lines` 自己的（已按本链路的目的排过）。
+ * 两段文字里只用主文本：线路标签已经把线路、方向与使用者声明过的通勤标识都说完了。
+ */
+const lineOptions = computed<ComboboxOption[]>(() => props.lines.map(item => ({
+  key: item.key,
+  primary: lineOptionLabel(item),
+  secondary: null,
+})))
+
+/**
+ * 触发器显示本段**持有**的那一条自己的标签；什么都没选时为 null，由占位文字接管。
+ *
+ * 不去列表里找一个同名的：列表还没读到、或该线路已不再被关注时，找回来的会是另一条。
+ */
+const selectedLine = computed<SelectedText | null>(() => (option.value === null
+  ? null
+  : { primary: lineOptionLabel(option.value), secondary: null }))
 
 /** 本段线路提供的站点，以及它们是否可供挑选。 */
 const stations = computed<Station[]>(() => option.value?.stations ?? [])
@@ -100,14 +121,15 @@ function onStation(which: 'board' | 'alight', choice: StationChoice | null): voi
  * 同一站反向编号），故把它带过去会记录新线路在该编号上并不持有的站——对地铁还会静默翻转
  * 本段方向。故站点作为一对被清空，这是「站名与站序要同时选定」的诚实读法，
  * 且清空被陈述，好让没有东西无声消失。
+ *
+ * 参数就是选项自己的 key，控件只报已选中的那一条，故「未设置」只由草稿持有的 null 表示。
  */
-function onLineChange(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value
+function onLineChange(key: string): void {
   const hadStations = props.leg.boardStationName !== null || props.leg.alightStationName !== null
-  clearedByLineChange.value = hadStations && value !== (props.leg.lineKey ?? '')
+  clearedByLineChange.value = hadStations && key !== (props.leg.lineKey ?? '')
   emit('update:leg', {
     ...props.leg,
-    lineKey: value === '' ? null : value,
+    lineKey: key,
     boardStationName: null,
     boardStationOrder: null,
     alightStationName: null,
@@ -176,13 +198,15 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
 <template>
   <div :data-chain-leg="index" class="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950 p-3">
     <div class="flex items-center justify-between gap-2">
-      <span class="text-xs font-medium text-slate-300">{{ legPositionText(index) }}</span>
+      <!-- 段标题：它是这一段的名字，不是一枚读数，故与「乘车段」那一级的字号分开 —— 12px
+           在这里会被读成另一条字段标签。 -->
+      <h5 class="text-sm font-semibold text-slate-200 lg:text-base">{{ legPositionText(index) }}</h5>
       <!-- 最后一段不可移除：一段车都没有的链路给不出任何结论，而丢掉整条链路的方式是
            该行自己的 删除。禁用的控件仍欠它的原因，那就是此处的 title 与标签——而标签把
            可见的「删除该段」留在其中，故控件上的字就是能寻址它的字。 -->
       <button
         type="button"
-        class="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs text-slate-300 transition hover:border-rose-500/40 hover:text-rose-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        class="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs text-slate-300 transition hover:border-rose-500/40 hover:text-rose-400 active:scale-95"
         :disabled="!removable"
         :aria-label="removeName"
         :title="removeName"
@@ -195,20 +219,18 @@ const removeName = computed(() => `${REMOVE_VISIBLE_LABEL}（${props.removable
 
     <label class="block">
       <span class="text-xs text-slate-400">线路与方向</span>
-      <!-- 原生 select，不是手搓选择器：这个选择是一份有界的、用户自己已关注线路的列表，
-           而站台屏的表头也已经为它那个有界选择用了 select。手机上也保留系统自己的选择器。 -->
-      <select
-        :value="leg.lineKey ?? ''"
-        class="mt-1 min-h-[44px] w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-slate-100 outline-none focus:border-cyan-500 lg:text-sm"
-        @change="onLineChange"
-      >
-        <option value="">
-          选择线路与方向
-        </option>
-        <option v-for="item in lines" :key="item.key" :value="item.key">
-          {{ lineOptionLabel(item) }}
-        </option>
-      </select>
+      <!-- 这份列表是有界的（一屏几条），故同一个共用控件在这里不带它那个搜索框；
+           站多到一眼看不完，两个选择器才需要搜索。 -->
+      <SearchableCombobox
+        :model-value="leg.lineKey"
+        :selected="selectedLine"
+        :options="lineOptions"
+        :searchable="false"
+        label="线路与方向"
+        placeholder="选择线路与方向"
+        class="mt-1"
+        @update:model-value="onLineChange"
+      />
       <!-- 在**选择**线路之处就陈述列表的来源，而不是只在它绑住手之处。这份列表是已关注的
            线路，故未关注的线路干脆不在选项里，而没有这句话，
            屏上就没有东西说明它为何缺席。 -->

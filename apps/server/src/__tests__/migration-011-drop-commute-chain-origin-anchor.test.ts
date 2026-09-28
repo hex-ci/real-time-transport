@@ -54,12 +54,15 @@ describe('011：通勤链路不再录入起点（只删列的结构改动）', (
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当时的最新一步；如今 012 在它之后，是它让出了这个位置', () => {
-    // 012 在它之后加了新的列（接驳方式），故「按文件名排最后」这一行 011 不再持有。
-    // 钉住的是**谁在它之后**，而不是它自己永远垫底。
+  it('是当时的最新一步；如今 012 与 013 在它之后，是它们让出了这个位置', () => {
+    // 012 在它之后加了新的列（接驳方式），013 又给设置行加了锚点的地点名与来源，
+    // 故「按文件名排最后」这一行 011 不再持有。钉住的是**谁在它之后**，而不是它自己永远垫底。
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
     const after = files.slice(files.indexOf(FILE) + 1)
-    expect(after, 'a migration landed before 011').toEqual(['012_commute-chain-leg-connection-mode.sql'])
+    expect(after, 'a migration landed before 011').toEqual([
+      '012_commute-chain-leg-connection-mode.sql',
+      '013_user-settings-anchor-place.sql',
+    ])
   })
 
   it('前向段去掉起点这一列，并显式点名删掉只看这一列的取值约束', () => {

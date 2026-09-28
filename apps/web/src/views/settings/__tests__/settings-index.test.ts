@@ -167,11 +167,12 @@ describe('设置索引是一张四行的清单，每行是一个整行的链接'
     const host = await mountIndex()
 
     // 整行是一个链接：不是脚本跳转，所以「在新标签页打开」、键盘与语义都是浏览器原生的。
+    // 顺序即层次：关注线路之后紧接通勤链路（链路是建在关注之上的），再是通勤时段与位置锚点。
     expect(rows(host).map(item => item.href)).toEqual([
       '/settings/lines',
+      '/settings/chains',
       '/settings/schedule',
       '/settings/anchors',
-      '/settings/chains',
     ])
     // 该行的状态写在链接内部 —— 行与它的摘要不能各说一半。
     expect(row(host, '/settings/lines').text).toContain('关注线路')
@@ -244,12 +245,32 @@ describe('每行的摘要只陈述该域现在的事实', () => {
     host.unmount()
   })
 
-  it('位置锚点给出每个锚点自己已设置 / 未设置', async () => {
+  it('位置锚点给出每个锚点自己已设置 / 未设置（设置索引这一行的口径，PRD §4.1）', async () => {
+    // 这一行陈述的是**该域是否配置过**；名字与坐标是位置锚点索引页那两行的事。
     const host = await mountIndex({ anchors: { homeLat: 39.9, homeLng: 116.4, workLat: null, workLng: null } })
 
     const text = row(host, '/settings/anchors').text
     expect(text).toContain('家 已设置')
     expect(text).toContain('公司 未设置')
+    host.unmount()
+  })
+
+  it('位置锚点有地点名时，设置索引这一行仍只说「已设置」——具体是哪个地点在它自己的页里', async () => {
+    const host = await mountIndex({
+      anchors: {
+        homeLat: 39.9,
+        homeLng: 116.4,
+        homePlaceName: '珠江帝景B区',
+        homeAnchorSource: 'search',
+        workLat: null,
+        workLng: null,
+      },
+    })
+
+    const text = row(host, '/settings/anchors').text
+    expect(text).toContain('家 已设置')
+    // 域级的行不承担地点名：那是索引页两行的事（见 anchor-place-search.test.ts）。
+    expect(text).not.toContain('珠江帝景B区')
     host.unmount()
   })
 
@@ -402,6 +423,35 @@ describe('四个子页面是 /settings 的子路由（一条结构断言：导�
     for (const page of ['index', 'lines', 'schedule', 'anchors', 'chains']) {
       expect(router, `${page}.vue is not reachable from the route table`).toContain(`@/views/settings/${page}.vue`)
     }
+  })
+
+  it('两个锚点各是 /settings 的子路由，且参数用正则圈死 home|work', () => {
+    // 三个事实一起钉：子页仍在 `/settings` 之下（顶栏点亮靠父记录）、两个锚点共用同一个页面
+    // （同构，文案查表）、以及参数正则 —— 它是「不发明默认值」在导航层面的那一半：
+    // `/settings/anchors/office` 必须落到兜底的 404 页，而不是按「家」渲染。
+    const router = codeOf(read('../../../router/index.ts'))
+
+    expect(router, 'the anchor sub-page is not a child of /settings, so the nav item would go dark')
+      .toContain(`path: 'anchors/:anchor(home|work)'`)
+    expect(router, 'the two anchors are not served by one page').toContain('@/views/settings/anchor-detail.vue')
+    // 一条路由，不是两条：复制出来的第二页就是两处会漂移的文案。
+    expect(router.match(/anchor-detail\.vue/g), 'the anchor page is registered more than once').toHaveLength(1)
+    // 参数以 props 交给页面，故页面不必自己读 `route.params`。
+    expect(router).toContain('props: route => ({ anchor: route.params.anchor })')
+  })
+
+  it('一条关注线路的编辑页也是 /settings 的子路由，参数以 props 交给页面', () => {
+    // 与锚点那两个子页同一件事，只差参数：关注行的 id 由服务端生成，取值范围是开放的，
+    // 故这里**不**加正则 —— 「参数不合法」那一半由页面在列表作答之后说「这条关注不存在」
+    // （`favorite-editor.vue`），而导航层面加一个正则只会把可达的 id 挡在门外。
+    const router = codeOf(read('../../../router/index.ts'))
+
+    expect(router, 'the favorite editor is not a child of /settings, so the nav item would go dark')
+      .toContain(`path: 'lines/:favoriteId'`)
+    expect(router, 'the favorite editor page is missing from the route table')
+      .toContain('@/views/settings/favorite-editor.vue')
+    expect(router.match(/favorite-editor\.vue/g), 'the editor page is registered more than once').toHaveLength(1)
+    expect(router).toContain('props: route => ({ favoriteId: route.params.favoriteId })')
   })
 })
 

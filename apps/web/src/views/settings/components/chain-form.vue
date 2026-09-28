@@ -56,7 +56,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'submit', write: ReturnType<typeof chainBodyOf>): void
-  (e: 'cancel'): void
   /** 草稿变了：之前就它所说的一切，都是关于一个已不存在的草稿。 */
   (e: 'edit'): void
   /** 关注集合读不到：在它被拥有的地方重读。 */
@@ -145,10 +144,6 @@ function onSave(): void {
   refusal.value = found
   if (found) return
   emit('submit', chainBodyOf(draft.value, props.lines))
-}
-
-function onCancel(): void {
-  emit('cancel')
 }
 </script>
 
@@ -240,7 +235,7 @@ function onCancel(): void {
       />
       <button
         type="button"
-        class="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-950 text-xs text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        class="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-950 text-xs text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300 active:scale-95"
         :disabled="atLegLimit || !hasLines"
         :title="atLegLimit ? `首版一条链路最多 ${MAX_CHAIN_LEGS} 段乘车` : undefined"
         @click="addLeg"
@@ -271,21 +266,17 @@ function onCancel(): void {
       <span>{{ error }}</span>
     </p>
 
-    <div class="flex flex-wrap gap-2">
+    <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-4">
       <button
         type="submit"
-        class="min-h-[44px] flex-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        class="min-h-[44px] min-w-0 flex-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:px-5 lg:text-base"
         :disabled="saving"
       >
         {{ saving ? '保存中…' : '保存链路' }}
       </button>
-      <button
-        type="button"
-        class="min-h-[44px] rounded-xl border border-slate-700 bg-slate-900 px-4 text-xs text-slate-200 transition hover:bg-slate-800 active:scale-95"
-        @click="onCancel"
-      >
-        取消
-      </button>
+      <!-- 删除只在这一条已经存在时有意义，故它的位置由使用者给：新建页没有它。它紧挨保存，
+           是这一页第二件能做的事。 -->
+      <slot name="actions"></slot>
     </div>
   </form>
 </template>

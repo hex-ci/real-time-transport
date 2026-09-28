@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
 import { haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
+import { announceActionFeedback } from '@/action-feedback'
 
 /**
  * 开发用的 GPS 覆写：`VITE_GPS_SIMULATION=true` 时把位置钉在固定坐标，以便不移动、不授权
@@ -174,15 +175,45 @@ export const useLocationStore = defineStore('location', () => {
   }
 
   /**
+   * 这一次跟踪的结局说过了没有，以及这一次是不是用户自己按下的。
+   *
+   * 位置流每秒都在动，故一次跟踪只说一次结局：取得的位置只在从「没有」到「有」的那一次算取得。
+   * 自动调用（页面挂载时要位置）一个字都不说 —— 它不是一次点按，且位置一到界面自己就显示距离。
+   */
+  let outcomeSaid = false
+  let awaited = false
+
+  /**
    * 开始连续跟踪。
    *
    * 被拒绝的权限保持被拒绝：重复请求只是刷控制台（iOS 上也开不出第二次弹窗），所以一旦被拒
    * 就忽略自动调用方，只有用户显式点按才会重试。
+   *
+   * 点按的四种结局都在这里说出去（提示在 `@/action-feedback` 的表里）：不支持、被拒、取不到、
+   * 以及随后真的取得位置。三处调用点因此不必各自加一句，它们只交出「是不是用户按的」。
+   *
+   * 开发模拟下不请求真实定位，但一次点按照旧要有回话 —— 否则在模拟环境里那个按钮看起来是坏的。
    */
   function requestLocation(options?: { userInitiated?: boolean }): void {
-    if (SIMULATION_COORDS) return
-    if (!geo.isSupported.value) return
-    if (permissionState.value === 'denied' && !options?.userInitiated) return
+    const userInitiated = options?.userInitiated === true
+    if (SIMULATION_COORDS) {
+      if (userInitiated) announceActionFeedback('location', 'ok', { simulated: true })
+      return
+    }
+    if (!geo.isSupported.value) {
+      // 按下一个没有回声的按钮是这里唯一的缺陷，故只有用户按的那一次说；自动调用保持静默。
+      if (userInitiated) announceActionFeedback('location', 'fail', { reason: 'unsupported' })
+      return
+    }
+    if (permissionState.value === 'denied' && !userInitiated) return
+
+    outcomeSaid = false
+    awaited = userInitiated
+    if (permissionState.value === 'denied') {
+      // 已被拒之后浏览器不会再弹窗，故这一次点按当场被回答，而不是等一个不会来的设备错误。
+      announceActionFeedback('location', 'fail', { reason: 'denied' })
+      outcomeSaid = true
+    }
     tracking.value = true
     geo.resume()
   }
@@ -218,6 +249,25 @@ export const useLocationStore = defineStore('location', () => {
 
   watch(userCoords, (coords) => {
     if (coords) void refreshLandmark()
+    // 取得位置只说一次：位置流每秒都在动，而「已经拿到」不是每秒重新成立一次的事。
+    if (!awaited || outcomeSaid || coords === null) return
+    outcomeSaid = true
+    // 地标是随后才解析出来的（防抖），故此刻知道就带上，不知道就不带 —— 绝不等它。
+    announceActionFeedback('location', 'ok', { landmark: landmark.value })
+  })
+
+  /**
+   * 设备上的失败：超时、取不到，以及权限在被按下之后被拒。
+   *
+   * `TIMEOUT` 与 `POSITION_UNAVAILABLE` 说的是同一件要用户做的事（再试一次），
+   * 故共用表里那一句；权限那一种说的是另一件事（去系统设置里放行）。
+   */
+  watch(() => geo.error.value, (err) => {
+    if (!awaited || outcomeSaid || !err) return
+    outcomeSaid = true
+    announceActionFeedback('location', 'fail', {
+      reason: err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable',
+    })
   })
 
   /**

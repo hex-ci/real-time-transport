@@ -8,9 +8,12 @@ import {
   type Route,
 } from './settings-harness'
 import LinesPage from '../lines.vue'
+import FavoriteEditorPage from '../favorite-editor.vue'
 import SchedulePage from '../schedule.vue'
 import AnchorsPage from '../anchors.vue'
+import AnchorDetailPage from '../anchor-detail.vue'
 import ChainsPage from '../chains.vue'
+import ChainEditorPage from '../chain-editor.vue'
 import RemovalDialog from '../components/removal-dialog.vue'
 import OverviewEmptyState from '@/views/overview/components/empty-state.vue'
 import ChainEmptyState from '@/views/commute-chain/components/chain-empty-state.vue'
@@ -41,7 +44,7 @@ afterEach(async () => {
 })
 
 /** 这些页面发出的读取，全部作答。 */
-function routes(options: { favourites?: 'ok' | 'fail', settings?: 'ok' | 'fail' | 'unset' } = {}): Route[] {
+function routes(options: { favourites?: 'ok' | 'fail', settings?: 'ok' | 'fail' | 'unset', chains?: Array<Record<string, unknown>> } = {}): Route[] {
   return [
     [/\/api\/transit\/favorites$/, () => (options.favourites === 'fail'
       ? { success: false, error: '读取失败' }
@@ -58,7 +61,7 @@ function routes(options: { favourites?: 'ok' | 'fail', settings?: 'ok' | 'fail' 
       }
     }],
     [/\/api\/transit\/lines\//, () => ({ success: true, data: { lineId: 'bus_027_1', direction: 0, directionName: '开往建国门', cityCode: '027', stops: [{ id: 's1', name: '东大桥', order: 1, interchanges: [] }] } })],
-    [/\/api\/transit\/commute-chains\?/, () => ({ success: true, data: [] })],
+    [/\/api\/transit\/commute-chains\?/, () => ({ success: true, data: options.chains ?? [] })],
   ]
 }
 
@@ -83,10 +86,10 @@ function accessibleName(host: MountedHost, node: HostElement): string {
   return label === undefined ? host.textOf(node) : String(label)
 }
 
-/** 子页面的「返回设置」控件，或一个点名缺失之物的抛错。 */
-function backControl(host: MountedHost): HostElement {
-  const found = host.nodes(item => item.tag === 'a' && host.textOf(item).includes('返回设置'))[0]
-  if (!found) throw new Error('the page rendered no 「返回设置」 control')
+/** 子页面的返回控件（可见文字为 `words`），或一个点名缺失之物的抛错。 */
+function backControl(host: MountedHost, words: string): HostElement {
+  const found = host.nodes(item => item.tag === 'a' && host.textOf(item).includes(words))[0]
+  if (!found) throw new Error(`the page rendered no 「${words}」 control`)
   return found
 }
 
@@ -155,29 +158,68 @@ function directionRadios(host: MountedHost): HostElement[] {
   return host.nodes(item => item.props.role === 'radio')
 }
 
+/**
+ * 一条已存链路，供编辑页那一帧用：编辑页的标题点名它正在编的那一条。
+ *
+ * 参数不合法时**不发明默认值**（那条断言在 `commute-chain-editor.test.ts` 里），故这里给的是
+ * 一个真的在列表里的 id —— 这一页的两半（渲染某一条 / 说它不存在）各由自己的测试守。
+ */
+const STORED_CHAIN: Record<string, unknown> = {
+  id: 'chain-1',
+  userId: 'default_user',
+  name: '早上上班',
+  purpose: 'morning',
+  displayOrder: 0,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  legs: [{
+    seq: 0,
+    lineId: 'bus_027_1',
+    lineName: '快线 1 路',
+    cityCode: '027',
+    boardStationName: '东大桥',
+    boardStationOrder: 1,
+    alightStationName: '建国门',
+    alightStationOrder: 2,
+    transferExtraMinutes: null,
+    connectionMode: null,
+  }],
+}
+
 const PAGES = [
-  { name: 'lines', component: LinesPage, heading: '关注线路' },
-  { name: 'schedule', component: SchedulePage, heading: '通勤时段' },
-  { name: 'anchors', component: AnchorsPage, heading: '位置锚点' },
-  { name: 'chains', component: ChainsPage, heading: '通勤链路' },
+  { name: 'lines', component: LinesPage, heading: '关注线路', props: {} },
+  { name: 'schedule', component: SchedulePage, heading: '通勤时段', props: {} },
+  { name: 'anchors', component: AnchorsPage, heading: '位置锚点', props: {} },
+  // 每个锚点自己的页面也欠同一条：真 `<h2>` 与一个应用内的返回控件。它们退到**锚点列表**
+  // 而不是设置索引 —— 从「家」退出去跳过锚点列表那一层，用户就回不到刚才在挑的那个锚点。
+  { name: 'anchor-detail(home)', component: AnchorDetailPage, heading: '设置「家」', props: { anchor: 'home' }, back: { href: '/settings/anchors', words: '返回位置锚点' } },
+  { name: 'anchor-detail(work)', component: AnchorDetailPage, heading: '设置「公司」', props: { anchor: 'work' }, back: { href: '/settings/anchors', words: '返回位置锚点' } },
+  { name: 'chains', component: ChainsPage, heading: '通勤链路', props: {} },
+  // 链路的录入与编辑在它自己的两页上，且两页都退到**链路列表**（不是设置索引）——
+  // 从一条链路退出去跳过列表那一层，用户就回不到他刚才在编的那一条所在的那一屏。
+  { name: 'chain-editor(new)', component: ChainEditorPage, heading: '新增链路', props: { chainId: null }, back: { href: '/settings/chains', words: '返回通勤链路' } },
+  { name: 'chain-editor(chain)', component: ChainEditorPage, heading: '编辑 早上上班', props: { chainId: 'chain-1' }, back: { href: '/settings/chains', words: '返回通勤链路' }, chains: [STORED_CHAIN] },
+  // 一条关注线路自己的页面：它退到**关注线路列表**，不是设置索引 —— 从这一条退出去跳过列表
+  // 那一层，用户就回不到他刚才在编的那一条所在的那一屏。
+  { name: 'favorite-editor', component: FavoriteEditorPage, heading: '编辑', props: { favoriteId: 'fav-1' }, back: { href: '/settings/lines', words: '返回关注线路' } },
 ]
 
-describe('四个子页面各自成页：真正的 h2、应用内的「返回设置」', () => {
+describe('子页面各自成页：真正的 h2、应用内的返回控件', () => {
   for (const page of PAGES) {
-    it(`${page.name} 页有自己的 h2，并带一个指向 /settings 的「返回设置」`, async () => {
-      const host = await mountPage(page.component)
+    const back = page.back ?? { href: '/settings', words: '返回设置' }
+    it(`${page.name} 页有自己的 h2，并带一个指向 ${back.href} 的「${back.words}」`, async () => {
+      const host = await mountPage(page.component, page.props, { chains: page.chains })
 
       const heading = host.node(item => item.tag === 'h2', `${page.name}'s own heading`)
       expect(host.textOf(heading)).toContain(page.heading)
 
-      const back = backControl(host)
-      expect(back.props.href).toBe('/settings')
-      // 名字里包含可见文案：可见的是「返回设置」，能念出来的也必须是「返回设置」。
-      expect(accessibleName(host, back)).toContain('返回设置')
-      expect(accessibleName(host, back)).toContain(host.textOf(back).trim())
+      const control = backControl(host, back.words)
+      expect(control.props.href).toBe(back.href)
+      // 名字里包含可见文案：可见的是哪几个字，能念出来的也必须是哪几个字。
+      expect(accessibleName(host, control)).toContain(back.words)
+      expect(accessibleName(host, control)).toContain(host.textOf(control).trim())
       // 可见文案只写一次：不在 aria-label 里重复一遍标题。
-      expect(back.props['aria-label']).toBeUndefined()
-      expect(String(back.props.class), `${page.name}'s back control is smaller than 44px`).toMatch(HOUSE_TOUCH_TARGET)
+      expect(control.props['aria-label']).toBeUndefined()
+      expect(String(control.props.class), `${page.name}'s back control is smaller than 44px`).toMatch(HOUSE_TOUCH_TARGET)
       host.unmount()
     })
   }
@@ -188,20 +230,41 @@ describe('四个子页面各自成页：真正的 h2、应用内的「返回设�
     expect(lines.text()).not.toContain('新增链路')
     lines.unmount()
 
+    const editor = await mountPage(FavoriteEditorPage, { favoriteId: 'fav-1' })
+    expect(editor.text()).toContain('编辑')
+    expect(editor.text(), 'the editor renders another domain').not.toContain('新增链路')
+    editor.unmount()
+
     const schedule = await mountPage(SchedulePage)
     expect(schedule.text()).toContain('通勤时段')
     expect(schedule.text()).not.toContain('搜索')
     schedule.unmount()
 
     const anchors = await mountPage(AnchorsPage)
-    expect(anchors.text()).toContain('用当前位置设置「家」和「公司」')
+    expect(anchors.text()).toContain('家与公司是步行到站台的起点')
     expect(anchors.text()).not.toContain('新增链路')
     anchors.unmount()
+
+    const anchorDetail = await mountPage(AnchorDetailPage, { anchor: 'home' })
+    expect(anchorDetail.text()).toContain('设置「家」')
+    expect(anchorDetail.text(), 'the anchor page renders another domain').not.toContain('新增链路')
+    anchorDetail.unmount()
+
+    const anchorWork = await mountPage(AnchorDetailPage, { anchor: 'work' })
+    expect(anchorWork.text()).toContain('设置「公司」')
+    anchorWork.unmount()
 
     const chains = await mountPage(ChainsPage)
     expect(chains.text()).toContain('新增链路')
     expect(chains.text()).not.toContain('用当前位置设置')
+    // 列表页只放列表与它的动作：表单搬到了编辑页上，故这里一个输入框都没有。
+    expect(chains.nodes(item => item.tag === 'input'), 'the list page still carries the form').toHaveLength(0)
     chains.unmount()
+
+    const chainEditor = await mountPage(ChainEditorPage, { chainId: null })
+    expect(chainEditor.text()).toContain('新增链路')
+    expect(chainEditor.text(), 'the chain editor renders another domain').not.toContain('搜索关注')
+    chainEditor.unmount()
   })
 })
 
@@ -215,11 +278,10 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
     host.unmount()
   })
 
-  it('取消关注：展开一行之后的那个控件，以及对话框里的两个', async () => {
-    const host = await mountPage(LinesPage)
+  it('取消关注：编辑页底部的那个控件，以及对话框里的两个', async () => {
+    const host = await mountPage(FavoriteEditorPage, { favoriteId: 'fav-1' })
 
-    // 必须先打开该行：折叠时面板不渲染。
-    await press(host, host.node(item => item.tag === 'button' && host.textOf(item).includes('快线 1 路'), 'the followed-line row'))
+    // 取消关注现在住在编辑页里（列表行上不再有它），且不藏在任何展开态之后。
     const unfollow = controlWith(host, '取消关注')
     expect(String(unfollow.props.class), '取消关注 is smaller than the house touch target').toMatch(HOUSE_TOUCH_TARGET)
     host.unmount()
@@ -233,11 +295,36 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
     dialog.unmount()
   })
 
-  it('展开一行后的方向单选也是 44px（这一处此前是 36px）', async () => {
+  it('编辑页的方向单选也是 44px（这一处此前是 36px）', async () => {
     // 方向药丸是本屏仍被测量为低于院内数字的那一个控件：`min-h-[36px]`，它满足 WCAG 2.5.8 的 24×24
     // 又不是 44。双向线路是唯一渲染它们的形状（单方向线路把方向显示为文本），
     // 故夹具是一条带 `reverseLineId` 的关注线路。
-    // `reverseLineId`.
+    const host = await mountComponent(FavoriteEditorPage, {
+      props: { favoriteId: TWO_WAY_FAVOURITE.id },
+      routes: [
+        [/\/api\/transit\/favorites$/, () => ({ success: true, data: [TWO_WAY_FAVOURITE] })],
+        [/\/api\/transit\/lines\//, () => ({ success: true, data: TWO_WAY_DETAIL })],
+        [/\/api\/transit\/settings/, () => ({ success: true, data: {} })],
+        [/\/api\/transit\/commute-chains\?/, () => ({ success: true, data: [] })],
+      ],
+      components: { RouterLink: RouterLinkStub },
+    })
+    await host.flush()
+
+    const radios = directionRadios(host)
+    // 非空在前，因为这个列表来自筛选 helper：空列表会让下面的循环在什么都没测量时通过。
+    // 两个用途 × 两个方向即该页显示的四个药丸。
+    expect(radios.length, 'the editor rendered no direction radio to measure').toBe(4)
+    for (const radio of radios) {
+      expect(String(radio.props.class), `a direction radio is smaller than the house touch target: ${String(radio.props.class)}`)
+        .toMatch(HOUSE_TOUCH_TARGET)
+    }
+    host.unmount()
+  })
+
+  it('列表行的拖拽手柄 ≥44px，且行内没有编辑控件（组合框一个都没有）', async () => {
+    // 展开退休之后，列表行只剩「手柄 + 链接」两件：整行是进编辑页的链接，行内不放编辑器。
+    // 故这一条同时钉两件事：手柄的触控目标，以及行内一个组合框都没有。
     const host = await mountComponent(LinesPage, {
       routes: [
         [/\/api\/transit\/favorites$/, () => ({ success: true, data: [TWO_WAY_FAVOURITE] })],
@@ -245,23 +332,19 @@ describe('44px 房规：这次量出来低于它的四个控件都补上了', ()
         [/\/api\/transit\/settings/, () => ({ success: true, data: {} })],
         [/\/api\/transit\/commute-chains\?/, () => ({ success: true, data: [] })],
       ],
+      components: { RouterLink: RouterLinkStub },
     })
     await host.flush()
 
-    // 必须先打开该行：折叠时面板不渲染。
-    await press(host, host.node(
-      item => item.tag === 'button' && host.textOf(item).includes('快线 1 路'),
-      'the followed-line row',
-    ))
+    const handle = host.node(item => 'data-drag-handle' in item.props, 'the drag handle')
+    expect(String(handle.props.class), 'the drag handle is smaller than the house touch target').toMatch(HOUSE_TOUCH_TARGET)
+    expect(String(handle.props.class), 'the drag handle is narrower than a finger').toMatch(/w-11|w-\[44px\]|min-w-11|min-w-\[44px\]/)
 
-    const radios = directionRadios(host)
-    // 非空在前，因为这个列表来自筛选 helper：空列表会让下面的循环在什么都没测量时通过。
-    // 两个用途 × 两个方向即该行显示的四个药丸。
-    expect(radios.length, 'the expanded row rendered no direction radio to measure').toBe(4)
-    for (const radio of radios) {
-      expect(String(radio.props.class), `a direction radio is smaller than the house touch target: ${String(radio.props.class)}`)
-        .toMatch(HOUSE_TOUCH_TARGET)
-    }
+    expect(directionRadios(host), 'the list row still carries the editor’s controls').toHaveLength(0)
+    expect(
+      host.nodes(item => item.tag === 'button' && (item.props.role === 'combobox' || item.props['aria-haspopup'] === 'listbox')),
+      'the list row still carries a stop picker',
+    ).toHaveLength(0)
     host.unmount()
   })
 })
@@ -385,9 +468,9 @@ describe('关注线路读不到时，说「未读到」，不说「没有」', (
 
   it('通勤链路页的录入：读失败时说未读到，不给「还没有关注线路」这句关于存储行的话', async () => {
     // 链路编辑器的前提是关注集，故失败的读取让它没有线路可提供——
-    // 这与「还没有关注线路」**不是**同一个事实。
-    const host = await mountPage(ChainsPage, {}, { favourites: 'fail' })
-    await press(host, controlWith(host, '新增链路'))
+    // 这与「还没有关注线路」**不是**同一个事实。表单现在住在新建页上，故驱动方式随之改到那一页
+    // （`chain-editor.vue` 的 `linesRead` 原样来自 `line-stops.ts`，与列表行时代同一个判断）。
+    const host = await mountPage(ChainEditorPage, { chainId: null }, { favourites: 'fail' })
 
     expect(host.text()).not.toContain('还没有关注线路')
     expect(host.text()).toContain('未读到关注线路')

@@ -150,13 +150,32 @@ export const UpdateFavoriteSchema = z.object({
 export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
 
 /**
+ * 一个锚点的坐标是从哪来的 —— 这条契约的**凭据**，不是标签。
+ *
+ * 来源决定写入时换不换算（`docs/PRD.md` §5.4）：`device` 是浏览器上报的原始 WGS-84，
+ * 在 HTTP 边界过 `deviceFixToGcj02` 一次；`search` 是高德地点搜索返回的坐标，**本身就是
+ * GCJ-02**，原样落库。少了这个词，一个已经处于 GCJ-02 的坐标会被再换算一次 ——
+ * 北京两个基准之间约 500 m，而结果仍是一个看着合理的坐标。
+ *
+ * 封闭集：第三个值不是其中之一的更小版本，而是一次无法定价的写入。
+ */
+export const AnchorSourceSchema = z.enum(['device', 'search'])
+export type AnchorSource = z.infer<typeof AnchorSourceSchema>
+
+/**
  * 用户级全局设置（按用户 id 单行）。
- * 锚点是通过一次性 GPS 读取保存的家 / 公司坐标，用于推导到上车站的步行耗时；
- * 以原始 WGS-84 抵达并在服务端转换 —— amap key 是 Web 服务 key，绝不能进入浏览器。
+ * 锚点是家 / 公司坐标，用于推导到上车站的步行耗时。
  * 可空，因为「尚未保存锚点」是真实状态，首页必须在不编造默认值的前提下渲染。
  * 四个时刻同理由可空，只是更深一层：自 migration 009 起，列以 NULL 表示
  * 「用户从未选择过这个时刻」，那与「选择了 06:30」是不同的事实。NULL 才是诚实的值，
  * 且它在任何地方都不会被当作一个时刻展示。
+ *
+ * 锚点的地点名与来源自 013 起同行，二者都只描述**已存的坐标对**：
+ *   - `*PlaceName` 是搜索来的地点名，供界面认人。没有名字时界面显示坐标 —— 绝不编造一个
+ *     名字（设备抓来的位置确实没有名字）；
+ *   - `*AnchorSource` 见 `AnchorSourceSchema`。
+ * 两列可空，且 NULL 就是「没记过」—— 不是 `device`：读侧对「要不要换算」的答案在
+ * 两种情况下相同（存下来的锚点一律已是 GCJ-02），但那是读侧的默认，不是这一列的取值。
  */
 export const UserSettingsSchema = z.object({
   morningStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable(),
@@ -167,6 +186,10 @@ export const UserSettingsSchema = z.object({
   homeLng: z.number().min(-180).max(180).nullable().optional(),
   workLat: z.number().min(-90).max(90).nullable().optional(),
   workLng: z.number().min(-180).max(180).nullable().optional(),
+  homePlaceName: z.string().min(1).nullable().optional(),
+  workPlaceName: z.string().min(1).nullable().optional(),
+  homeAnchorSource: AnchorSourceSchema.nullable().optional(),
+  workAnchorSource: AnchorSourceSchema.nullable().optional(),
 })
 export type UserSettings = z.infer<typeof UserSettingsSchema>
 

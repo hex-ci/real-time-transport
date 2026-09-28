@@ -70,10 +70,16 @@ const DEDUCTIONS: Route = [
   },
 ]
 
-/** 页面勾选的那个目的，按单选组自己的陈述。 */
+/**
+ * 页面勾选的那个目的，按单选组自己的陈述。
+ *
+ * 页签在本页出现两处（宽屏那块卡片与窄屏那条收展面板），两处说的是同一个目的，故先钉住两处
+ * 不打架，再读那个值 —— 一个页面不能同时选中两个目的。
+ */
 function chosenPurpose(page: MountedChainPage): string {
   const checked = purposeRadios(page).filter(radio => radio.props['aria-checked'] === true)
-  expect(checked, 'the page checked no purpose at all').toHaveLength(1)
+  expect(checked, 'the page checked no purpose at all').not.toHaveLength(0)
+  expect(new Set(checked.map(radio => radio.props.value)).size, 'the two purpose groups disagree').toBe(1)
   return String(checked[0]!.props.value)
 }
 

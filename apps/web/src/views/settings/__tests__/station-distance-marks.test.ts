@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RouterLinkStub,
-  choose,
   httpStatus,
   mountComponent,
   press,
@@ -19,7 +18,7 @@ import {
 } from '../station-distance'
 import type { ChainDraft } from '../chain-draft'
 import type { ChainLineOption, StationReference } from '../types'
-import ChainsPage from '../chains.vue'
+import ChainEditorPage from '../chain-editor.vue'
 
 /**
  * 链路录入的站点选择器：每个站到**参考点**的直线距离，最近的那一个带「最近」标记。
@@ -156,14 +155,19 @@ function routes(options: { settings?: SettingsAnswer } = {}): Route[] {
   ]
 }
 
-/** 挂载 通勤链路 页（`/settings/chains`）并打开录入表单。 */
+/**
+ * 挂载**新建链路页**（`/settings/chains/new`）：录入表单现在就在这一页上，故没有展开这一步。
+ *
+ * 「列表页 + 独立编辑页」把表单从列表行里搬到了这一页，本文件评判的东西一字未改 ——
+ * 变的只是它挂在哪一页上。
+ */
 async function mountEditor(options: { settings?: SettingsAnswer } = {}): Promise<MountedHost> {
-  const host = await mountComponent(ChainsPage, {
+  const host = await mountComponent(ChainEditorPage, {
+    props: { chainId: null },
     routes: routes(options),
     components: { RouterLink: RouterLinkStub },
   })
   await host.flush()
-  await press(host, buttonWith(host, '新增链路'))
   return host
 }
 
@@ -199,10 +203,25 @@ function legBlock(host: MountedHost, index: number): HostElement {
   return host.node(item => String(item.props['data-chain-leg']) === String(index), `第 ${index + 1} 段`)
 }
 
-/** 某一段的两个站选择器，上车站在前。 */
-function stationTriggers(host: MountedHost, index: number): HostElement[] {
+/**
+ * 某一段的三个下拉触发器，按屏上先后：线路与方向、上车站、下车站。
+ * 三个都是同一个共用控件（线路与方向那个不带搜索框）。
+ */
+function comboTriggers(host: MountedHost, index: number): HostElement[] {
   return within(host, legBlock(host, index)).filter(item => item.tag === 'button'
     && (item.props.role === 'combobox' || item.props['aria-expanded'] !== undefined))
+}
+
+/** 本段「线路与方向」下拉的触发器。 */
+function lineTrigger(host: MountedHost, index: number): HostElement {
+  const found = comboTriggers(host, index)[0]
+  if (!found) throw new Error(`第 ${index + 1} 段 rendered no 线路与方向 picker`)
+  return found
+}
+
+/** 某一段的两个站选择器，上车站在前——线路与方向那个下拉在它们之前，不算在内。 */
+function stationTriggers(host: MountedHost, index: number): HostElement[] {
+  return comboTriggers(host, index).slice(1)
 }
 
 function triggerOf(host: MountedHost, index: number, which: 'board' | 'alight'): HostElement {
@@ -212,10 +231,11 @@ function triggerOf(host: MountedHost, index: number, which: 'board' | 'alight'):
   return trigger
 }
 
+/** 从线路与方向的下拉里选一条，按用户读到的标签：打开、按标签找那一条、点它。 */
 async function chooseLine(host: MountedHost, index: number, label: string): Promise<void> {
-  const select = within(host, legBlock(host, index)).find(item => item.tag === 'select')!
-  const option = host.node(item => item.tag === 'option' && host.textOf(item) === label, `the option 「${label}」`)
-  await choose(host, select, String(option.props.value))
+  await press(host, lineTrigger(host, index))
+  const option = host.node(item => item.props.role === 'option' && host.textOf(item) === label, `the line option 「${label}」`)
+  await press(host, option)
 }
 
 /**
@@ -417,7 +437,8 @@ describe('参考点不可知时一个数字都不标，并如实说出是哪一�
   })
 
   it('本方向的站点一个坐标都没有：数字量不出来，那句话说的是站点这一边缺东西', async () => {
-    const host = await mountComponent(ChainsPage, {
+    const host = await mountComponent(ChainEditorPage, {
+      props: { chainId: null },
       routes: [
         ...routes(),
         [/\/api\/transit\/lines\//, () => ({ success: true, data: {
@@ -432,7 +453,6 @@ describe('参考点不可知时一个数字都不标，并如实说出是哪一�
       components: { RouterLink: RouterLinkStub },
     })
     await host.flush()
-    await press(host, buttonWith(host, '新增链路'))
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
 
     expect(await listedStations(host, 0, 'board', 4)).toEqual([

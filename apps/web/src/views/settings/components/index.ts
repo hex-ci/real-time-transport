@@ -1,6 +1,6 @@
-export { default as AnchorPicker } from './anchor-picker.vue'
 export { default as BackToSettings } from './back-to-settings.vue'
-export { default as CommuteChainCard } from './commute-chain-card.vue'
+export { default as ChainForm } from './chain-form.vue'
+export { default as ChainRemovalDialog } from './chain-removal-dialog.vue'
 export { default as CommuteHoursCard } from './commute-hours-card.vue'
 export { default as CommuteHoursForm } from './commute-hours-form.vue'
 export { default as DragOrderList } from './drag-order-list.vue'

@@ -19,10 +19,10 @@ import { lineDetail } from '../fixtures.mjs'
 export const name = '首页卡片'
 
 /** 卡片网格的直接子元素就是一张卡片；按线路名定位，不按下标。 */
-const CARD_INDEX = name => `JSON.stringify([...document.querySelectorAll('main div.grid > div')]
+const CARD_INDEX = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
   .findIndex(card => card.querySelector('span')?.textContent.trim() === ${JSON.stringify(name)}))`
 
-const CARD_TEXT = name => `JSON.stringify([...document.querySelectorAll('main div.grid > div')]
+const CARD_TEXT = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
   .find(card => card.querySelector('span')?.textContent.trim() === ${JSON.stringify(name)})?.innerText ?? null)`
 
 /** 页面为「某线路 + 某站序」收到过的全部到站应答。 */
@@ -51,7 +51,7 @@ export async function run({ check, equal, note, fixtures }) {
   await installFetchRecorder()
   await goto(`${WEB_ORIGIN}/`)
   await waitForValue(
-    `JSON.stringify(document.querySelectorAll('main div.grid > div').length)`,
+    `JSON.stringify(document.querySelectorAll('main div.grid.grid-cols-1 > div').length)`,
     length => length === 3,
     { what: '三张关注线路卡片', timeout: 25_000 },
   )
@@ -71,18 +71,22 @@ export async function run({ check, equal, note, fixtures }) {
   if (leadingA) {
     // 屏幕上的分钟与距站数必须同时出现在**同一份**收到的载荷里（混着两次读数的行会失败）。
     // 后续那几行也要能对上：一个列表展示的是一份载荷，不是两次读数的拼盘。
+    // 已到站的行（isAtStation）按契约显示「正在进站」且不给距站数，断言要跟着它走。
+    const atStation = row => row?.isAtStation === true || (row?.etaSeconds === 0 && row?.stopsAway === 0)
     const expectations = rowsA.map(rows => ({
-      leading: typeof rows[0]?.etaSeconds === 'number'
-        ? `${Math.max(1, Math.round(rows[0].etaSeconds / 60))}\n分钟后到站`
-        : null,
-      stops: `${rows[0]?.stopsAway} 站`,
+      leading: atStation(rows[0])
+        ? '正在进站'
+        : (typeof rows[0]?.etaSeconds === 'number'
+            ? `${Math.max(1, Math.round(rows[0].etaSeconds / 60))}\n分钟后到站`
+            : null),
+      stops: atStation(rows[0]) ? null : `${rows[0]?.stopsAway} 站`,
       subsequent: rows.slice(1)
-        .filter(row => typeof row.etaSeconds === 'number')
+        .filter(row => typeof row.etaSeconds === 'number' && !atStation(row))
         .map(row => `${Math.max(1, Math.round(row.etaSeconds / 60))}分`),
     }))
     const matched = expectations.some(expectation => expectation.leading !== null
       && String(textA).includes(expectation.leading)
-      && String(textA).includes(`距 ${expectation.stops}`)
+      && (expectation.stops === null || String(textA).includes(`距 ${expectation.stops}`))
       && expectation.subsequent.every(text => String(textA).includes(text)))
     check(
       '卡片 A 显示的每一个数字都来自它收到过的那一份载荷',
@@ -163,7 +167,7 @@ export async function run({ check, equal, note, fixtures }) {
   const detail = await lineDetail(a.line.upLineId, 0)
   const index = await pageEval(CARD_INDEX(a.line.lineName))
   check('卡片 A 在网格里有位置', index >= 0, `下标 ${index}`)
-  await cli(['click', `main div.grid > div:nth-child(${index + 1})`])
+  await cli(['click', `main div.grid.grid-cols-1 > div:nth-child(${index + 1})`])
   await waitForValue(
     'JSON.stringify(location.pathname + location.search)',
     url => typeof url === 'string' && url.startsWith(`/line/${a.line.upLineId}`),

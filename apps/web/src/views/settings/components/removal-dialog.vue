@@ -50,7 +50,7 @@ const emit = defineEmits<{
        处理读到待处理目标之前就关掉对话框、清掉目标。见 confirmRemoval。 -->
           <button
             type="button"
-            class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 lg:px-5 lg:text-base"
+            class="min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/15 px-4 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 active:scale-95 lg:px-5 lg:text-base"
             :disabled="removing"
             @click="emit('confirm')"
           >

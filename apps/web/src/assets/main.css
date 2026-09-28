@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 /* 安全区 inset 工具；index.html 的 viewport-fit=cover 是 env() 不为 0 的前提。 */
 @import "tailwindcss-safe-area";
+/* 提示库的默认外观。它落在 base 层：不写层就是无层规则，会压过本仓 utilities 里的条目样式。 */
+@import "vue-sonner/style.css" layer(base);
 
 /* 字号阶梯：固定 px，不随视口缩放。line-height 用无单位值，使行距跟随字号。 */
 @theme {
@@ -32,6 +34,16 @@ html, body {
   text-size-adjust: 100% !important;
   -moz-text-size-adjust: 100% !important;
   touch-action: manipulation;
+}
+
+/* 按不动的控件只有一处样子：变淡，并且光标也说自己按不动。
+   各控件不必再各自写 `disabled:` 前缀 —— 两处就会漂成两种（此前是 0.5 与 0.6 各半）。 */
+@layer base {
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
 }
 
 @layer utilities {

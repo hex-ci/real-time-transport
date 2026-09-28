@@ -114,6 +114,20 @@ export function statedCoordinate(value: unknown): number | undefined {
 }
 
 /**
+ * 上游声明的文本；未声明时为 `undefined`。
+ *
+ * 本规则只此一份，与 `statedNumber` 同族：高德把「它没有这一项」写成空串、空数组或直接缺字段
+ * （`district: ""`、`address: []`），三种都是**没声明**。空串不是「一个空的名字」——
+ * 把它当成值会往界面上印一个空白的地址行，而那正是「编造」的另一种形态：看起来有内容，
+ * 实际什么也没说。**绝不用占位文案顶上**（那是替上游发言）。
+ */
+export function statedText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+/**
  * 站在其线路上的站序：上游声明的正整数优先，否则取该站在停靠列表中的下标。
  * 列表本身即按站序构造（各提供方都按站序读取停靠），故下标就是真实站序，不是替代值。
  * 缺字段、非数字或 0 都会以 NaN/0 出行，指到一个该线并不存在的站序。

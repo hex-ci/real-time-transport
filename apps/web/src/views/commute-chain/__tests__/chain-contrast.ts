@@ -223,9 +223,12 @@ function textRuleOf(token: string): TextRule | null {
   }
 }
 
-/** 源码写下的每个 `:class` 表达式。 */
+/** 源码把脚本值交给某个元素的每一处：`v-bind="…"`（一组参数）与 `:class="…"`。 */
 function bindingsOf(source: string): string[] {
-  return [...source.matchAll(/:class="([^"]*)"/g)].map(match => match[1]!)
+  return [
+    ...source.matchAll(/\bv-bind="([^"]*)"/g),
+    ...source.matchAll(/:class="([^"]*)"/g),
+  ].map(match => match[1]!)
 }
 
 /** 源码写下的每个类：静态 `class` 属性与 `:class` 字面量。 */
@@ -259,12 +262,12 @@ function templateBody(source: string): string {
   return withoutScripts.slice(nameEnd + 1, close)
 }
 
-/** `:class` 绑定引用但未以字面量写出的类名。 */
+/** `:class` 或 `v-bind` 绑定引用但未以字面量写出的类名。 */
 export function boundIdentifiers(template: string): string[] {
   const identifiers: string[] = []
-  for (const binding of template.matchAll(/:class="([^"]*)"/g)) {
-    for (const word of binding[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) {
-      if (!binding[1]!.includes(`'${word[0]}'`)) identifiers.push(word[0])
+  for (const expression of bindingsOf(template)) {
+    for (const word of expression.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      if (!expression.includes(`'${word[0]}'`)) identifiers.push(word[0])
     }
   }
   return [...new Set(identifiers)]
@@ -443,9 +446,9 @@ export function auditContrast(
       }
     }
 
-    // script 自己的色调 helper：它的颜色渲染在绑定它的元素上，故对该元素的表面审计——而非文件里最亮的
-    // 表面，那会为一个从不出现的表面判它不合格。script 交给 `:class` 绑定的值不带自己的状态，
-    // 故按元素基础状态下涂绘的表面读取。
+    // script 自己的色调 helper：它的颜色渲染在绑定它的元素上——`v-bind` 把一组参数交给共用控件时，
+    // 那个控件就是该元素——故对该元素实际涂绘的表面审计，而非文件里最亮的表面：那会为一个从不出现
+    // 的表面判它不合格。绑定的值不带自己的状态，故按元素基础状态下涂绘的表面读取。
     const declared = [...script.matchAll(/'(text-(?:white|black|[a-z]+-\d{2,3}))'/g)]
       .map(match => match[1]!.replace('text-', ''))
     scriptColors.push(...declared)

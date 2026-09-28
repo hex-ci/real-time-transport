@@ -1,7 +1,8 @@
 import type {
+  PlaceSuggestion,
   Station,
 } from '@real-time-transport/shared'
-import { statedCoordinate, statedNumber, statedStopOrder } from '@real-time-transport/shared'
+import { statedCoordinate, statedNumber, statedStopOrder, statedText } from '@real-time-transport/shared'
 
 const AMAP_BASE = 'https://restapi.amap.com'
 
@@ -58,6 +59,14 @@ export interface NearbyStationResult {
    */
   distanceMeters?: number
 }
+
+/**
+ * 地点搜索的一条候选。
+ *
+ * 与契约层 `PlaceSuggestion`（`packages/shared/src/schemas/gis.ts`）是**同一个形状**，
+ * 故此处直接取用它，不另立一份：两个声明就是两处对「候选有哪些字段」产生分歧的机会。
+ */
+export type PlaceSuggestionResult = PlaceSuggestion
 
 /**
  * 高德的「lng,lat」坐标对；上游未给出位置时为 undefined。
@@ -443,6 +452,61 @@ export class AmapGisService {
       parts.push(street.street)
     }
     return parts.join('') || null
+  }
+
+  /**
+   * 地点输入提示（v3/assistant/inputtips）—— 「我知道这个地方叫什么」的搜索。
+   *
+   * 与 `getLineByName` 的区别是**刻意的**：那个按线路名找一条线路的站序，这个按自由文本
+   * 找任意地点，故两者共用同一个限流器与同一份失败分类，但各有自己的端点与读法。
+   *
+   * `cityAdcode` 把候选限定在一个城市里（`cities.ts` 的 `adcode`）：不限定的话
+   * 搜「珠江帝景」会得到全国同名的候选，而锚点是通勤起点，它在用户所在的城市里。
+   *
+   * 返回的 `lng`/`lat` 是高德自己的 GCJ-02，原样交出 —— 它会被存成锚点，而锚点一律是
+   * GCJ-02（见类上的契约与 `docs/PRD.md` §5.4）。本方法不做任何换算。
+   *
+   * **不缓存**：搜索词是自由文本，一次一个，缓存命中的概率低而条目数无界；
+   * 锚点页面一次搜索只发一次请求（见 PRD F2），故不需要靠缓存省配额。
+   *
+   * 上游失败与「确实没有这个地点」分得开：前者由调用方答 502（`null` 且 `transient`），
+   * 后者是一个空数组（上游合法作答、`count: 0`）。把两者混成一个空列表，就是替一次
+   * 没答上来的搜索说「没有这个地方」。
+   */
+  async searchPlaces(keywords: string, cityAdcode: string): Promise<PlaceSuggestionResult[] | null> {
+    const { json, transient } = await this.requestDetailed('/v3/assistant/inputtips', {
+      keywords,
+      city: cityAdcode,
+      citylimit: 'true',
+      datatype: 'all',
+    })
+
+    if (!json) {
+      // 上游没答上来（无 key、网络、超时、QPS/配额）。调用方据 `transient` 决定状态码，
+      // 但两种情形都**不是**「没有匹配的地点」。
+      return null
+    }
+
+    const tips = Array.isArray(json.tips) ? json.tips : []
+    const results: PlaceSuggestionResult[] = []
+    for (const tip of tips) {
+      const location = parseAmapLocation(tip?.location)
+      // 高德对「放不下」的候选（省 / 市 / 泛化词条）会省略 `location`，给出的是一对空数组。
+      // 没有坐标的候选无法成为锚点 —— 故它不出现在候选里，而它确实不是一条可保存的结果。
+      if (!location) continue
+      const name = statedText(tip?.name)
+      if (name === undefined) continue
+      results.push({
+        name,
+        district: statedText(tip?.district),
+        address: statedText(tip?.address),
+        lng: location.lng,
+        lat: location.lat,
+      })
+    }
+    // `transient` 在合法作答时恒为 false，此处只是把它交给调用方的那一半；命中 0 条
+    // 与失败是两件事，故空数组照常返回。
+    return transient ? null : results
   }
 }
 

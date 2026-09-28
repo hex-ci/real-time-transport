@@ -56,9 +56,9 @@ const chains = shallowRef<SummaryValue<number>>({ state: 'reading' })
  */
 const rows = computed(() => [
   { to: '/settings/lines', label: '关注线路', icon: Search, summary: followedLinesText(followedLines.value) },
+  { to: '/settings/chains', label: '通勤链路', icon: Waypoints, summary: chainsText(chains.value) },
   { to: '/settings/schedule', label: '通勤时段', icon: Clock, summary: hoursText(savedHours.value) },
   { to: '/settings/anchors', label: '位置锚点', icon: MapPin, summary: anchorsText(anchors.value) },
-  { to: '/settings/chains', label: '通勤链路', icon: Waypoints, summary: chainsText(chains.value) },
 ])
 
 onMounted(() => {

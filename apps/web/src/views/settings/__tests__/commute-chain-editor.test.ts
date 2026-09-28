@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   LAST_LEG_REASON,
   emptyChainDraft,
@@ -14,7 +14,6 @@ import type { ChainLineOption } from '../types'
 import { auditContrast } from '@/views/commute-chain/__tests__/chain-contrast'
 import {
   RouterLinkStub,
-  choose,
   httpStatus,
   mountComponent,
   press,
@@ -23,7 +22,28 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import ChainsPage from '../chains.vue'
+import ChainsListPage from '../chains.vue'
+import ChainEditorPage from '../chain-editor.vue'
+
+/**
+ * 推出去的那句话。链路卡的三处写操作（保存、删除、顺序）成与败各说一句，由本文件末尾那一组评判；
+ * 其余用例不读它。
+ */
+const { pushed } = vi.hoisted(() => ({ pushed: [] as string[] }))
+
+vi.mock('vue-sonner', () => ({
+  toast: Object.assign(
+    (message: string) => {
+      pushed.push(message)
+      return pushed.length
+    },
+    { dismiss: () => {}, custom: () => {} },
+  ),
+}))
+
+beforeEach(() => {
+  pushed.length = 0
+})
 
 /**
  * F10 的链路编辑器，由**行为**守住。
@@ -49,16 +69,23 @@ function codeOf(source: string): string {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 }
 
-const CARD = read('../components/commute-chain-card.vue')
 const FORM = read('../components/chain-form.vue')
 const LEG = read('../components/chain-leg-fields.vue')
 const DIALOG = read('../components/chain-removal-dialog.vue')
 const DRAFT = read('../chain-draft.ts')
 const TYPES = read('../types.ts')
 const PATTERN = read('../../platform/components/platform-header.vue')
+/** 本屏的选站器：它自己不再画标记，选单来自共用的控件（见下面那条控件选择的源码规则）。 */
+const PICKER = read('../components/station-pin-picker.vue')
 
 /** 设置目录（`views/settings`），按目录遍历，使任何东西都逃不出审计。 */
 const SETTINGS_DIR = fileURLToPath(new URL('..', import.meta.url))
+
+/**
+ * 本应用生产源码的根（`apps/web/src`）。
+ * 控件选择的规则扫的是**整个应用**，而不是本目录：一处原生 select 在哪都算。
+ */
+const WEB_SRC = fileURLToPath(new URL('../../../', import.meta.url))
 
 /** 某目录下每个 `.vue`，含子目录（`__tests__` 不含）。 */
 function sfcFiles(directory: string): string[] {
@@ -76,13 +103,14 @@ function sfcFiles(directory: string): string[] {
  * 它在它所处之处被评判：末尾跑遍本页每个 SFC 的对比度审计。本文件不以其他方式评判它。
  */
 const SFC = {
-  'commute-chain-card': CARD,
   'chain-form': FORM,
   'chain-leg-fields': LEG,
   'chain-removal-dialog': DIALOG,
-  // 渲染编辑器的页面。它曾是 `设置` 的单页（`index.vue`）；§4.1 的拆分把这张卡移到自己的页面，
-  // 故下面的页级守卫随它到那里，而非评判一个该卡不再出现的屏幕。
+  // 渲染列表的页面与渲染编辑器的页面。列表页曾是卡片所在的屏幕；「列表页 + 独立编辑页」把
+  // 编辑器移到 `chain-editor.vue`，故下面的页级守卫随它到那里 —— 两页都在守卫范围内，
+  // 评判一个表单已经不再出现的屏幕，或放过表单现在所在的那一页，都会让回归漏掉。
   'chains.vue': read('../chains.vue'),
+  'chain-editor.vue': read('../chain-editor.vue'),
 }
 
 /**
@@ -92,9 +120,19 @@ const SFC = {
  * 或它们共用的选择器里被提亮的背景或被压暗的文字，在那里同样不可读。**遍历**目录（而非列出文件）
  * 使日后新增的页面或卡片无法静默逃出该规则——拆成索引加四个子页面正是一个枚举会让其走出审计范围的改动。
  */
-const SETTINGS_SFC: Record<string, string> = Object.fromEntries(
-  sfcFiles(SETTINGS_DIR).map(path => [basename(path), readFileSync(path, 'utf8')]),
-)
+const SETTINGS_SFC: Record<string, string> = {
+  ...Object.fromEntries(
+    sfcFiles(SETTINGS_DIR).map(path => [basename(path), readFileSync(path, 'utf8')]),
+  ),
+  /**
+   * 本屏共用的选站器控件住在 `src/components`（站台屏也用同一个），故它自己的标记也要被审计：
+   * 把标记搬出本目录，同时把它的颜色带出审计范围，是这次归一唯一会削弱的东西。
+   */
+  'searchable-combobox/main.vue': readFileSync(
+    fileURLToPath(new URL('../../../components/searchable-combobox/main.vue', import.meta.url)),
+    'utf8',
+  ),
+}
 
 // ---------- 一段可以乘坐的线路 ----------
 
@@ -282,11 +320,41 @@ function routes(options: {
   return table
 }
 
-/** 挂载 通勤链路 自己的页面（`/settings/chains`）及其路由，并让首批读取作答。 */
+/**
+ * 挂载**新建链路页**（`/settings/chains/new`）及其路由，并让首批读取作答。
+ *
+ * 「列表页 + 独立编辑页」把表单从列表行里搬到了这一页上：本文件评判的每个行为一字未改，
+ * 变的只是它挂在哪一页 —— 以及驱动方式（没有展开这一步了，表单挂载出来就在）。
+ */
 async function mountChainEditor(options: Parameters<typeof routes>[0] = {}): Promise<MountedHost> {
-  // `设置` 拆成索引加四个页面：链路编辑器现在是 `/settings/chains` 的页面（`chains.vue`），
-  // 本文件挂载的就是它。此处断言的每个行为都属于同一张卡，只是在新渲染它的页面上。
-  const host = await mountComponent(ChainsPage, {
+  return mountChainEditorFor(null, options)
+}
+
+/**
+ * 挂载**一条链路自己的页面**（`/settings/chains/:chainId`），按那条链路在已存列表里的 id。
+ *
+ * id 从测试自己给的那份列表里取，而不是写死一个：同一条路由记录上的两页共用同一个组件，
+ * 故「编的是哪一条」正是由传进去的那个 id 决定的。
+ */
+async function mountChainEditorFor(
+  chainName: string | null,
+  options: Parameters<typeof routes>[0] = {},
+): Promise<MountedHost> {
+  const rows = (options.chains ?? []) as Array<{ id?: string, name?: string }>
+  const row = chainName === null ? null : rows.find(item => item.name === chainName)
+  if (chainName !== null && !row?.id) throw new Error(`no stored chain named 「${chainName}」 in this fixture`)
+  const host = await mountComponent(ChainEditorPage, {
+    props: { chainId: row?.id ?? null },
+    routes: routes(options),
+    components: { RouterLink: RouterLinkStub },
+  })
+  await host.flush()
+  return host
+}
+
+/** 挂载**列表页**（`/settings/chains`）：列表、拖动排序与「新增链路」都在这一页上。 */
+async function mountChainList(options: Parameters<typeof routes>[0] = {}): Promise<MountedHost> {
+  const host = await mountComponent(ChainsListPage, {
     routes: routes(options),
     components: { RouterLink: RouterLinkStub },
   })
@@ -315,13 +383,13 @@ function inside(root: HostElement, node: HostElement): boolean {
 }
 
 /**
- * 链路卡，按其**名字**定位：按标注它的标题（`aria-labelledby`），绝非按 `aria-label` 里该文本的副本
- * ——正是那个副本让屏幕阅读器把「通勤链路」读两遍，一次作为区域、一次作为标题。
+ * 列表页的区域，按其**名字**定位：按标注它的标题（`aria-labelledby`），绝非按 `aria-label` 里
+ * 该文本的副本 —— 正是那个副本让屏幕阅读器把「通勤链路」读两遍，一次作为区域、一次作为标题。
  */
-function cardOf(host: MountedHost): HostElement {
+function chainSection(host: MountedHost): HostElement {
   return host.node(
     item => item.tag === 'section' && item.props['aria-labelledby'] === 'commute-chain-heading',
-    'chain card',
+    'chain section',
   )
 }
 
@@ -329,10 +397,16 @@ function within(host: MountedHost, root: HostElement): HostElement[] {
   return host.nodes(item => inside(root, item))
 }
 
+/**
+ * 某个控件，按它印出的文字。
+ *
+ * 搜索范围是**整页**（含 portal 里的弹层），而不是某一处区域：这些控件分布在不同块里，而按区域
+ * 收窄会让一个搬到别处的控件静默地「不存在」。代价是标签必须足够独特 —— 下面用的标签都够
+ * （「删除链路」不是「删除该段」，「保存链路」不是任何别的东西）。
+ */
 function buttonWith(host: MountedHost, label: string): HostElement {
-  const found = within(host, cardOf(host)).find(item => item.tag === 'button'
-    && host.textOf(item).includes(label))
-  if (!found) throw new Error(`the chain card rendered no 「${label}」 control`)
+  const found = host.nodes(item => item.tag === 'button' && host.textOf(item).includes(label))[0]
+  if (!found) throw new Error(`the page rendered no 「${label}」 control`)
   return found
 }
 
@@ -345,14 +419,31 @@ function legFields(host: MountedHost, index: number): HostElement[] {
 }
 
 /**
- * 某段的两个站，如选择器所提供：上车站在前。
+ * 某一段的三个下拉触发器，按屏上先后：线路与方向、上车站、下车站。
+ *
+ * 线路与方向那个是**同一个**共用控件（只是不带搜索框），故它和两个站选择器一样，带的是 reka 触发器
+ * 自己那个 `aria-expanded`。
+ */
+function comboTriggers(host: MountedHost, index: number): HostElement[] {
+  return legFields(host, index).filter(item => item.tag === 'button'
+    && (item.props.role === 'combobox' || item.props['aria-expanded'] !== undefined))
+}
+
+/** 本段「线路与方向」下拉的触发器，也是段里三个下拉中最先出现的那个。 */
+function lineTrigger(host: MountedHost, index: number): HostElement {
+  const found = comboTriggers(host, index)[0]
+  if (!found) throw new Error(`第 ${index + 1} 段 rendered no 线路与方向 picker`)
+  return found
+}
+
+/**
+ * 某段的两个站选择器，上车站在前——线路与方向那个下拉在它们之前，不算在内。
  *
  * 来自**筛选** helper 的列表（本函数、`legFields`、`within`……）在被展开进另一个断言或循环之前先断言
  * 非空：空列表会让循环白通过，正是两个 40px 控件曾满足 44px 规则的方式。任何主题来自筛选的新检查都先欠这一行。
  */
 function stationTriggers(host: MountedHost, index: number): HostElement[] {
-  return legFields(host, index).filter(item => item.tag === 'button'
-    && (item.props.role === 'combobox' || item.props['aria-expanded'] !== undefined))
+  return comboTriggers(host, index).slice(1)
 }
 
 /**
@@ -369,8 +460,9 @@ function fontSizeTokens(source: string): string[] {
     .filter(token => /^(?:xs|sm|base|lg|xl|md|[0-9])/.test(token))
 }
 
+/** 表单里的名称字段——本页唯一的文本输入框。 */
 function nameField(host: MountedHost): HostElement {
-  return within(host, cardOf(host)).find(item => item.tag === 'input' && item.props.type === 'text')!
+  return host.nodes(item => item.tag === 'input' && item.props.type === 'text')[0]!
 }
 
 function extraField(host: MountedHost, index: number): HostElement {
@@ -392,39 +484,34 @@ function recordWrites(host: MountedHost): Array<{ url: string, method: string, b
     && request.method !== 'GET')
 }
 
-async function openComposer(host: MountedHost): Promise<void> {
-  await press(host, buttonWith(host, '新增链路'))
-}
-
-async function openEditorFor(host: MountedHost, chainName: string): Promise<void> {
-  const row = host.node(item => item.tag === 'li' && host.textOf(item).includes(chainName), `the row of ${chainName}`)
-  const edit = within(host, row).find(item => item.tag === 'button' && host.textOf(item).includes('编辑'))!
-  await press(host, edit)
-}
-
 /**
- * 从 select 提供的线路中选择一条，按用户读到的标签。
+ * 从线路与方向的下拉里选一条，按用户读到的标签。
  *
- * 值取自该标签所属的选项，故控件按浏览器驱动它的方式驱动，而非由本测试知道某个键。
+ * 面板里的选项取自渲染出的树，故控件按浏览器驱动它的方式驱动，而非由本测试知道某个键。
  */
 async function chooseLine(host: MountedHost, index: number, label: string): Promise<void> {
-  const select = legFields(host, index).find(item => item.tag === 'select')!
-  const option = host.node(item => item.tag === 'option' && host.textOf(item) === label, `the option 「${label}」`)
-  await choose(host, select, String(option.props.value))
+  await press(host, lineTrigger(host, index))
+  const option = host.node(item => item.props.role === 'option' && host.textOf(item) === label,
+    `the line option 「${label}」`)
+  await press(host, option)
 }
 
 /**
- * 某一段下拉里的方向选项本身（不含那一条占位项），按屏幕上的先后。
+ * 某一段下拉里的方向选项本身，按屏幕上的先后：打开、读、收起。
+ *
  * 值取自渲染出的树，故被断言的是用户读到的东西，而不是本测试对选项集的复述。
  */
-function directionOptionsOf(host: MountedHost, index: number): HostElement[] {
-  const select = legFields(host, index).find(item => item.tag === 'select')!
-  return within(host, select).filter(item => item.tag === 'option' && item.props.value !== '')
+async function directionOptionsOf(host: MountedHost, index: number): Promise<HostElement[]> {
+  const trigger = lineTrigger(host, index)
+  await press(host, trigger)
+  const options = host.nodes(item => item.props.role === 'option')
+  await press(host, trigger)
+  return options
 }
 
 /** 同上，只要它们印出来的文字。 */
-function directionOptionTexts(host: MountedHost, index: number): string[] {
-  return directionOptionsOf(host, index).map(item => host.textOf(item))
+async function directionOptionTexts(host: MountedHost, index: number): Promise<string[]> {
+  return (await directionOptionsOf(host, index)).map(item => host.textOf(item))
 }
 
 /**
@@ -464,7 +551,6 @@ function removeNameText(inner: string): string {
 describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
   it('公交段录反了：拒绝，句子说出方向录反了这一事实，且不发任何写请求', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     // 东大桥 是本线路 id 上的第 3 站，十里堡 是第 1 站：公交线路已存的 id 已固定方向，
@@ -480,7 +566,6 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
   it('地铁段录反了：接受，写出去的仍是下车站序小于上车站序的那一对', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     // 一个线路 id 携带两个方向，而「开往平安里」把平安里编成第 1 站：在此列表上上平安里、下西直门
     // 是另一个方向的真实一程，不是录入错误。
@@ -504,7 +589,6 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
   it('上车站与下车站是同一站：拒绝', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -519,10 +603,9 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
   it('半截的站点：只有站名、没有站序的记录在保存时被拒绝', async () => {
     // 在本编辑器存在之前（或经直接写入）记录的记录可以只持有这一对的一半，这正是读侧只能以
     // `station-unset` 作答的状态——编辑器把它表面化，并拒绝重新保存它。
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({ legs: [storedLeg({ seq: 0, alightStationOrder: null })] })],
     })
-    await openEditorFor(host, '早上上班')
     await save(host)
 
     expect(recordWrites(host)).toHaveLength(0)
@@ -534,10 +617,9 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
     // 上一种情形的镜像，它此前没有自己的测试：配对规则是对称的——「站名与站序要同时选定」——
     // 而没有站名的**数字**也定位不到任何站，故另一半缺的记录写入时同样以它自己的句子被拒绝，
     // 而非被读成一个站。
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({ legs: [storedLeg({ seq: 0, boardStationName: null, boardStationOrder: 3 })] })],
     })
-    await openEditorFor(host, '早上上班')
     await save(host)
 
     expect(recordWrites(host)).toHaveLength(0)
@@ -546,10 +628,9 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
   })
 
   it('站名与站序不成对：站序不在该线路的站序里，拒绝并指出是第几站', async () => {
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({ legs: [storedLeg({ seq: 0, boardStationOrder: 9 })] })],
     })
-    await openEditorFor(host, '早上上班')
     await save(host)
 
     expect(recordWrites(host)).toHaveLength(0)
@@ -559,7 +640,6 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
   it('某一段的站点还没选完：拒绝并点名是哪一段', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -572,7 +652,6 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
   it('没有乘车段的链路给不出结论：最后一段的删除控制说出原因，规则也拒绝空段草稿', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
 
     const remove = within(host, legBlock(host, 0))
       .find(item => item.tag === 'button' && host.textOf(item).includes('删除该段'))!
@@ -593,7 +672,6 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
   it('两段时「删除该段」可点：它的可访问名字包含这行字，并说清删的是第几段（WCAG 2.5.3）', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await press(host, buttonWith(host, '添加乘车段'))
 
     const remove = within(host, legBlock(host, 1))
@@ -609,8 +687,8 @@ describe('六条规则：录入时就地拦下，不靠提交后报错', () => {
 
 describe('写出去的东西，就是 PRD 要求服务端收到的东西', () => {
   it('每段带上线路与上下车站的一对（站名 + 站序），段序就是数组顺序，且不带 seq', async () => {
+    // 已存一条 displayOrder 4 的链路：新建的那一条要落到 5，而不是「行数」那个 0。
     const host = await mountChainEditor({ chains: [storedChain({ displayOrder: 4 })] })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -657,12 +735,29 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
     host.unmount()
   })
 
+  it('选中的那一条写进这一段：换一个方向，写出去的就是那个方向自己的线路 id', async () => {
+    // 屏上读到的标签是「快线 1 路 · 上班方向 · 开往十里堡」，而值是不透明的 key——它解析成方向 1
+    // 自己的线路 id（公交线路的两个方向是两个 id）。按标签回查会写回方向 0，即用户没选的那一程。
+    const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
+    await type(host, nameField(host), '早上上班')
+    await chooseLine(host, 0, '快线 1 路 · 上班方向 · 开往十里堡')
+    // 触发器当场读回选中的那一条：值确实写进了这一段的草稿。
+    expect(host.textOf(lineTrigger(host, 0))).toBe('快线 1 路 · 上班方向 · 开往十里堡')
+    await pickStation(host, 0, 'board', '建国门', 1)
+    await pickStation(host, 0, 'alight', '十里堡', 4)
+    await save(host)
+
+    const posts = recordWrites(host).filter(request => request.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(posts[0]!.body.legs[0]).toMatchObject({ lineId: BUS_DOWN, lineName: '快线 1 路' })
+    host.unmount()
+  })
+
   it('同名站在站序里出现两次时，写出去的是用户点的那一对（站名 + 站序），不是名字查回来的第一个', async () => {
     // 环线 3 路 把 东大桥 列在第 2 站**与**第 4 站：线上同名站不止一个（PRD）。仅以**名字**携带的
     // 选择会被 `find(name)` 解析回去，写入**首个**出现，而触发器显示同一对错值——用户从未选过的一对，
     // 且屏幕不会揭示。
     const host = await mountChainEditor({ favourites: [...FAVOURITES, LOOP_FAVOURITE] })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '环线 3 路 · 开往终点站')
     await pickStation(host, 0, 'board', '东大桥', 4)
@@ -697,10 +792,9 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
 
   it('半截的一对在站里显示为未设置，「未设置」不冒充任何一站', async () => {
     // 只持有**站序**（站名为 null）的已存记录不是站：选择器不得把一个数字渲染得像它定位到了某个站。
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({ legs: [storedLeg({ seq: 0, boardStationName: null, boardStationOrder: 3 })] })],
     })
-    await openEditorFor(host, '早上上班')
 
     const triggers = stationTriggers(host, 0)
     expect(triggers, 'the leg rendered no station pickers').toHaveLength(2)
@@ -710,7 +804,6 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
 
   it('transferExtraMinutes：留空是 null，填 0 就是 0 —— 两个事实不互相冒充', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -722,7 +815,6 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
 
     // 同一字段再次清空：「没配」绝不能被写成「没有额外时间」。
     const cleared = await mountChainEditor()
-    await openComposer(cleared)
     await type(cleared, nameField(cleared), '早上上班')
     await chooseLine(cleared, 0, '快线 1 路 · 开往建国门')
     await pickStation(cleared, 0, 'board', '东大桥', 3)
@@ -737,16 +829,15 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
   })
 
   it('编辑：草稿来自已存的记录，改完之后整条链路发出去', async () => {
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({
         legs: [storedLeg({ seq: 0, transferExtraMinutes: 0 })],
       })],
     })
-    await openEditorFor(host, '早上上班')
 
     // 已存的草稿在屏幕上：名称、用途、线路与两个站。
-    expect(host.textOf(cardOf(host))).toContain('早上上班')
-    expect(host.textOf(cardOf(host))).toContain('快线 1 路 · 开往建国门')
+    expect(host.text()).toContain('编辑 早上上班')
+    expect(host.text()).toContain('快线 1 路 · 开往建国门')
     expect(extraField(host, 0).props.value).toBe('0')
 
     await type(host, nameField(host), '早上上班（改）')
@@ -767,7 +858,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
   })
 
   it('编辑地铁的反向段：按站序对回它记录时用的那个方向，原样写回', async () => {
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       chains: [storedChain({
         legs: [storedLeg({
           seq: 0,
@@ -780,14 +871,10 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
         })],
       })],
     })
-    await openEditorFor(host, '早上上班')
 
     // 一个线路 id 携带两个方向，故该段被放到其自身编号持有其站序的那个方向——「开往西直门」把平安里
     // 编成第 1 站，而「开往平安里」把它编成第 3 站。把它加载到另一个方向会静默翻转该记录所写的那一程。
-    const select = legFields(host, 0).find(item => item.tag === 'select')!
-    const option = host.node(item => item.tag === 'option'
-      && host.textOf(item) === '地铁 88 号线 · 开往西直门', 'the option 地铁 88 号线 · 开往西直门')
-    expect(select.props.value).toBe(option.props.value)
+    expect(host.textOf(lineTrigger(host, 0))).toBe('地铁 88 号线 · 开往西直门')
 
     await press(host, buttonWith(host, '保存链路'))
 
@@ -802,8 +889,8 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
   })
 
   it('删除：确认之后删掉那条记录，列表里不再有它', async () => {
-    const host = await mountChainEditor({ chains: [storedChain()] })
-    await press(host, buttonWith(host, '删除'))
+    const host = await mountChainEditorFor('早上上班', { chains: [storedChain()] })
+    await press(host, buttonWith(host, '删除链路'))
     expect(host.text()).toContain('删除通勤链路「早上上班」？')
 
     await press(host, host.node(item => item.tag === 'button' && host.textOf(item) === '确认删除', 'the confirm control'))
@@ -822,7 +909,6 @@ describe('服务端拒绝时如实报错', () => {
       chains: [storedChain()],
       chainWrite: () => httpStatus(400, { success: false, error: '下车站的站序必须大于上车站的站序' }),
     })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -841,7 +927,6 @@ describe('服务端拒绝时如实报错', () => {
 describe('说过的句子不会留在原地，说着用户已经离开的状态', () => {
   it('照着拒绝的话改完下车站，那句拒绝就消失（屏幕已经在它说的状态之外了）', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -865,7 +950,6 @@ describe('说过的句子不会留在原地，说着用户已经离开的状态'
       chains: [storedChain()],
       chainWrite: () => httpStatus(400, { success: false, error: '下车站的站序必须大于上车站的站序' }),
     })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
@@ -880,60 +964,85 @@ describe('说过的句子不会留在原地，说着用户已经离开的状态'
 })
 
 describe('空状态与读取失败是两个原因，谁也不遮住谁', () => {
-  it('读不到时说读取失败并给出重试，不说「还没有录入」', async () => {
-    const host = await mountChainEditor({ chainRead: 'fail' })
+  it('列表页读不到时说读取失败并给出重试，不说「还没有录入」', async () => {
+    // 「读取失败」与「还没有录入」是同一份列表的两种事实，而它们说的是**列表**：
+    // 故这一条现在挂在列表页上（表单搬走之后，编辑页渲染的是这一条自己的字段）。
+    const host = await mountChainList({ chainRead: 'fail' })
 
-    expect(host.textOf(cardOf(host))).toContain('换乘链读取失败')
-    expect(host.textOf(cardOf(host))).not.toContain('还没有录入通勤链路')
+    expect(host.textOf(chainSection(host))).toContain('换乘链读取失败')
+    expect(host.textOf(chainSection(host))).not.toContain('还没有录入通勤链路')
     expect(buttonWith(host, '重试')).toBeDefined()
     host.unmount()
   })
 
-  it('读失败之后按重试：读到就把行显示出来，失败的那条说明消失', async () => {
-    const host = await mountChainEditor({ chainRead: 'fail' })
-    expect(host.textOf(cardOf(host))).toContain('换乘链读取失败')
+  it('列表页读失败之后按重试：读到就把行显示出来，失败的那条说明消失', async () => {
+    const host = await mountChainList({ chainRead: 'fail' })
+    expect(host.textOf(chainSection(host))).toContain('换乘链读取失败')
 
     host.server.on(/\/api\/transit\/commute-chains\?/, () => ({ success: true, data: [storedChain()] }))
     await press(host, buttonWith(host, '重试'))
 
-    expect(host.textOf(cardOf(host))).toContain('早上上班')
-    expect(host.textOf(cardOf(host))).not.toContain('换乘链读取失败')
+    expect(host.textOf(chainSection(host))).toContain('早上上班')
+    expect(host.textOf(chainSection(host))).not.toContain('换乘链读取失败')
     host.unmount()
   })
 
-  it('回答是空列表时，说「还没有录入」并指出下一步', async () => {
-    const host = await mountChainEditor()
+  it('列表页回答是空列表时，说「还没有录入」并指出下一步', async () => {
+    const host = await mountChainList()
 
-    expect(host.textOf(cardOf(host))).toContain('还没有录入通勤链路')
-    expect(host.textOf(cardOf(host))).toContain('新增链路')
+    expect(host.textOf(chainSection(host))).toContain('还没有录入通勤链路')
+    expect(host.textOf(chainSection(host))).toContain('新增链路')
+    host.unmount()
+  })
+
+  it('编辑页上的读取失败也说自己的成因，不借用空状态的措辞', async () => {
+    // 编辑页自己也要读那条链路（它没有别的地方可以拿到它），故它同样欠这句话。
+    const host = await mountChainEditorFor('早上上班', { chains: [storedChain()], chainRead: 'fail' })
+
+    expect(host.text()).toContain('换乘链读取失败')
+    expect(host.text()).not.toContain('还没有录入通勤链路')
+    expect(buttonWith(host, '重试')).toBeDefined()
     host.unmount()
   })
 
   it('没有关注线路时，录入里说明这一原因，而不是给一个永远选不出东西的线路列表', async () => {
     const host = await mountChainEditor({ favourites: [] })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
 
-    expect(host.textOf(cardOf(host))).toContain('还没有关注线路，无法录入乘车段')
-    expect(host.nodes(item => item.tag === 'option' && item.props.value !== '')).toHaveLength(0)
+    expect(host.text()).toContain('还没有关注线路，无法录入乘车段')
+    // 这个下拉里一条线路都没有：触发器读占位文字，打开也只得到一张空列表。
+    const trigger = lineTrigger(host, 0)
+    expect(host.textOf(trigger)).toBe('选择线路与方向')
+    await press(host, trigger)
+    expect(host.nodes(item => item.props.role === 'option')).toHaveLength(0)
     host.unmount()
   })
 })
 
 describe('房子里的结构规则', () => {
-  it('链路录入是设置里「通勤链路」页上的一张卡片，不是新的一级页面（一条注册表规则：路由是数据；形状换了，规则没换）', () => {
-    // `设置` 曾是一个单页，这张卡就在它上面。§4.1 把该页拆成索引加四个子页面，故这张卡现在
-    // 位于 `chains.vue`——`/settings/chains` 处的页面。本测试所守的东西不因形状而变：链路录入**不是**
-    // 换乘链路 旁的一级入口，后者的页面只读结论。拆分本身也被断言，因为留在索引上的卡片会让本规则保持绿，
-    // 而四个域仍挤在一个屏幕上。
-    expect(codeOf(read('../chains.vue'))).toContain('<CommuteChainCard')
-    expect(codeOf(read('../index.vue'))).not.toContain('<CommuteChainCard')
+  it('链路录入在设置里的两个子页上，不是新的一级页面（一条注册表规则：路由是数据；形状换了，规则没换）', () => {
+    // `设置` 曾是一个单页，编辑器就在它上面。§4.1 把它拆成索引加四个子页面，而
+    // 「列表页 + 独立编辑页」又把编辑器从列表行里搬到了 `/settings/chains/new` 与
+    // `/settings/chains/:chainId`。本测试所守的东西不因形状而变：链路录入**不是**
+    // 换乘链路 旁的一级入口，后者的页面只读结论。两页共用同一个组件（同构，只差参数），
+    // 而列表页上不再有表单 —— 那正是这次搬动要办的事。
+    const list = codeOf(read('../chains.vue'))
+    expect(list).toContain('<DragOrderList')
+    expect(list, 'the list page still carries the form').not.toContain('<ChainForm')
+    const editor = codeOf(read('../chain-editor.vue'))
+    expect(editor).toContain('<ChainForm')
     expect(codeOf(read('../index.vue'))).not.toContain('<DragOrderList')
     expect(codeOf(read('../index.vue'))).not.toContain('<AnchorPicker')
     const router = codeOf(read('../../../router/index.ts'))
     expect(router).toContain(`path: '/settings'`)
     expect(router).toContain(`path: 'chains'`)
     expect(router).not.toContain('commute-chain-editor')
+    // 两页都挂在 `/settings` 之下（顶栏点亮靠父记录），且新建那条**静态**路径排在 `:chainId` 之前
+    // ——否则 `new` 会被读成一个 chainId，那一页只能说「这条链路不存在」。
+    expect(router).toContain(`path: 'chains/new'`)
+    expect(router).toContain(`path: 'chains/:chainId'`)
+    expect(router.indexOf(`path: 'chains/new'`)).toBeLessThan(router.indexOf(`path: 'chains/:chainId'`))
+    expect(router.match(/chain-editor\.vue/g), 'the chain editor page is registered more than once').toHaveLength(2)
   })
 
   it('不承诺产品做不到的事：录入界面的文案里没有自动规划、路线推荐或对永久原因的「稍后再试」（一条关于文案的源码规则）', () => {
@@ -964,8 +1073,19 @@ describe('房子里的结构规则', () => {
   })
 
   it('触控目标不小于 44px（房子约定）', async () => {
+    // 「新增链路」住在列表页上，其余在编辑页上：两页各量自己那几个。
+    const list = await mountChainList({ chains: [storedChain()] })
+    // 「新增链路」是一个**链接**（一条链路自己的页面），不是按钮：脚本跳转要自己接语义、
+    // 键盘可达与「在新标签页打开」，而这三样浏览器原生就给了。
+    const addLink = list.node(
+      item => item.tag === 'a' && list.textOf(item).includes('新增链路'),
+      'the 新增链路 link',
+    )
+    expect(String(addLink.props.class), '新增链路 is smaller than the house touch target')
+      .toMatch(/min-h-\[44px\]|min-h-11|h-11/)
+    list.unmount()
+
     const host = await mountChainEditor({ chains: [storedChain()] })
-    await openComposer(host)
     // 必须先选一条线路，两个选择器才存在：没有它，下面的列表不携带任何选择器，循环将空转通过
     // ——正是两个 40px 控件曾满足 44px 规则的方式。
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
@@ -973,12 +1093,10 @@ describe('房子里的结构规则', () => {
     const pickers = stationTriggers(host, 0)
     expect(pickers, 'the pickers are rendered, or this check has no picker to measure').toHaveLength(2)
     const controls = [
-      buttonWith(host, '新增链路'),
       buttonWith(host, '保存链路'),
-      buttonWith(host, '取消'),
       buttonWith(host, '添加乘车段'),
       buttonWith(host, '删除该段'),
-      legFields(host, 0).find(item => item.tag === 'select')!,
+      lineTrigger(host, 0),
       extraField(host, 0),
       ...pickers,
     ]
@@ -991,10 +1109,23 @@ describe('房子里的结构规则', () => {
     host.unmount()
   })
 
+  it('「第 N 段」是标题级文字，不是 12px 的字段标签', async () => {
+    // 段名与「乘车段」「名称」那些字段标签曾经同字号，读起来像又多了一条字段。它是这一段
+    // 自己的标题，故它与表单里的 `h4` 同族（14px 起），不落回 `text-xs`。
+    const host = await mountChainEditor({ chains: [storedChain()] })
+
+    const heading = host.nodes(item => item.tag === 'h5' && /^第 \d+ 段$/.test(host.textOf(item).trim()))[0]
+    expect(heading, 'the leg heading is not a heading element').toBeDefined()
+    const classes = String(heading!.props.class ?? '')
+    expect(classes, `the leg heading is field-label sized: ${classes}`).not.toContain('text-xs')
+    expect(classes, `the leg heading is not title sized: ${classes}`).toMatch(/text-(sm|base|lg)/)
+    host.unmount()
+  })
+
   it('文字在它真正合成的背景上可读（12px 也要 4.5:1）——整张设置页都在检查范围内', () => {
     // 本屏的**每个** SFC，含关注线路行与复用的选择器：只读链路卡文件的规则会让回归在本屏其他地方发布。
-    for (const name of ['index.vue', 'lines.vue', 'schedule.vue', 'anchors.vue', 'chains.vue',
-      'back-to-settings.vue', 'anchor-picker.vue', 'commute-hours-card.vue',
+    for (const name of ['index.vue', 'lines.vue', 'favorite-editor.vue', 'schedule.vue', 'anchors.vue', 'anchor-detail.vue', 'chains.vue',
+      'back-to-settings.vue', 'commute-hours-card.vue',
       'commute-hours-form.vue', 'station-pin-picker.vue', 'drag-order-list.vue', 'removal-dialog.vue']) {
       expect(Object.keys(SETTINGS_SFC), `${name} is not audited`).toContain(name)
     }
@@ -1003,11 +1134,12 @@ describe('房子里的结构规则', () => {
     expect(audit.pairs.length).toBeGreaterThan(0)
     expect(audit.violations).toEqual([])
 
-    // 半透明文字色也被测量——与它所在的表面合成，这是 `text-sky-400/80` 能被读取的唯一方式。
-    // 审计跳过的颜色就是没有守卫的颜色，而本屏画了这样一个。
-    const translucent = audit.pairs.filter(pair => pair.textToken === 'text-sky-400/80')
-    expect(translucent, 'the translucent developer-mode note is audited').not.toHaveLength(0)
-    expect(translucent.every(pair => pair.ratio >= 4.5), 'its composite is readable').toBe(true)
+    // 半透明文字色也被测量——与它所在的表面合成，这是它们能被读取的唯一方式。
+    // 审计跳过的颜色就是没有守卫的颜色。锚点页原先那个开发用模拟说明（`text-sky-400/80`）
+    // 已被删掉，故这条改为守住本屏真实画着的那个半透明色（`text-amber-400/90`）。
+    const translucent = audit.pairs.filter((pair: { textToken: string }) => /\/\d+$/.test(pair.textToken))
+    expect(translucent, 'the translucent note on this screen is audited').not.toHaveLength(0)
+    expect(translucent.every((pair: { ratio: number }) => pair.ratio >= 4.5), 'its composite is readable').toBe(true)
   })
 
   it('配对只看同一状态：hover 的文字不跟没加 hover 的背景相乘，真实的那一对反而要审到', () => {
@@ -1039,7 +1171,6 @@ describe('房子里的结构规则', () => {
 
   it('添加乘车段的边界与本版一致：到上限的按钮禁用，并在原地说明这是首版的边界', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await press(host, buttonWith(host, '添加乘车段'))
 
     expect(host.nodes(item => item.props['data-chain-leg'] !== undefined)).toHaveLength(2)
@@ -1051,19 +1182,17 @@ describe('房子里的结构规则', () => {
 
   it('更换线路会清空该段的上下车站，并说明原因：站序属于一条线路', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
     await pickStation(host, 0, 'board', '东大桥', 3)
     await chooseLine(host, 0, '地铁 88 号线 · 开往平安里')
 
-    expect(host.textOf(cardOf(host))).toContain('更换线路后已清空这一段的上车站与下车站')
+    expect(host.text()).toContain('更换线路后已清空这一段的上车站与下车站')
     expect(host.textOf(stationTriggers(host, 0)[0]!)).toContain('未设置')
     host.unmount()
   })
 
   it('站点只从该线路的站序列表里选：段里没有手输站名的地方，列表就是那条线路的站序', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
 
     // 段里完全没有文本输入框：手打的站名是一个没人能定位的站，
@@ -1071,10 +1200,10 @@ describe('房子里的结构规则', () => {
     expect(legFields(host, 0).filter(item => item.tag === 'input').map(item => item.props.type))
       .toEqual(['number'])
 
-    // 两个选择器对着**同一**站表，故各自携带把自己与另一个区分开的名字供屏幕阅读器用：
-    // 「上车站」不是「下车站」。
-    expect(stationTriggers(host, 0).map(item => item.props['aria-label']))
-      .toEqual(['上车站', '下车站'])
+    // 段里的三个下拉各有把自己与另外两个区分开的名字供屏幕阅读器用：
+    // 「线路与方向」不是「上车站」，「上车站」不是「下车站」。
+    expect(comboTriggers(host, 0).map(item => item.props['aria-label']))
+      .toEqual(['线路与方向', '上车站', '下车站'])
 
     await press(host, stationTriggers(host, 0)[0]!)
 
@@ -1083,9 +1212,29 @@ describe('房子里的结构规则', () => {
     host.unmount()
   })
 
+  it('线路与方向的下拉不带搜索框：面板打开就是全部线路，与编辑器给的那份列表一条不差', async () => {
+    // 这份列表一屏就看完了，缩它没有意义——故它用共用的控件，但不带搜索框。
+    const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
+    await press(host, lineTrigger(host, 0))
+
+    // 整个屏上（含 portal 里的面板）一个搜索框都没有：线路与方向的下拉自己就没带。
+    expect(host.nodes(item => item.tag === 'input' && item.props.role === 'combobox'),
+      '线路与方向的下拉带上了搜索框').toHaveLength(0)
+
+    const options = host.nodes(item => item.props.role === 'option').map(item => host.textOf(item))
+    // 两条关注线路、各两个方向：数量与编辑器交给这一段的那份列表一致，一条都没被缩掉。
+    expect(options).toHaveLength(DECLARED_FAVOURITES.length * 2)
+    expect(options).toEqual([
+      '快线 1 路 · 上班方向 · 开往十里堡',
+      '快线 1 路 · 下班方向 · 开往建国门',
+      '地铁 88 号线 · 开往平安里',
+      '地铁 88 号线 · 开往西直门',
+    ])
+    host.unmount()
+  })
+
   it('未选线路的段说明下一步，而不是摆出一对空的组合框', async () => {
     const host = await mountChainEditor()
-    await openComposer(host)
 
     expect(host.textOf(legBlock(host, 0))).toContain('请先选择线路与方向，再从它的站序里选上车站与下车站')
     expect(stationTriggers(host, 0)).toHaveLength(0)
@@ -1098,7 +1247,6 @@ describe('房子里的结构规则', () => {
     const host = await mountChainEditor({
       overrides: [[/\/api\/transit\/lines\//, () => { throw new Error('offline') }]],
     })
-    await openComposer(host)
     await type(host, nameField(host), '早上上班')
     // 选项按其编号命名方向：「开往 X」标签来自那次尚未作答的读取，
     // 故不得捏造一个没人报告过的终点站。
@@ -1129,7 +1277,6 @@ describe('房子里的结构规则', () => {
         },
       })]],
     })
-    await openComposer(host)
     await chooseLine(host, 0, '快线 1 路 · 开往建国门')
 
     expect(host.textOf(legBlock(host, 0))).toContain('暂无站点数据')
@@ -1141,11 +1288,10 @@ describe('房子里的结构规则', () => {
   it('已不再关注的线路不会被悄悄换掉：它在选项里说明自己不在关注列表，并拒绝保存', async () => {
     // 已存链路乘 快线 1 路，而它已不再被关注：它的站表完全读不到，故这一对无法核实——
     // 这正是保存必须说的，而不是把该段重编到某条别的线路上。
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       favourites: [FAVOURITES[1]!],
       chains: [storedChain()],
     })
-    await openEditorFor(host, '早上上班')
     await save(host)
 
     expect(recordWrites(host)).toHaveLength(0)
@@ -1154,13 +1300,12 @@ describe('房子里的结构规则', () => {
   })
 
   it('已不再关注的公交线，选项说的是「站序未知」：公交线 id 已经把方向定死，说方向未知是说过头了', async () => {
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       favourites: [FAVOURITES[1]!],
       chains: [storedChain()],
     })
-    await openEditorFor(host, '早上上班')
 
-    const options = host.nodes(item => item.tag === 'option').map(item => host.textOf(item))
+    const options = await directionOptionTexts(host, 0)
     expect(options).toContain('快线 1 路 · 站序未知')
     expect(options, 'a stored bus id fixes the direction, so claiming it is unknown overstates')
       .not.toContain('快线 1 路 · 方向未知')
@@ -1168,7 +1313,7 @@ describe('房子里的结构规则', () => {
   })
 
   it('已不再关注的地铁线，选项说的是「方向未知」：一个 id 带两个方向，方向确实读不出来', async () => {
-    const host = await mountChainEditor({
+    const host = await mountChainEditorFor('早上上班', {
       favourites: [FAVOURITES[0]!],
       chains: [storedChain({
         legs: [storedLeg({
@@ -1182,28 +1327,26 @@ describe('房子里的结构规则', () => {
         })],
       })],
     })
-    await openEditorFor(host, '早上上班')
 
-    const options = host.nodes(item => item.tag === 'option').map(item => host.textOf(item))
+    const options = await directionOptionTexts(host, 0)
     expect(options).toContain('地铁 88 号线 · 方向未知')
     host.unmount()
   })
 
   it('线路是在哪里选的，就在那里说明列表来自关注线路：不等到它绑住手才说', async () => {
-    // 只提供关注的线路，故未关注的线路在 select 里干脆缺席——而在稳态下屏幕上没有别的东西会说明原因。
+    // 只提供关注的线路，故未关注的线路在下拉里干脆缺席——而在稳态下屏幕上没有别的东西会说明原因。
     // 代价在做出选择之处陈述，而非只在它绑住手时才说。
     const host = await mountChainEditor()
-    await openComposer(host)
 
     const sentence = '列表来自你关注的线路：没关注的线路要先关注，才能在这里选它的站序'
     expect(host.textOf(legBlock(host, 0))).toContain(sentence)
     host.unmount()
   })
 
-  it('卡片由它自己的标题命名：名字只念一次（aria-labelledby，不是重复一遍的 aria-label）', async () => {
-    const host = await mountChainEditor()
+  it('列表那块区域由它自己的标题命名：名字只念一次（aria-labelledby，不是重复一遍的 aria-label）', async () => {
+    const host = await mountChainList()
 
-    const card = cardOf(host)
+    const card = chainSection(host)
     expect(card.props['aria-label']).toBeUndefined()
     const labelled = card.props['aria-labelledby']
     const heading = host.node(item => item.props.id === labelled, 'the heading the card is named by')
@@ -1217,9 +1360,8 @@ describe('方向按使用者的声明标注上下班，并按链路自己的目�
     // 快线 1 路 声明过（方向 1 上班、方向 0 下班），地铁 88 号线 没声明过：
     // 声明过的两个方向各自成句，没声明过的两条仍只说线路名与「开往 X」。
     const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
-    await openComposer(host)
 
-    expect(directionOptionTexts(host, 0)).toEqual([
+    expect(await directionOptionTexts(host, 0)).toEqual([
       '快线 1 路 · 上班方向 · 开往十里堡',
       '快线 1 路 · 下班方向 · 开往建国门',
       '地铁 88 号线 · 开往平安里',
@@ -1229,13 +1371,14 @@ describe('方向按使用者的声明标注上下班，并按链路自己的目�
   })
 
   it('下班目的的链路里，下班方向那条排在前；上班方向与上游的「开往 X」照旧在', async () => {
-    const host = await mountChainEditor({
+    // 目的按**已存链路自己的**那条算：这一条存在链路上，故它必须从编辑页进来（新建页的草稿
+    // 一律是上班目的，在那里看不出排序跟着链路走）。
+    const host = await mountChainEditorFor('早上上班', {
       favourites: DECLARED_FAVOURITES,
       chains: [storedChain({ purpose: 'evening' })],
     })
-    await openEditorFor(host, '早上上班')
 
-    expect(directionOptionTexts(host, 0)).toEqual([
+    expect(await directionOptionTexts(host, 0)).toEqual([
       '快线 1 路 · 下班方向 · 开往建国门',
       '快线 1 路 · 上班方向 · 开往十里堡',
       '地铁 88 号线 · 开往平安里',
@@ -1246,28 +1389,27 @@ describe('方向按使用者的声明标注上下班，并按链路自己的目�
 
   it('上班与下班两个目的只换先后，不换选项集：任何方向都既不停用也不消失', async () => {
     const morning = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
-    await openComposer(morning)
-    const evening = await mountChainEditor({
+    const evening = await mountChainEditorFor('早上上班', {
       favourites: DECLARED_FAVOURITES,
       chains: [storedChain({ purpose: 'evening' })],
     })
-    await openEditorFor(evening, '早上上班')
 
-    const morningTexts = directionOptionTexts(morning, 0)
-    const eveningTexts = directionOptionTexts(evening, 0)
+    const morningTexts = await directionOptionTexts(morning, 0)
+    const eveningTexts = await directionOptionTexts(evening, 0)
     expect(eveningTexts).not.toEqual(morningTexts)
     expect(eveningTexts).toHaveLength(morningTexts.length)
     expect([...eveningTexts].sort()).toEqual([...morningTexts].sort())
     // 反方向那条（目的不指向它）仍在，且没有一个是禁用的：先往反方向坐到枢纽是真实走法。
-    expect(directionOptionsOf(evening, 0).every(item => item.props.disabled === undefined)).toBe(true)
+    // 禁用与否读的是列表项自己的那一档（reka 只在停用时才标 `data-disabled`）。
+    expect((await directionOptionsOf(evening, 0)).every(item => item.props['data-disabled'] === undefined))
+      .toBe(true)
     morning.unmount()
     evening.unmount()
   })
 
   it('在录入屏上换目的，同一条线路的两个方向当场换先后（先后跟着这份草稿的目的走）', async () => {
     const host = await mountChainEditor({ favourites: DECLARED_FAVOURITES })
-    await openComposer(host)
-    expect(directionOptionTexts(host, 0).slice(0, 2))
+    expect((await directionOptionTexts(host, 0)).slice(0, 2))
       .toEqual(['快线 1 路 · 上班方向 · 开往十里堡', '快线 1 路 · 下班方向 · 开往建国门'])
 
     const evening = host.node(
@@ -1276,7 +1418,7 @@ describe('方向按使用者的声明标注上下班，并按链路自己的目�
     )
     await press(host, evening)
 
-    expect(directionOptionTexts(host, 0).slice(0, 2))
+    expect((await directionOptionTexts(host, 0)).slice(0, 2))
       .toEqual(['快线 1 路 · 下班方向 · 开往建国门', '快线 1 路 · 上班方向 · 开往十里堡'])
     host.unmount()
   })
@@ -1423,9 +1565,124 @@ describe('规则模块本身', () => {
       .toBe('第 1 段的上车站「东大桥」没有站序：站名与站序要同时选定，单独一半定位不到车站')
   })
 
-  it('有界的选择用房子里已有的控件：平台页用的原生 select，加房子自己的站点组合框，不手搓（一条关于控件选择的源码规则）', () => {
-    expect(codeOf(LEG)).toContain('<select')
-    expect(codeOf(PATTERN)).toContain('<select')
+  it('选择器一律走共用的下拉：全仓的生产源码里一个原生 select 都不留（一条关于控件选择的源码规则）', () => {
+    // 选项少到一眼看得完时不带搜索框，多到读不完时带上，但两种情况都是**同一个**控件，
+    // 而不是各写一份。留下任何一个原生 select 都会让「有界的选择用 select」这条旧读法继续
+    // 膨胀出第二份实现，故本规则不放宽成「允许某些 select」。
+    const offenders = sfcFiles(WEB_SRC)
+      .filter(path => !path.includes('/__tests__/'))
+      .filter(path => codeOf(readFileSync(path, 'utf8')).includes('<select'))
+    expect(offenders).toEqual([])
+
+    // 三处调用分别落在共用的控件上：链路录入的线路与方向、它复用的选站器、站台屏的表头。
+    expect(codeOf(LEG)).toContain('SearchableCombobox')
     expect(codeOf(LEG)).toContain('StationPinPicker')
+    expect(codeOf(PATTERN)).toContain('SearchableCombobox')
+    expect(codeOf(PICKER)).toContain('SearchableCombobox')
+  })
+})
+
+describe('链路的三处写操作成与败各说一句', () => {
+  /**
+   * 拖拽库挂在容器元素自己身上的那个实例。
+   *
+   * 它按一个每次加载都不同的键挂上去，故这里按前缀找键 —— 库自己的键名就是 `Sortable…`。
+   */
+  function sortableOf(host: MountedHost): { options: { onEnd: (event: unknown) => void } } {
+    const keyOf = (node: HostElement): string | undefined =>
+      Object.keys(node).find(name => /^sortable/i.test(name))
+    const node = host.node(item => keyOf(item) !== undefined, 'the sortable container')
+    return (node as unknown as Record<string, { options: { onEnd: (event: unknown) => void } }>)[keyOf(node)!]!
+  }
+
+  /** 一次拖放：被拖走的链路占据它落在其上的那条链路的格子。 */
+  async function drag(host: MountedHost, from: number, to: number): Promise<void> {
+    sortableOf(host).options.onEnd({ oldIndex: from, newIndex: to })
+    await host.flush()
+  }
+
+  /** 一条新链路的完整录入：名字、一条公交线路，以及它的一对站。 */
+  async function compose(host: MountedHost): Promise<void> {
+    await type(host, nameField(host), '早上上班')
+    await chooseLine(host, 0, '快线 1 路 · 开往建国门')
+    await pickStation(host, 0, 'board', '东大桥', 3)
+    await pickStation(host, 0, 'alight', '建国门', 4)
+  }
+
+  /** 排队删除并确认。 */
+  async function removeFirst(host: MountedHost): Promise<void> {
+    await press(host, buttonWith(host, '删除链路'))
+    await press(host, host.node(
+      item => item.tag === 'button' && host.textOf(item).trim() === '确认删除',
+      'the confirm button',
+    ))
+  }
+
+  it('保存：说一句已保存链路，带上这条链路的名字', async () => {
+    const host = await mountChainEditor()
+    await compose(host)
+    await save(host)
+
+    expect(pushed).toEqual(['已保存链路 早上上班'])
+    host.unmount()
+  })
+
+  it('保存：被拒时带上服务端给的原因，内联那一份照旧留着', async () => {
+    const host = await mountChainEditor({
+      chainWrite: () => ({ success: false, error: '一条链路至少要有一段乘车段' }),
+    })
+    await compose(host)
+    await save(host)
+
+    expect(pushed).toEqual(['链路保存失败 早上上班 · 一条链路至少要有一段乘车段'])
+    expect(serverErrorText(host)).toBe('一条链路至少要有一段乘车段')
+    host.unmount()
+  })
+
+  it('删除：说一句已删除链路，带上这条链路的名字', async () => {
+    const host = await mountChainEditorFor('早上上班', { chains: [storedChain()] })
+
+    await removeFirst(host)
+
+    expect(pushed).toEqual(['已删除链路 早上上班'])
+    host.unmount()
+  })
+
+  it('删除：被拒时带上服务端给的原因', async () => {
+    const host = await mountChainEditorFor('早上上班', {
+      chains: [storedChain()],
+      overrides: [[/\/api\/transit\/commute-chains\/[^/]+$/, request => (request.method === 'DELETE'
+        ? { success: false, error: '该链路不存在' }
+        : { success: true, data: stored(request.body, 'chain-saved-1') })]],
+    })
+
+    await removeFirst(host)
+
+    expect(pushed).toEqual(['链路删除失败 早上上班 · 该链路不存在'])
+    host.unmount()
+  })
+
+  it('顺序：落一次拖放说一句顺序已更新', async () => {
+    // 拖动排序住在**列表页**上：编辑器搬走之后，这条列表与它的拖动留在这里。
+    const host = await mountChainList({
+      chains: [storedChain(), storedChain({ id: 'chain-saved-2', name: '下班回家', displayOrder: 1 })],
+    })
+
+    await drag(host, 0, 1)
+
+    expect(pushed).toEqual(['顺序已更新'])
+    host.unmount()
+  })
+
+  it('顺序：被拒时带上服务端给的原因', async () => {
+    const host = await mountChainList({
+      chains: [storedChain(), storedChain({ id: 'chain-saved-2', name: '下班回家', displayOrder: 1 })],
+      overrides: [[/\/api\/transit\/commute-chains\/[^/]+$/, () => ({ success: false, error: '该链路不存在' })]],
+    })
+
+    await drag(host, 0, 1)
+
+    expect(pushed).toEqual(['顺序保存失败 · 该链路不存在'])
+    host.unmount()
   })
 })

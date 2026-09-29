@@ -190,7 +190,6 @@ describe('F11 has one entry here, and what it names comes from the answers on sc
     await pressRefresh(page)
 
     // 拒绝什么都没携带，故再次索要数字只会取回屏幕上已有的东西。
-    expect(page.store.refreshOutcome).toBe('throttled')
     expect(page.server.seen(/commute-chains\/deductions/)).toHaveLength(before)
     page.unmount()
   })
@@ -225,9 +224,10 @@ describe('结局由全局提示说，页面上没有读数那一行', () => {
       const page = await mountChainPage({
         routes: [withChains, [/api\/transit\/refresh$/, scenario.respond]],
       })
+      // 按下走完整条请求，结局由提示说出（`refresh-toast.test.ts` 评判推了什么）；store 不再把它
+      // 作为状态留着 —— 说完就完。这里守的是：页面自己也绝不去印那个词。
       await pressRefresh(page)
 
-      expect(page.store.refreshOutcome, scenario.name).toBe(scenario.outcome)
       // 页面不印结局：它是提示的，措辞只出在一个地方（store + 提示模块）。
       expect(page.text(), scenario.name).not.toContain('刷新太频繁')
       expect(page.text(), scenario.name).not.toContain('已刷新')

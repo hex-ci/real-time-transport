@@ -7,7 +7,7 @@ import {
 } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useIntervalFn } from '@vueuse/core'
-import type { LineDetail, LiveBus } from '@real-time-transport/shared'
+import type { LineDetail, LiveBus, RefreshLiveTarget } from '@real-time-transport/shared'
 import { favoriteDirections, operatingDaySecondsOf, operatingStatusOf } from '@real-time-transport/shared'
 import { operatingTextOf } from '@/operating-copy'
 import { refreshFreshnessOf, useTransitStore } from '@/stores/transit.store'
@@ -38,8 +38,10 @@ const landmarkHint = shallowRef('多线聚合')
 const boardLoading = shallowRef(false)
 const detecting = shallowRef(false)
 /**
- * 报告板的刷新控件正在读取。与加载体不同，它示意更新正运行在留在屏上的行**之上**：
- * 同一事实的非破坏性一半，故忙时的措辞用刷新家族自己的，且占用期间控件禁用。
+ * 一次仍在途的重读（12 秒轮询、换站、GPS 对准、重试）正运行在**留在屏上**的行之上。
+ *
+ * 它是保留契约被示意出来的那一半：行留下，改在工具栏那枚控件上说「正在跑」。加载体只在屏上
+ * 没有东西可留时出现，故两者互斥。
  */
 const boardBusy = shallowRef(false)
 /** 已请求定位，正在等第一次 GPS 定位结果到达。 */
@@ -174,8 +176,8 @@ function buildRulesForStation(stationName: string): PlatformLineRule[] {
 /**
  * 报告板的一次完整读取，无论由什么触发（12 秒轮询、站台选择器、GPS 对准、重试）。
  *
- * 破坏性刷新问题由「每个状态何时移动」解决，而非靠多画什么：刷新期间屏上的行继续渲染，
- * 只有刷新控件示意更新在跑；加载体只在没有东西可留时出现；行的时刻只由产出屏上这些行的
+ * 破坏性刷新问题由「每个状态何时移动」解决，而非靠多画什么：重读期间屏上的行继续渲染，
+ * 只有工具栏那枚控件示意更新在跑；加载体只在没有东西可留时出现；行的时刻只由产出屏上这些行的
  * 那个响应写入。
  */
 async function loadPlatformDepartures(): Promise<void> {
@@ -400,6 +402,48 @@ const rowsFreshness = computed(() =>
   refreshFreshnessOf(rowsReadAt.value === null
     ? null
     : { at: rowsReadAt.value, dataSource: null, isDegraded: null }))
+
+/**
+ * 端点点名的就是**屏上这些行**背后的线路与方向。
+ *
+ * 行由本站台上真正有站的那些关注线路构造，故这份点名从同一处推导：屏上没有的线路不被点名，
+ * 因为没有东西在读它。地铁两个方向是两条独立读数，故两个方向都点名。
+ */
+const refreshTargets = computed<RefreshLiveTarget[]>(() => {
+  const seen = new Set<string>()
+  const targets: RefreshLiveTarget[] = []
+  for (const rule of buildRulesForStation(currentStationName.value)) {
+    const key = `${rule.lineId}_${rule.direction}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    targets.push({
+      lineId: rule.lineId,
+      direction: rule.direction,
+      cityCode: cityStore.currentCode,
+    })
+  }
+  return targets
+})
+
+/**
+ * 一次按下的全程都为真：花掉窗口的那个请求，以及显示它取到了什么的那次重读。
+ */
+const refreshing = shallowRef(false)
+
+/**
+ * 按下：经由拥有冷却期的那**一个**请求去问，然后重读答案以展示它取得之物。
+ * 只有取得读数的那次按下才重读：拒绝或失败什么都没携带。
+ */
+async function onRefresh(): Promise<void> {
+  refreshing.value = true
+  try {
+    const outcome = await transitStore.refreshLive(refreshTargets.value)
+    if (outcome === 'ok') await loadPlatformDepartures()
+  }
+  finally {
+    refreshing.value = false
+  }
+}
 </script>
 
 <template>
@@ -409,18 +453,19 @@ const rowsFreshness = computed(() =>
       :station-options="stationOptions"
       :landmark-hint="landmarkHint"
       :detecting="detecting"
+      :refreshing="refreshing || boardBusy"
+      :refresh-disabled="refreshTargets.length === 0"
       @detect="detectNearbyPlatform"
       @change="loadPlatformDepartures"
+      @refresh="onRefresh"
     />
 
-    <!-- 发车报告板 -->
+    <!-- 发车报告板。刷新入口在它上面的工具栏里（F11），故它自己不带刷新控件。 -->
     <DepartureBoard
       :items="departureItems"
       :loading="boardLoading"
-      :refreshing="boardBusy"
       :freshness="rowsFreshness"
       :favorites-read="favouritesRead"
-      @refresh="loadPlatformDepartures"
       @retry="reloadForCurrentCity"
     />
   </div>

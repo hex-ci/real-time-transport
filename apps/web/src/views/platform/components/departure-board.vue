@@ -19,13 +19,6 @@ const props = defineProps<{
    */
   favoritesRead: ReadState
   /**
-   * 刷新正运行在留在屏上的行之上时为 true。
-   *
-   * 它是 loading 的非破坏性一半：行被保留，改在控件上示意更新（刷新家族自己的措辞
-   * 「正在刷新…」）。它绝不与 loading 体同时出现——体恰在没有东西可留时出现。
-   */
-  refreshing?: boolean
-  /**
    * 屏上这些行背后那次读取的新鲜度行，由页面报告——屏上没有读取产出的东西时为 `null`。
    * 时刻取自响应自己的 `updatedAt`，故刷新甚至失败时，这一行仍描述**可见的行**来自哪次读取。
    */
@@ -34,7 +27,6 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'retry'): void
-  (e: 'refresh'): void
 }>()
 
 /**
@@ -178,19 +170,6 @@ function markOf(item: DepartureItem): string | null {
         </div>
       </div>
 
-      <!-- 刷新控件，只在它能重读的行之上渲染：忙时禁用，并以刷新家族自己的措辞
-           （「正在刷新…」）示意——非破坏性的信号，就在留下的行旁边。 -->
-      <div class="flex justify-center border-t border-slate-800/60 p-2.5">
-        <button
-          type="button"
-          class="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:text-base"
-          :disabled="refreshing"
-          @click="$emit('refresh')"
-        >
-          <RefreshCw class="h-3.5 w-3.5 shrink-0" :class="refreshing ? 'animate-spin' : ''" aria-hidden="true" />
-          <span>{{ refreshing ? '正在刷新…' : '刷新车况数据' }}</span>
-        </button>
-      </div>
     </div>
   </div>
 </template>

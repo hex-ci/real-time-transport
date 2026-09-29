@@ -41,6 +41,8 @@ vi.mock('../../../views/platform/components/platform-header.vue', async () => {
   return {
     default: {
       name: 'PlatformHeaderStub',
+      // 只声明桩自己要驱动的几个：`refreshing` / `refreshDisabled` / `onRefresh` 刻意**不**声明，
+      // 才落在 attrs 里、被摊到标记元素上 —— 测试据此读到页面传下去的值（与 change/v-model 同一条思路）。
       props: ['modelValue', 'stationOptions', 'landmarkHint', 'detecting'],
       setup(_props: Record<string, unknown>, { attrs }: { attrs: Record<string, unknown> }) {
         // change / v-model 的 onXxx 绑定不声明为 emits，才落在 attrs 里、被摊到
@@ -195,6 +197,21 @@ function minuteSpans(host: MountedHost): string[] {
     .map(item => item.text.trim())
 }
 
+/**
+ * 顶部工具栏那枚共用刷新控件是不是忙的。
+ *
+ * 忙碌信号从报告板底部那条挪到了顶部工具栏（F11：刷新入口在顶部、三页同形），故断言的落点随之
+ * 改变 ——它问的仍是同一件事：一次在途的重读是否被示意出来。本用例把整个站头换成桩，故读的是
+ * 页面传给它的那一个 prop：桩收到的 `refreshing` 正是真实控件会拿到的那一个值。
+ */
+function refreshBusy(host: MountedHost): boolean {
+  const stub = host.node(
+    (item: HostElement) => item.tag === 'platform-header-stub',
+    'station header stub',
+  )
+  return stub.props.refreshing === true || stub.props.refreshing === 'true'
+}
+
 /** 读者自己时区下的「HH:MM:SS」——与新鲜度行印出的形状相同。 */
 function clockOf(at: number): string {
   const d = new Date(at)
@@ -221,21 +238,22 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     await selectStation(host, '共用站')
     await host.flush()
 
-    // 在途：**同一**两行仍在屏幕上，含分钟，且报告板说更新正在进行，而非把列表换掉。
+    // 在途：**同一**两行仍在屏幕上，含分钟，而非把列表换掉。
     expect(rowTerminals(host), 'the rows must survive the in-flight refresh')
       .toHaveLength(2)
     expect(minuteSpans(host)).toEqual(expect.arrayContaining(['2', '5']))
     expect(host.text()).toContain('开往丙方向')
     expect(host.text()).not.toContain('正在加载车况数据')
-    expect(host.text()).toContain('正在刷新…')
+    // 忙碌信号由顶部工具栏那枚共用刷新控件承担（F11：入口在顶部、三页同形）：它在途时是忙的。
+    expect(refreshBusy(host), 'the toolbar refresh does not show the in-flight read').toBe(true)
 
     gate1.resolve(liveBody('bus_027_1', 1, STAMP_A2, 240))
     gate2.resolve(liveBody('bus_027_2', 1, STAMP_A2, 600))
     await host.flush()
 
-    // 新的读取落到被保留的行里。
+    // 新的读取落到被保留的行里，忙碌信号随之落下。
     expect(minuteSpans(host)).toEqual(expect.arrayContaining(['4', '10']))
-    expect(host.text()).not.toContain('正在刷新…')
+    expect(refreshBusy(host)).toBe(false)
     host.unmount()
   })
 
@@ -306,9 +324,9 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     await selectStation(host, '共用站')
     await host.flush()
 
-    // 在途时该时刻不被触碰——绝不在请求时盖章——且忙碌词在它旁边，而不是取代它。
+    // 在途时该时刻不被触碰——绝不在请求时盖章——而忙碌信号在工具栏那枚控件上，不取代它。
     expect(host.text()).toContain(stampText)
-    expect(host.text()).toContain('正在刷新…')
+    expect(refreshBusy(host)).toBe(true)
     expect(host.text()).not.toContain(clockOf(STAMP_A2))
 
     gate1.resolve(liveBody('bus_027_1', 1, STAMP_A2, 240))
@@ -318,7 +336,7 @@ describe('站台页：刷新不清空已在屏上的行', () => {
     // 只有产出**新**行的那次读取会移动该行。
     expect(host.text()).toContain(`最后更新 ${clockOf(STAMP_A2)}`)
     expect(host.text()).not.toContain(stampText)
-    expect(host.text()).not.toContain('正在刷新…')
+    expect(refreshBusy(host)).toBe(false)
     host.unmount()
   })
 

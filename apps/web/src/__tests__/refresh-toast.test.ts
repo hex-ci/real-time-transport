@@ -3,13 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RefreshLiveResult } from '@real-time-transport/shared'
-import { click, mountComponent } from '@/__tests__/views/settings/settings-harness'
 import { useTransitStore } from '../stores/transit.store'
-import {
-  REFRESH_COOLDOWN_TOAST_ID,
-  REFRESH_RESULT_DURATION_MS,
-  RefreshCooldownContent,
-} from '../refresh-toast'
+import { REFRESH_RESULT_DURATION_MS } from '../refresh-toast'
 
 /**
  * 一次刷新的结局去哪里说。
@@ -21,30 +16,15 @@ import {
  * 是我们自己的契约。库自带一条 polite 的 live region（`Toaster` 渲染的容器），故读屏播报由它承担。
  */
 
-const { pushed, dismissed, custom } = vi.hoisted(() => ({
+const { pushed } = vi.hoisted(() => ({
   pushed: [] as Array<{ message: string, options: Record<string, unknown> }>,
-  /** 每一次撤销请求，按它点名的身份。 */
-  dismissed: [] as string[],
-  /** 以自定义组件渲染的那几条：组件本身，以及它拿到的选项。 */
-  custom: [] as Array<{ component: unknown, options: Record<string, unknown> }>,
 }))
 
 vi.mock('vue-sonner', () => ({
-  toast: Object.assign(
-    (message: string, options: Record<string, unknown> = {}) => {
-      pushed.push({ message, options })
-      return options.id ?? pushed.length
-    },
-    {
-      dismiss: (id?: string | number) => {
-        dismissed.push(String(id ?? ''))
-      },
-      custom: (component: unknown, options: Record<string, unknown> = {}) => {
-        custom.push({ component, options })
-        return options.id ?? custom.length
-      },
-    },
-  ),
+  toast: (message: string, options: Record<string, unknown> = {}) => {
+    pushed.push({ message, options })
+    return options.id ?? pushed.length
+  },
 }))
 
 /** 夹具报告为取得的瞬间。2023-11-14T22:13:20Z。 */
@@ -95,7 +75,6 @@ describe('一次按下的结局推一条提示', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     pushed.length = 0
-    dismissed.length = 0
   })
 
   afterEach(() => {
@@ -115,25 +94,19 @@ describe('一次按下的结局推一条提示', () => {
     // 不给固定 id：连着两次成功也该各说一次，而不是让第二条被读成第一条的更新。
     expect(pushed[0]!.options.id).toBeUndefined()
     expect(classOf(0)).toContain('text-cyan-300')
-    // 上一次的倒计时说的窗口已被这次按下花掉。
-    expect(dismissed).toEqual([REFRESH_COOLDOWN_TOAST_ID])
   })
 
   it('成功：窗口关着的那几秒里不再多推一条（结局只说一次）', async () => {
-    vi.useFakeTimers()
     const store = useTransitStore()
     answerOnce(200, { success: true, data: okResult() })
 
     await store.refreshLive(TARGET)
-    // 服务端把窗口关上了，故倒计时的指针在这几秒里一直在走。
-    vi.advanceTimersByTime(5_000)
 
-    expect(store.refreshNow).toBeGreaterThan(OBTAINED_AT)
+    // 结局只推一次：窗口关着不再触发第二句 —— 倒数不再在后台走（F11：点一下、说一句）。
     expect(pushed).toHaveLength(1)
   })
 
-  it('被拒：驻留的那一条带着服务端的秒数，并按同一个身份逐秒改写自己', async () => {
-    vi.useFakeTimers()
+  it('被拒：只说一次、自带服务端给的秒数，然后自己退场（不驻留、不逐秒改写）', async () => {
     const store = useTransitStore()
     const start = Date.now()
     answerOnce(429, {
@@ -144,48 +117,26 @@ describe('一次按下的结局推一条提示', () => {
 
     expect(await store.refreshLive(TARGET)).toBe('throttled')
 
-    // 冷却那条以自定义组件渲染（两个节点，见下面那一组），故它不在字符串那一条里。
-    expect(pushed).toHaveLength(0)
-    expect(custom).toHaveLength(1)
-    expect(custom[0]!.options.componentProps)
-      .toEqual({ announcement: '刷新太频繁', detail: ' · 13 秒后可刷新' })
-    // 驻留：它说的是「还要等多久」，一次说死就是假的。
-    expect(custom[0]!.options.id).toBe(REFRESH_COOLDOWN_TOAST_ID)
-    expect(custom[0]!.options.duration).toBe(Infinity)
-    expect(String(custom[0]!.options.class ?? '')).toContain('text-amber-300')
-
-    vi.advanceTimersByTime(1_000)
-    expect(custom).toHaveLength(2)
-    // 同一个身份上的更新是「同一件事的下一秒」，不是第二条通知，故屏幕上只有一条。
-    expect(custom[1]!.options.id).toBe(REFRESH_COOLDOWN_TOAST_ID)
-    expect(custom[1]!.options.componentProps)
-      .toEqual({ announcement: '刷新太频繁', detail: ' · 12 秒后可刷新' })
-    // 而它改写的仍是**那一个**组件：库按 id 更新同一条，绝不新挂一个。
-    expect(custom[1]!.component).toBe(custom[0]!.component)
-
-    vi.advanceTimersByTime(1_000)
-    expect(custom[2]!.options.componentProps)
-      .toEqual({ announcement: '刷新太频繁', detail: ' · 11 秒后可刷新' })
-    expect(custom[2]!.options.id).toBe(REFRESH_COOLDOWN_TOAST_ID)
+    // 与其他结局同一条路径：一次按下推一条，按服务端答的时长一次说清，自己退场。
+    expect(pushed).toHaveLength(1)
+    expect(pushed[0]!.message).toBe('刷新太频繁 · 13 秒后可刷新')
+    expect(pushed[0]!.options.duration).toBe(REFRESH_RESULT_DURATION_MS)
+    expect(pushed[0]!.options.id).toBeUndefined()
+    expect(classOf(0)).toContain('text-amber-300')
   })
 
-  it('窗口一开那条提示就撤掉，而不是留在屏幕上说一个已经不成立的等待', async () => {
-    vi.useFakeTimers()
+  it('窗口开后再点一下：按那一刻重算再答一次（点一下、说一句）', async () => {
+    // 冷却的秒数只在按下那次回答里需要：窗口开着时再点一下，服务端放它通过，
+    // 故这次回答的是「已刷新」，不是又一句等待。
     const store = useTransitStore()
-    const start = Date.now()
-    answerOnce(429, {
-      success: false,
-      error: '…',
-      data: refusedResult({ nextAllowedAt: start + 3_000, retryAfterSeconds: 3 }),
-    })
-
+    answerOnce(429, { success: false, error: '…', data: refusedResult({ retryAfterSeconds: 0 }) })
     await store.refreshLive(TARGET)
-    expect(store.refreshOutcome).toBe('throttled')
+    expect(pushed[0]!.message).toContain('刷新太频繁')
 
-    vi.advanceTimersByTime(3_000)
-
-    expect(store.refreshOutcome).toBeNull()
-    expect(dismissed).toContain(REFRESH_COOLDOWN_TOAST_ID)
+    pushed.length = 0
+    answerOnce(200, { success: true, data: okResult() })
+    await store.refreshLive(TARGET)
+    expect(pushed[0]!.message).toBe('已刷新')
   })
 
   it('失败：红调、自己退场，且与被拒说的话不同', async () => {
@@ -231,48 +182,6 @@ describe('一次按下的结局推一条提示', () => {
     await store.refreshLive(TARGET)
 
     expect(pushed.map(item => item.message)).toEqual(['已刷新', '已刷新'])
-  })
-})
-
-describe('冷却那条的秒数对读屏隐藏，宣告语仍被读出', () => {
-  /**
-   * 库自己那个容器整块是一条 `aria-live="polite"`（`aria-relevant="additions text"`）的区域，
-   * 故落在里面的**任何**文本变化都会被播报 —— 而冷却那条每秒都改写自己的秒数。
-   * 秒数因此单独一个 `aria-hidden` 的节点：被隐藏的文本变化不触发播报，宣告语留在它外面。
-   */
-  async function mountCooldown(announcement = '刷新太频繁', detail = ' · 12 秒后可刷新') {
-    const onCloseToast = vi.fn()
-    const host = await mountComponent(RefreshCooldownContent, {
-      props: { announcement, detail, onCloseToast },
-    })
-    return { host, onCloseToast }
-  }
-
-  it('秒数那一段是 aria-hidden 的节点，宣告语不在它里面', async () => {
-    const { host } = await mountCooldown()
-
-    const hidden = host.nodes(node => node.props['aria-hidden'] === 'true' && host.textOf(node).trim() !== '')
-    expect(hidden, 'the countdown is not hidden from the live region').toHaveLength(1)
-    // 逐秒改写的那一段正是被隐藏的那一段……
-    expect(host.textOf(hidden[0]!).trim()).toBe('· 12 秒后可刷新')
-    // ……而宣告语在被隐藏的那一段**之外**，故一条提示说什么仍旧读得出来。
-    expect(host.textOf(hidden[0]!)).not.toContain('刷新太频繁')
-    expect(host.text()).toContain('刷新太频繁')
-
-    host.unmount()
-  })
-
-  it('库里那枚关闭按钮的位置由本组件自己补上，且接的是库交进来的处理', async () => {
-    const { host, onCloseToast } = await mountCooldown()
-
-    const close = host.node(
-      node => node.tag === 'button' && node.props['aria-label'] === '关闭提示',
-      'the close button',
-    )
-    click(close)
-
-    expect(onCloseToast).toHaveBeenCalledTimes(1)
-    host.unmount()
   })
 })
 

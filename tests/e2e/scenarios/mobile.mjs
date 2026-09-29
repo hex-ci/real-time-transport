@@ -55,7 +55,7 @@ const MEASURE = `JSON.stringify((() => {
 const PRIMARY = {
   home: ['刷新最新车况'],
   line: ['刷新最新车况'],
-  platform: ['刷新车况数据', '定位最近站台'],
+  platform: ['刷新最新车况', '定位最近站台'],
   chain: ['刷新最新车况', '上班', '下班'],
   settings: ['关注线路', '通勤时段', '位置锚点', '通勤链路'],
 }

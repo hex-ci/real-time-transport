@@ -291,7 +291,7 @@ describe('移动端抽屉里的刷新入口', () => {
 
     await press(host, drawerRefreshButton(host))
 
-    expect(host.store.refreshOutcome).toBe('throttled')
+    // 结局由全局提示说出（见 F11：点一下、说一句），store 不再把它作为状态留着。
     // 读数仍是 store 那一句原文：拒绝不给它添一个字，也不替它改一个字。
     expect(host.textOf(freshnessLine(host))).toBe(refreshFreshnessOf(host.store.refreshReading).text)
     // 而那个结局由全局提示说：页面上一个状态词都没有。

@@ -225,7 +225,19 @@ export async function run({ check, note, fixtures }) {
   check('刷新前屏上有多行', tagged > 0, `标记了 ${tagged} 行`)
 
   await clearRecordedRequests()
-  await cli(['click', `getByRole('button', { name: '刷新车况数据' })`])
+  // 刷新入口在顶部工具栏那一行（F11），与定位、选站同一行 —— 先断言它真在那里，再点它：
+  // 只按文字点、不验位置，会让「刷新又掉回页面底部」这类回归照样通过。
+  const toolbarRow = await pageEval(`JSON.stringify((() => {
+    const refresh = [...document.querySelectorAll('main button')].find(b => (b.getAttribute('aria-label') || '') === '刷新最新车况')
+    const locate = [...document.querySelectorAll('main button')].find(b => (b.getAttribute('aria-label') || '') === '定位最近站台')
+    if (!refresh || !locate) return null
+    const r = refresh.getBoundingClientRect()
+    const l = locate.getBoundingClientRect()
+    return { sameRow: Math.abs(r.top - l.top) < 2, height: Math.round(r.height), width: Math.round(r.width) }
+  })())`)
+  check('刷新入口在顶部工具栏那一行（与定位同排）', toolbarRow?.sameRow === true, JSON.stringify(toolbarRow))
+  check('刷新入口是 44 的图标按钮', toolbarRow?.height === 44 && toolbarRow?.width === 44, JSON.stringify(toolbarRow))
+  await cli(['click', `getByRole('button', { name: '刷新最新车况' })`])
   await waitForValue(
     'JSON.stringify((window.__e2eFetch || []).filter(r => r.url.includes("/live?")).length)',
     count => typeof count === 'number' && count > 0,

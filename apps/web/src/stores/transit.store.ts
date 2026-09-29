@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
 import { DEFAULT_USER_ID, REFRESH_MAX_LINES, vehicleProvenanceOf } from '@real-time-transport/shared'
 import { provenanceLabelOf } from '@/provenance-copy'
-import { announceRefreshCooldown, announceRefreshOutcome, dismissRefreshCooldown } from '@/refresh-toast'
+import { announceRefreshOutcome } from '@/refresh-toast'
 import { lineLoadStateOf, type LineLoadState } from '@/line-load-state'
 import type {
   CommuteChain,
@@ -356,12 +355,10 @@ export const useTransitStore = defineStore('transit', () => {
   const commuteChains = shallowRef<CommuteChain[]>([])
 
   const refreshInFlight = shallowRef(false)
-  const refreshOutcome = shallowRef<RefreshOutcome | null>(null)
   const refreshNextAllowedAt = shallowRef<number | null>(null)
   const refreshRetryAfterSeconds = shallowRef<number | null>(null)
   const refreshAnsweredAt = shallowRef<number | null>(null)
   const refreshReading = shallowRef<RefreshReading | null>(null)
-  const refreshNow = shallowRef(Date.now())
 
   /**
  * 所述窗口打开的时刻 —— 服务端的截止时刻与它送来的时长里较晚的那个，使一个与服务端不一致的
@@ -373,46 +370,9 @@ export const useTransitStore = defineStore('transit', () => {
     answeredAt: refreshAnsweredAt.value,
   }))
 
-  const refreshWaitSecondsLeft = computed(() =>
-    refreshWaitSeconds(refreshWaitUntil.value, refreshNow.value))
-
-  /**
- * 只推动倒计时的那根指针，别的什么都不做。
- *
- * 不是数据定时器：它不取任何东西，只在用户刚花掉的那个窗口倒计时期间运行，并在窗口打开的那
- * 一刻停掉自己 —— 所以它永远不会变成产品排除的那种常开 tick。
- */
-  const refreshTick = useIntervalFn(() => {
-    const now = Date.now()
-    // 每次 tick 都推动指针，等待不会冻在一个过期的秒数上。
-    refreshNow.value = now
-    if (refreshCountdownOpen(refreshWaitUntil.value, now)) {
-      // 窗口还关着：那条驻留的提示改说下一秒，而不是让一个说死的秒数变成谎话。只有被拒的那次
-      // 按压有等待可言 —— 一次成功的刷新自己那条话已经说完了。
-      if (refreshOutcome.value === 'throttled') {
-        announceRefreshCooldown(refreshCooldownText(refreshWaitSecondsLeft.value))
-      }
-      return
-    }
-    // 没有可数的了：窗口已开，所以 ticker 停下，而不是空转到下一次按压重启它。拒绝只在窗口
-    // 关着时报告，所以是这里结束它 —— 读数结束不了，因为「已刷新」说的是界面仍持有的数据。
-    refreshTick.pause()
-    if (refreshOutcome.value === 'throttled') refreshOutcome.value = null
-    // 窗口一开，那条提示说的等待就不存在了，故它跟着消失。
-    dismissRefreshCooldown()
-  }, 1000, { immediate: false })
-
-  /**
- * 把倒计时对准这次按压刚收到的应答，并且只在它所述窗口仍关着时才数。
- *
- * 不管还有没有窗口可数，指针都要动：一个在它所带截止时刻已过之后才到的拒绝 —— 也就是落在
- * 窗口最后一趟往返里的按压 —— 否则会从上一个倒计时停下的时刻、或本 store 首次绘制起算，那
- * 是一个用户的按压没有设定的第二个时钟。
- */
-  function resumeRefreshTick(): void {
-    const now = Date.now()
-    refreshNow.value = now
-    if (refreshCountdownOpen(refreshWaitUntil.value, now)) refreshTick.resume()
+  /** 按下那一刻窗口还剩的秒数 —— 倒计时只在一次按下的回答里需要，故不在后台走秒。 */
+  function refreshWaitSecondsLeft(): number {
+    return refreshWaitSeconds(refreshWaitUntil.value, Date.now())
   }
 
   /**
@@ -450,7 +410,6 @@ export const useTransitStore = defineStore('transit', () => {
         refreshRetryAfterSeconds.value = result.retryAfterSeconds
         refreshAnsweredAt.value = Date.now()
         refreshReading.value = refreshReadingOf(result, refreshReading.value)
-        resumeRefreshTick()
       }
       outcome = json.success ? 'ok' : res.status === 429 ? 'throttled' : 'unavailable'
     }
@@ -461,11 +420,10 @@ export const useTransitStore = defineStore('transit', () => {
     finally {
       refreshInFlight.value = false
     }
-    refreshOutcome.value = outcome
     announceRefreshOutcome(outcome, refreshStatusTextOf({
       outcome,
       // 指针已在应答到达时推过，故这里读到的就是那个窗口还剩的秒数。
-      waitSeconds: refreshWaitSecondsLeft.value,
+      waitSeconds: refreshWaitSecondsLeft(),
       wanted: targets.length,
       covered: asked.length,
     }))
@@ -1143,14 +1101,12 @@ export const useTransitStore = defineStore('transit', () => {
     loadFailure,
     simulationEnabled,
     refreshInFlight,
-    refreshOutcome,
     refreshNextAllowedAt,
     refreshRetryAfterSeconds,
     refreshAnsweredAt,
     refreshWaitUntil,
     refreshWaitSecondsLeft,
     refreshReading,
-    refreshNow,
     fetchCommuteProfile,
     fetchFavorites,
     fetchRuntimeFlags,

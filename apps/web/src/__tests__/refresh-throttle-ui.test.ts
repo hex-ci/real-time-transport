@@ -293,7 +293,6 @@ describe('one press, one request', () => {
 
     // 拒绝什么都没读到，故读数仍是早先那一次——而与它一起记录的类型仍描述它。
     expect(store.refreshReading).toEqual({ at: OBTAINED_AT, dataSource: 'chelaile', isDegraded: false })
-    expect(store.refreshOutcome).toBe('throttled')
   })
 
   it('clears the reading when an answer obtained none', async () => {
@@ -365,29 +364,25 @@ describe('one press, one request', () => {
     }])
 
     await store.refreshLive([{ lineId: 'line_a', direction: 0 }])
-    expect(refreshWaitSeconds(store.refreshWaitUntil, store.refreshNow)).toBe(3)
+    // 剩几秒按「此刻」现算：按下那一刻答出的就是那一刻还剩的。
+    expect(refreshWaitSeconds(store.refreshWaitUntil, Date.now())).toBe(3)
 
     vi.advanceTimersByTime(2000)
-    expect(refreshWaitSeconds(store.refreshWaitUntil, store.refreshNow)).toBe(1)
+    expect(refreshWaitSeconds(store.refreshWaitUntil, Date.now())).toBe(1)
 
     vi.advanceTimersByTime(2000)
-    // 到截止时刻等待结束，而说明这一点的是截止时刻而非本地猜测：倒计时丢弃该拒绝，
-    // 故状态行再无可报，并停止描述一个不再关闭的窗口。
-    expect(refreshWaitSeconds(store.refreshWaitUntil, store.refreshNow)).toBe(0)
-    expect(store.refreshOutcome).toBeNull()
-    // 窗口开了就再没有等待可说，故提示也不会留在屏幕上。
-    expect(wordingOf(store)).toBeNull()
+    // 到截止时刻等待结束 —— 由截止时刻说明，不是本地猜测。
+    expect(refreshWaitSeconds(store.refreshWaitUntil, Date.now())).toBe(0)
   })
 })
 
 /**
- * store 现在会说出的那句话：结局取自它，等待取自它自己的时钟。没有结局可陈述时为 null。
+ * 按下那一刻会答出的那句话：结局按调用它的人（被拒），等待按那一刻重算。
  */
-function wordingOf(store: ReturnType<typeof useTransitStore>): string | null {
-  if (store.refreshOutcome === null) return null
+function refusalWording(store: ReturnType<typeof useTransitStore>): string {
   return lineOf(refreshStatusTextOf({
-    outcome: store.refreshOutcome,
-    waitSeconds: store.refreshWaitSecondsLeft,
+    outcome: 'throttled',
+    waitSeconds: store.refreshWaitSecondsLeft(),
     wanted: 1,
     covered: 1,
   }))
@@ -424,7 +419,6 @@ describe('a refusal is never silent', () => {
     }])
     await store.refreshLive([{ lineId: 'line_a', direction: 0 }])
     vi.advanceTimersByTime(17_000)
-    expect(store.refreshNow).toBe(start + 17_000)
 
     // 第二次按下在窗口最后一个往返内离开。倒计时到达其截止时刻并在答案仍在路上时停下，
     // 故它落在一个已越过它所携带截止时刻的时钟上。
@@ -442,14 +436,9 @@ describe('a refusal is never silent', () => {
     expect(await store.refreshLive([{ lineId: 'line_a', direction: 0 }])).toBe('throttled')
 
     expect(store.refreshNextAllowedAt).toBe(deadline)
-    expect(store.refreshNow).toBeGreaterThan(deadline)
 
     // 服务端陈述了还剩 1 秒窗口；拒绝如实陈述，而非让这次按下完全没有答案。
-    expect(wordingOf(store)).toBe('刷新太频繁 · 1 秒后可刷新')
-
-    // ……而那一秒被数过并结束，而非永远站着。
-    vi.advanceTimersByTime(1_000)
-    expect(wordingOf(store)).toBeNull()
+    expect(refusalWording(store)).toBe('刷新太频繁 · 1 秒后可刷新')
   })
 
   it('states the wait for a device whose clock runs ahead of the server', async () => {
@@ -468,7 +457,6 @@ describe('a refusal is never silent', () => {
     // 倒计时的指针从此时钟读，故它也落在该截止时刻之后。
     vi.setSystemTime(deadline + 5_000)
     vi.advanceTimersByTime(1_000)
-    expect(store.refreshNow).toBeGreaterThan(deadline)
 
     stubFetch([{
       status: 429,
@@ -481,10 +469,7 @@ describe('a refusal is never silent', () => {
     expect(await store.refreshLive([{ lineId: 'line_a', direction: 0 }])).toBe('throttled')
 
     // 服务端发送的时长不受该差异影响，故拒绝由它陈述，而非由这个时钟丢失的截止时刻陈述。
-    expect(wordingOf(store)).toBe('刷新太频繁 · 13 秒后可刷新')
-
-    vi.advanceTimersByTime(13_000)
-    expect(wordingOf(store)).toBeNull()
+    expect(refusalWording(store)).toBe('刷新太频繁 · 13 秒后可刷新')
   })
 })
 
@@ -494,7 +479,7 @@ describe('a refusal is never silent', () => {
  * 同一条提示改说下一秒，而不是每秒新推一条：屏幕上是一条在数，不是一叠各说一个秒数的通知。
  * （它逐秒改写的后果由 `refresh-toast.test.ts` 从提示那一侧评判。）
  */
-describe('the countdown rewrites one statement, not one per second', () => {
+describe('the refusal is answered once, not rewritten every second', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -504,7 +489,7 @@ describe('the countdown rewrites one statement, not one per second', () => {
     vi.useRealTimers()
   })
 
-  it('says the same state word all the way down the window it counts', async () => {
+  it('says how long it is once, at the moment the press lands', async () => {
     vi.useFakeTimers()
     const store = useTransitStore()
     const start = Date.now()
@@ -519,30 +504,17 @@ describe('the countdown rewrites one statement, not one per second', () => {
 
     await store.refreshLive([{ lineId: 'line_a', direction: 0 }])
 
-    // 在窗口关闭期间每秒采样一次，即那条提示改写自己的方式。
-    const words: Array<string | null> = []
-    const seconds: number[] = []
-    for (let second = 0; second <= 5; second++) {
-      const outcome = store.refreshOutcome
-      if (outcome === null) {
-        words.push(null)
-      }
-      else {
-        words.push(refreshStatusTextOf({
-          outcome,
-          waitSeconds: store.refreshWaitSecondsLeft,
-          wanted: 1,
-          covered: 1,
-        }).announcement)
-        seconds.push(store.refreshWaitSecondsLeft)
-      }
-      if (second < 5) vi.advanceTimersByTime(1_000)
-    }
-
-    // 一次五秒拒绝期间状态词只说两件事——被拒，以及窗口开了——而不是等待中每秒钟一个词。
-    expect(words.filter((word, index) => word !== words[index - 1])).toEqual(['刷新太频繁', null])
-    // 而被改写的那个数确实在往下走，故它读起来是一个倒计时。
-    expect(seconds).toEqual([5, 4, 3, 2, 1])
+    // 按下那一刻答出那一刻还剩的（F11：点一下、说一句）。
+    expect(refusalWording(store)).toBe('刷新太频繁 · 5 秒后可刷新')
+    // 而等只剩 3 秒时再按一下，服务端仍关着窗口，这次答的就是那一刻的 3 秒 —— 秒数是
+    // 「按下那一刻现算」的，不是后台走秒的产物。
+    vi.advanceTimersByTime(2_000)
+    stubFetch([{
+      status: 429,
+      body: { success: false, error: '…', data: refusedResult({ nextAllowedAt: start + 5_000, retryAfterSeconds: 3 }) },
+    }])
+    await store.refreshLive([{ lineId: 'line_a', direction: 0 }])
+    expect(refusalWording(store)).toBe('刷新太频繁 · 3 秒后可刷新')
   })
 })
 
@@ -585,11 +557,12 @@ describe('both screens come through the one request that owns the window', () =>
     expect(codeOf(detail)).toContain('reloadLiveStatus')
   })
 
-  it('declares the countdown paused, so a page left open gains no ticker', () => {
-    // 等待是服务端的 `nextAllowedAt`，而读取它的指针不得自行运行；只有一次按下恢复它，
-    // 且只在那个截止时刻仍在未来时。这是源码断言而非运行时断言：在 vitest 下没有客户端，
-    // 故未暂停的 interval 在那里无论如何都是惰性的，而其后果是浏览器事实。
-    expect(codeOf(store)).toContain('{ immediate: false }')
+  it('has no second-level ticker at all: the seconds are computed at the press, not driven by a clock', () => {
+    // 冷却只在一次按下的回答里需要：后台不再有走秒的 tick（F11：点一下、说一句）。这是源码断言
+    // 而非运行时断言：秒级 interval 在 vitest 下是惰性的，而其后果是浏览器事实。
+    const code = codeOf(store)
+    expect(code).not.toContain('useIntervalFn')
+    expect(code).not.toContain('setInterval')
   })
 
   it('words the states in one place, so the two screens cannot drift', () => {

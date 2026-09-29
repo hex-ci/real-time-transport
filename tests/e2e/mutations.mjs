@@ -36,9 +36,9 @@ export const MUTATIONS = {
     replace: 'return next',
   },
   移动端可访问性: {
-    file: 'apps/web/src/views/platform/components/departure-board.vue',
-    // 刷新控件（这一屏的主控件）缩到 20px：触控目标不够大。
-    find: 'class="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:text-base"',
-    replace: 'class="flex min-h-[20px] items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-medium whitespace-nowrap text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:text-base"',
+    file: 'apps/web/src/views/platform/components/platform-header.vue',
+    // 刷新入口从顶部控件那行掉出去：屏上不再量得到它，而它属于那一行（F11）。
+    find: '@refresh="emit(\'refresh\')"',
+    replace: '@refresh="emit(\'refresh\')" v-show="false"',
   },
 }

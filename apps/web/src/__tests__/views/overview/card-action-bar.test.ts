@@ -221,7 +221,24 @@ describe('操作栏始终贴着卡片底边', () => {
     // 网格默认 `align-items: stretch` 把同一行卡片拉成等高；没有这一对 flex 时，富余高度全落在
     // 操作栏下面（实测过 86~125px 的空当）。
     expect(source).toContain('flex flex-col')
-    expect(source).toMatch(/class="block flex-1 p-4/)
+    expect(source).toMatch(/class="flex flex-1 flex-col p-4/)
+  })
+
+  it('空状态与加载态的深色面板吃掉余下高度、文字垂直居中', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),
+      'utf-8',
+    )
+    // 面板不 `grow` 时，富余空间落在面板外面 —— 卡片深浅两块的比例与内容满的卡片对不上
+    // （实测深色占比会掉到 40% 上下，而满卡片是 63%）。
+    const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
+    const emptyPanels = panels.filter((c: string) => !c.includes('space-y-2.5'))
+    expect(emptyPanels.length).toBe(3)
+    for (const cls of emptyPanels) {
+      expect(cls).toContain('grow')
+      expect(cls).toContain('items-center')
+      expect(cls).toContain('justify-center')
+    }
   })
 })
 

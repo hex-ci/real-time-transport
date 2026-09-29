@@ -340,7 +340,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
          挂着 click 的 div —— 键盘打不开，屏幕阅读器也不认为它可操作。 -->
     <RouterLink
       :to="detailHref"
-      class="block flex-1 p-4 transition focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-400"
+      class="flex flex-1 flex-col p-4 transition focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-400"
       :aria-label="`查看${lineName}线路详情`"
     >
       <!-- 卡片头部 -->
@@ -381,18 +381,19 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         </div>
       </div>
 
-      <!-- 加载态：详情还没从接口解析出来 -->
-      <div v-if="!detailLoaded" class="my-3.5 flex items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
+      <!-- 加载态：详情还没从接口解析出来。与下面两条空状态一样吃掉主体余下的高度、文字居中 ——
+           富余空间落在深色面板内部，故卡片深浅两块的比例与内容满的卡片一致。 -->
+      <div v-if="!detailLoaded" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
         <span class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600" :class="accent.spinner"></span>
         正在加载线路数据...
       </div>
 
       <template v-else>
         <!-- 诚实的空状态，一种成因一条 -->
-        <div v-if="nearbyNotice" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-if="nearbyNotice" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ nearbyNotice }}
         </div>
-        <div v-else-if="legNotice" class="my-3.5 rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-else-if="legNotice" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
 

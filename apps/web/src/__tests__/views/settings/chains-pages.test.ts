@@ -9,8 +9,8 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import ChainsListPage from '../chains.vue'
-import ChainEditorPage from '../chain-editor.vue'
+import ChainsListPage from '../../../views/settings/chains.vue'
+import ChainEditorPage from '../../../views/settings/chain-editor.vue'
 
 /**
  * 通勤链路的「列表页 + 独立编辑页」：行是链接、行内没有表单、删除只在编辑页、认不出的

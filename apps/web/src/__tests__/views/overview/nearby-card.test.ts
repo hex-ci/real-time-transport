@@ -1,7 +1,7 @@
 import { createRenderer, nextTick, ssrContextKey, type Component } from 'vue'
 import { describe, expect, it } from 'vitest'
-import LineMiniCard from '../components/line-mini-card.vue'
-import type { NearbyLocationState } from '../nearby-notice'
+import LineMiniCard from '../../../views/overview/components/line-mini-card.vue'
+import type { NearbyLocationState } from '../../../views/overview/nearby-notice'
 
 /**
  * 附近卡片在没有站台可报时实际渲染的内容。

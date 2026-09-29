@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RefreshLiveResult } from '@real-time-transport/shared'
-import { click, mountComponent } from '@/views/settings/__tests__/settings-harness'
+import { click, mountComponent } from '@/__tests__/views/settings/settings-harness'
 import { useTransitStore } from '../stores/transit.store'
 import {
   REFRESH_COOLDOWN_TOAST_ID,

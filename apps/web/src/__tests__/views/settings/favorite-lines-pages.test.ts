@@ -8,8 +8,8 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import LinesPage from '../lines.vue'
-import FavoriteEditorPage from '../favorite-editor.vue'
+import LinesPage from '../../../views/settings/lines.vue'
+import FavoriteEditorPage from '../../../views/settings/favorite-editor.vue'
 
 /**
  * 关注线路的「列表页 + 独立编辑页」：行是链接、行内没有编辑器、取消关注只在编辑页、

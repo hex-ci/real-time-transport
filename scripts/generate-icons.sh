@@ -15,7 +15,7 @@
 #   a 20% margin, so scaling it into the 80% maskable safe zone is one padding step
 #   and cannot drift from the plain icon.
 #
-# The verifier (apps/web/tests/installability.test.ts) decodes these files and
+# The verifier (apps/web/src/__tests__/tests/installability.test.ts) decodes these files and
 # asserts size, opacity and content, so this script's output is checked by the test
 # run rather than by eye.
 

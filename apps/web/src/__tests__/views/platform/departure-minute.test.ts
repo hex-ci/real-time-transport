@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { LiveBusSchema } from '@real-time-transport/shared'
-import { departureRowOf } from '../departure-row'
-import type { PlatformLineRule } from '../types'
+import { departureRowOf } from '../../../views/platform/departure-row'
+import type { PlatformLineRule } from '../../../views/platform/types'
 
 /**
  * H1：报告板的预计到站列必须能陈述真实分钟。
@@ -139,7 +139,7 @@ describe('H1: the board asks about the platform it is showing', () => {
   it('names the station order in the live request, which is what makes the minute exist', () => {
     // 只索要线路方向的视图会收到终点站数字并当作本站台的陈述，
     // 或（如它曾经那样）完全不陈述分钟。
-    const view = codeOf(read('../index.vue'))
+    const view = codeOf(read('../../../views/platform/index.vue'))
     expect(view).toContain('order: String(rule.stationOrder)')
     expect(view).toContain('departureRowOf(')
   })
@@ -148,7 +148,7 @@ describe('H1: the board asks about the platform it is showing', () => {
     // 该状态仍可达且仍只被措辞一次：无分钟、无车辆事实、无失败的行落到报告板的最后一个分支，由它陈述。
     // 措辞现在来自 `@/arrival-copy`——每个到站表面都渲染的同一个模块——故报告板不再自己打这句话，
     // 断言的是渲染而非字面量。
-    const board = read('../components/departure-board.vue')
+    const board = read('../../../views/platform/components/departure-board.vue')
     expect(board.match(/无法估算/g)?.length).toBe(1)
     expect(board).toContain('arrival-copy')
     expect(board.match(/\{\{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT \}\}/g)?.length).toBe(1)

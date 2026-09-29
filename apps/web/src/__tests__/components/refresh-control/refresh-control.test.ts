@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
-import { mountComponent, press, type MountedHost } from '../../../views/settings/__tests__/settings-harness'
-import RefreshControl from '../main.vue'
+import { mountComponent, press, type MountedHost } from '../../views/settings/settings-harness'
+import RefreshControl from '../../../components/refresh-control/main.vue'
 
 /**
  * F11 的刷新控件，如三个页面共用时那样。

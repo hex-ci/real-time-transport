@@ -5,8 +5,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import PlatformPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import PlatformPage from '../../../views/platform/index.vue'
 
 /**
  * 站台屏在 §4.1 规则中的那一份：**失败**的关注线路读取不是空的关注线路列表。
@@ -20,7 +20,7 @@ import PlatformPage from '../index.vue'
  * 而 runtime-dom 的 `v-model` 通过 `options.length` 写入——本装置刻意不建模的 DOM API。此处无关头部。
  */
 
-vi.mock('../components/platform-header.vue', () => ({
+vi.mock('../../../views/platform/components/platform-header.vue', () => ({
   default: {
     name: 'PlatformHeaderStub',
     props: ['modelValue', 'stationOptions', 'landmarkHint', 'detecting'],

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { AT_PLATFORM_ETA_TEXT } from '../at-platform'
+import { AT_PLATFORM_ETA_TEXT } from '../../../views/line-detail/at-platform'
 
 /**
  * 显示侧的 F-A 与 F-C。
@@ -15,11 +15,11 @@ import { AT_PLATFORM_ETA_TEXT } from '../at-platform'
  */
 
 const popover = readFileSync(
-  fileURLToPath(new URL('../components/station-popover.vue', import.meta.url)),
+  fileURLToPath(new URL('../../../views/line-detail/components/station-popover.vue', import.meta.url)),
   'utf8',
 )
 
-const view = readFileSync(fileURLToPath(new URL('../index.vue', import.meta.url)), 'utf8')
+const view = readFileSync(fileURLToPath(new URL('../../../views/line-detail/index.vue', import.meta.url)), 'utf8')
 
 function templateOf(sfc: string): string {
   const start = sfc.indexOf('<template>')

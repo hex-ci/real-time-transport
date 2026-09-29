@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DataProvenance } from '@real-time-transport/shared'
 import { refreshFreshnessOf } from '@/stores/transit.store'
-import { chainReadingOf, legMarkOf } from '../provenance'
+import { chainReadingOf, legMarkOf } from '../../../views/commute-chain/provenance'
 import { READ_AT } from './chain-fixtures'
 
 /**

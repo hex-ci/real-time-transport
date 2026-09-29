@@ -5,8 +5,8 @@ import {
   press,
   type HostElement,
   type MountedHost,
-} from '../../settings/__tests__/settings-harness'
-import LineDetail from '../index.vue'
+} from '../settings/settings-harness'
+import LineDetail from '../../../views/line-detail/index.vue'
 
 /**
  * 详情页在桌面端也有刷新入口。
@@ -19,11 +19,11 @@ import LineDetail from '../index.vue'
  * 报站板（Konva）没有测试台，故用桩件替掉；动作行、移动端头部、刷新控件都是真的。
  */
 
-vi.mock('../components', async () => {
+vi.mock('../../../views/line-detail/components', async () => {
   const vue = await import('vue')
-  const StationPopover = (await import('../components/station-popover.vue')).default
-  const DesktopActionBar = (await import('../components/desktop-action-bar.vue')).default
-  const MobileLineHeader = (await import('../components/mobile-line-header.vue')).default
+  const StationPopover = (await import('../../../views/line-detail/components/station-popover.vue')).default
+  const DesktopActionBar = (await import('../../../views/line-detail/components/desktop-action-bar.vue')).default
+  const MobileLineHeader = (await import('../../../views/line-detail/components/mobile-line-header.vue')).default
   const Empty = vue.defineComponent({ name: 'EmptyStub', render: () => null })
   const RouteBoard = vue.defineComponent({
     name: 'RouteBoardStub',

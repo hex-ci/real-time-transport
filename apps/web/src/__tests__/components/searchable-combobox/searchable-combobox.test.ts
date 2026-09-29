@@ -5,9 +5,9 @@ import {
   type,
   type HostElement,
   type MountedHost,
-} from '@/views/settings/__tests__/settings-harness'
-import SearchableCombobox from '../main.vue'
-import type { ComboboxOption } from '../types'
+} from '@/__tests__/views/settings/settings-harness'
+import SearchableCombobox from '../../../components/searchable-combobox/main.vue'
+import type { ComboboxOption } from '../../../components/searchable-combobox/types'
 
 /**
  * 共用的带搜索的下拉。

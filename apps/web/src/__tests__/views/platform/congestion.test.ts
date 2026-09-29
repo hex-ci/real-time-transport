@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { congestionChipClass, congestionClass, congestionLabel } from '../congestion'
+import { congestionChipClass, congestionClass, congestionLabel } from '../../../views/platform/congestion'
 
 /**
  * 站台屏上的 F12：拥挤度芯片由其陈述的**判决**着色，绝不由某个到站分钟是否存在决定。
@@ -68,7 +68,7 @@ describe('the crowding chip\'s colour follows the verdict, not the minute', () =
 
 describe('the board binds the chip through that decision, not through a ternary', () => {
   const board = readFileSync(
-    fileURLToPath(new URL('../components/departure-board.vue', import.meta.url)),
+    fileURLToPath(new URL('../../../views/platform/components/departure-board.vue', import.meta.url)),
     'utf8',
   )
 

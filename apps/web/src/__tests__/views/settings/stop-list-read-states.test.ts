@@ -7,7 +7,7 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import FavoriteEditorPage from '../favorite-editor.vue'
+import FavoriteEditorPage from '../../../views/settings/favorite-editor.vue'
 
 /**
  * 关注线路的**编辑页**（`/settings/lines/:favoriteId`）里的上车点面板：一个方向的站点读取有三种事实，各说各的。

@@ -15,10 +15,10 @@ import {
   distanceText,
   legReferencesOf,
   stationDistances,
-} from '../station-distance'
-import type { ChainDraft } from '../chain-draft'
-import type { ChainLineOption, StationReference } from '../types'
-import ChainEditorPage from '../chain-editor.vue'
+} from '../../../views/settings/station-distance'
+import type { ChainDraft } from '../../../views/settings/chain-draft'
+import type { ChainLineOption, StationReference } from '../../../views/settings/types'
+import ChainEditorPage from '../../../views/settings/chain-editor.vue'
 
 /**
  * 链路录入的站点选择器：每个站到**参考点**的直线距离，最近的那一个带「最近」标记。

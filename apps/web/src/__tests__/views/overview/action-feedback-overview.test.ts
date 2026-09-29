@@ -6,8 +6,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import OverviewPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import OverviewPage from '../../../views/overview/index.vue'
 
 /**
  * 首页上按下的东西：置顶说一句，而**切换**不说话。

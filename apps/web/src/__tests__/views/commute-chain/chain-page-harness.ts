@@ -1,7 +1,7 @@
 import { createRenderer, h, nextTick, ssrContextKey, type Component } from 'vue'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { vi } from 'vitest'
-import ChainPage from '../index.vue'
+import ChainPage from '../../../views/commute-chain/index.vue'
 import { useTransitStore } from '@/stores/transit.store'
 import { useCityStore } from '@/stores/city.store'
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chainCardOf } from '../card'
+import { chainCardOf } from '../../../views/commute-chain/card'
 import { chainView, conclusion, leg, refusal } from './chain-fixtures'
 
 /**

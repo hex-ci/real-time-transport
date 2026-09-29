@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { ArrivalRowSchema } from '@real-time-transport/shared'
-import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../provenance'
+import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../../../views/line-detail/provenance'
 import { provenanceLabelOf } from '../../../provenance-copy'
 
 /**
@@ -77,7 +77,7 @@ describe('an unstated provenance is never rounded up to 实时', () => {
 
 describe('the panel renders that fallback where the minutes are', () => {
   const popover = readFileSync(
-    fileURLToPath(new URL('../components/station-popover.vue', import.meta.url)),
+    fileURLToPath(new URL('../../../views/line-detail/components/station-popover.vue', import.meta.url)),
     'utf8',
   )
 

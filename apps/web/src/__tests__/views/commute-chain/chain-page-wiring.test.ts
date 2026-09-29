@@ -50,24 +50,24 @@ function codeOf(source: string): string {
 }
 
 const MODULES = {
-  'types': read('../types.ts'),
-  'margin': read('../margin.ts'),
-  'refusal': read('../refusal.ts'),
-  'empty-state': read('../empty-state.ts'),
-  'provenance': read('../provenance.ts'),
-  'card': read('../card.ts'),
+  'types': read('../../../views/commute-chain/types.ts'),
+  'margin': read('../../../views/commute-chain/margin.ts'),
+  'refusal': read('../../../views/commute-chain/refusal.ts'),
+  'empty-state': read('../../../views/commute-chain/empty-state.ts'),
+  'provenance': read('../../../views/commute-chain/provenance.ts'),
+  'card': read('../../../views/commute-chain/card.ts'),
 }
 
 const COMPONENTS = {
-  'transfer-card': read('../components/transfer-card.vue'),
-  'transfer-row': read('../components/transfer-row.vue'),
-  'band-chip': read('../components/band-chip.vue'),
-  'chain-empty-state': read('../components/chain-empty-state.vue'),
-  'chain-load-state': read('../components/chain-load-state.vue'),
-  'index': read('../components/index.ts'),
+  'transfer-card': read('../../../views/commute-chain/components/transfer-card.vue'),
+  'transfer-row': read('../../../views/commute-chain/components/transfer-row.vue'),
+  'band-chip': read('../../../views/commute-chain/components/band-chip.vue'),
+  'chain-empty-state': read('../../../views/commute-chain/components/chain-empty-state.vue'),
+  'chain-load-state': read('../../../views/commute-chain/components/chain-load-state.vue'),
+  'index': read('../../../views/commute-chain/components/index.ts'),
 }
 
-const page = read('../index.vue')
+const page = read('../../../views/commute-chain/index.vue')
 const router = read('../../../router/index.ts')
 const nav = read('../../../components/header-nav/main.vue')
 

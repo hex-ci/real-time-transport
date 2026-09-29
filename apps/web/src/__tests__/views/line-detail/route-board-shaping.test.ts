@@ -10,8 +10,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '../../settings/__tests__/settings-harness'
-import LineDetail from '../index.vue'
+} from '../settings/settings-harness'
+import LineDetail from '../../../views/line-detail/index.vue'
 
 /**
  * F6：线路拓扑报站屏的**成形数据与站台角标**（界面层）。
@@ -32,12 +32,12 @@ import LineDetail from '../index.vue'
 const ANCHOR = { screenX: 120, screenY: 240, radius: 12, x: 12, y: 24 }
 const BADGE_TEXTS = ['🏠 上班方向', '🏢 下班方向']
 
-vi.mock('../components', async () => {
+vi.mock('../../../views/line-detail/components', async () => {
   const vue = await import('vue')
-  const StationPopover = (await import('../components/station-popover.vue')).default
+  const StationPopover = (await import('../../../views/line-detail/components/station-popover.vue')).default
   // 真实的两个头部：方向徽标（🏠/🏢）就在它们里面。
-  const DesktopActionBar = (await import('../components/desktop-action-bar.vue')).default
-  const MobileLineHeader = (await import('../components/mobile-line-header.vue')).default
+  const DesktopActionBar = (await import('../../../views/line-detail/components/desktop-action-bar.vue')).default
+  const MobileLineHeader = (await import('../../../views/line-detail/components/mobile-line-header.vue')).default
   const Empty = vue.defineComponent({ name: 'EmptyStub', render: () => null })
   /**
    * 报站板没有测试台（Konva 要 canvas），故用桩件替掉；桩件把收到的 props 原样渲染出来，

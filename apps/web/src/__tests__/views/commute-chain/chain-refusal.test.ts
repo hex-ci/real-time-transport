@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { DataSourceTypeSchema } from '@real-time-transport/shared'
-import { REFUSAL_SENTENCE, anchorNameOf, anchorUnsetSentenceOf, refusalOf } from '../refusal'
+import { REFUSAL_SENTENCE, anchorNameOf, anchorUnsetSentenceOf, refusalOf } from '../../../views/commute-chain/refusal'
 import { READ_AT, OPERATING, refusal } from './chain-fixtures'
 
 /**

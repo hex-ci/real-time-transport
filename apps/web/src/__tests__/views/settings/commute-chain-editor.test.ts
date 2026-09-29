@@ -9,9 +9,9 @@ import {
   lineOptionLabel,
   orderedLineOptionsFor,
   refuseChainDraft,
-} from '../chain-draft'
-import type { ChainLineOption } from '../types'
-import { auditContrast } from '@/views/commute-chain/__tests__/chain-contrast'
+} from '../../../views/settings/chain-draft'
+import type { ChainLineOption } from '../../../views/settings/types'
+import { auditContrast } from '@/__tests__/views/commute-chain/chain-contrast'
 import {
   RouterLinkStub,
   httpStatus,
@@ -22,8 +22,8 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import ChainsListPage from '../chains.vue'
-import ChainEditorPage from '../chain-editor.vue'
+import ChainsListPage from '../../../views/settings/chains.vue'
+import ChainEditorPage from '../../../views/settings/chain-editor.vue'
 
 /**
  * 推出去的那句话。链路卡的三处写操作（保存、删除、顺序）成与败各说一句，由本文件末尾那一组评判；
@@ -69,17 +69,17 @@ function codeOf(source: string): string {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 }
 
-const FORM = read('../components/chain-form.vue')
-const LEG = read('../components/chain-leg-fields.vue')
-const DIALOG = read('../components/chain-removal-dialog.vue')
-const DRAFT = read('../chain-draft.ts')
-const TYPES = read('../types.ts')
-const PATTERN = read('../../platform/components/platform-header.vue')
+const FORM = read('../../../views/settings/components/chain-form.vue')
+const LEG = read('../../../views/settings/components/chain-leg-fields.vue')
+const DIALOG = read('../../../views/settings/components/chain-removal-dialog.vue')
+const DRAFT = read('../../../views/settings/chain-draft.ts')
+const TYPES = read('../../../views/settings/types.ts')
+const PATTERN = read('../../../views/platform/components/platform-header.vue')
 /** 本屏的选站器：它自己不再画标记，选单来自共用的控件（见下面那条控件选择的源码规则）。 */
-const PICKER = read('../components/station-pin-picker.vue')
+const PICKER = read('../../../views/settings/components/station-pin-picker.vue')
 
 /** 设置目录（`views/settings`），按目录遍历，使任何东西都逃不出审计。 */
-const SETTINGS_DIR = fileURLToPath(new URL('..', import.meta.url))
+const SETTINGS_DIR = fileURLToPath(new URL('../../../views/settings', import.meta.url))
 
 /**
  * 本应用生产源码的根（`apps/web/src`）。
@@ -109,8 +109,8 @@ const SFC = {
   // 渲染列表的页面与渲染编辑器的页面。列表页曾是卡片所在的屏幕；「列表页 + 独立编辑页」把
   // 编辑器移到 `chain-editor.vue`，故下面的页级守卫随它到那里 —— 两页都在守卫范围内，
   // 评判一个表单已经不再出现的屏幕，或放过表单现在所在的那一页，都会让回归漏掉。
-  'chains.vue': read('../chains.vue'),
-  'chain-editor.vue': read('../chain-editor.vue'),
+  'chains.vue': read('../../../views/settings/chains.vue'),
+  'chain-editor.vue': read('../../../views/settings/chain-editor.vue'),
 }
 
 /**
@@ -1026,13 +1026,13 @@ describe('房子里的结构规则', () => {
     // `/settings/chains/:chainId`。本测试所守的东西不因形状而变：链路录入**不是**
     // 换乘链路 旁的一级入口，后者的页面只读结论。两页共用同一个组件（同构，只差参数），
     // 而列表页上不再有表单 —— 那正是这次搬动要办的事。
-    const list = codeOf(read('../chains.vue'))
+    const list = codeOf(read('../../../views/settings/chains.vue'))
     expect(list).toContain('<DragOrderList')
     expect(list, 'the list page still carries the form').not.toContain('<ChainForm')
-    const editor = codeOf(read('../chain-editor.vue'))
+    const editor = codeOf(read('../../../views/settings/chain-editor.vue'))
     expect(editor).toContain('<ChainForm')
-    expect(codeOf(read('../index.vue'))).not.toContain('<DragOrderList')
-    expect(codeOf(read('../index.vue'))).not.toContain('<AnchorPicker')
+    expect(codeOf(read('../../../views/settings/index.vue'))).not.toContain('<DragOrderList')
+    expect(codeOf(read('../../../views/settings/index.vue'))).not.toContain('<AnchorPicker')
     const router = codeOf(read('../../../router/index.ts'))
     expect(router).toContain(`path: '/settings'`)
     expect(router).toContain(`path: 'chains'`)

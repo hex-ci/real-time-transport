@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CommuteChain } from '@real-time-transport/shared'
-import ChainsPage from '../chains.vue'
+import ChainsPage from '../../../views/settings/chains.vue'
 import {
   RouterLinkStub,
   mountComponent,
@@ -45,8 +45,8 @@ function codeOf(source: string): string {
  * `/settings/chains/new` 与 `/settings/chains/:chainId` 之后，列表与它的拖动留在这里
  * （见 `docs/PRD.md` §4.1「列表页与编辑页的分工」）。
  */
-const LIST = read('../chains.vue')
-const ORDER_LIST = read('../components/drag-order-list.vue')
+const LIST = read('../../../views/settings/chains.vue')
+const ORDER_LIST = read('../../../views/settings/components/drag-order-list.vue')
 
 function chain(id: string, displayOrder: number, name: string, createdAt = '2026-01-01T00:00:00.000Z'): CommuteChain {
   return {
@@ -195,9 +195,9 @@ describe('F10 链路列表由拖动排序', () => {
     expect(codeOf(LIST)).toContain('<DragOrderList')
     expect(codeOf(LIST)).toContain('@move="onReorder"')
     // 关注线路列表引用的是同一个文件，不是第二份复制品。
-    expect(codeOf(read('../lines.vue'))).toContain('import { BackToSettings, DragOrderList } from \'./components\'')
-    expect(codeOf(read('../lines.vue'))).toContain('<DragOrderList')
-    expect(codeOf(read('../lines.vue'))).toContain('@move="onReorder"')
+    expect(codeOf(read('../../../views/settings/lines.vue'))).toContain('import { BackToSettings, DragOrderList } from \'./components\'')
+    expect(codeOf(read('../../../views/settings/lines.vue'))).toContain('<DragOrderList')
+    expect(codeOf(read('../../../views/settings/lines.vue'))).toContain('@move="onReorder"')
     expect(codeOf(ORDER_LIST)).toContain('handle="[data-drag-handle]"')
     expect(codeOf(ORDER_LIST)).toContain('VueDraggable')
   })

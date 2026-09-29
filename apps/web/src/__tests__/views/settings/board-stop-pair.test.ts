@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RouterLinkStub, mountComponent, press, type HostElement, type MountedHost, type Route } from './settings-harness'
-import FavoriteEditorPage from '../favorite-editor.vue'
-import LinesPage from '../lines.vue'
+import FavoriteEditorPage from '../../../views/settings/favorite-editor.vue'
+import LinesPage from '../../../views/settings/lines.vue'
 
 /**
  * 关注线路 · 上车点写入：记录的是 (站名, 站序) 一对，不是一个名字。

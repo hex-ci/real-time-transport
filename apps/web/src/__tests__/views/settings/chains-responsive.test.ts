@@ -6,8 +6,8 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import ChainsListPage from '../chains.vue'
-import ChainEditorPage from '../chain-editor.vue'
+import ChainsListPage from '../../../views/settings/chains.vue'
+import ChainEditorPage from '../../../views/settings/chain-editor.vue'
 
 /**
  * 链路两页在 320 / 375 / 1024 / 1280 上的宽度与高度预算，按**声明**算出来。

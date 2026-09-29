@@ -5,9 +5,9 @@ import {
   mountComponent,
   type MountedHost,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import LineMiniCard from '../components/line-mini-card.vue'
-import OverviewPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import LineMiniCard from '../../../views/overview/components/line-mini-card.vue'
+import OverviewPage from '../../../views/overview/index.vue'
 
 /**
  * 首页卡片上「前方有几辆车」这句话：只有读了才数车。

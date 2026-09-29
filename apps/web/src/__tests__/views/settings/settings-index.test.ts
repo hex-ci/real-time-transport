@@ -8,7 +8,7 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import SettingsIndex from '../index.vue'
+import SettingsIndex from '../../../views/settings/index.vue'
 
 /**
  * `设置` 的**索引页**，由**行为**守住。

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { statedDistanceSuffix } from '../landmark-distance'
+import { statedDistanceSuffix } from '../../../views/platform/landmark-distance'
 
 /**
  * 雷达的距离，在渲染它的唯一表面上：站台屏 GPS 按钮下的地标提示。
@@ -42,7 +42,7 @@ describe('the hint states the distance only where the radar stated one', () => {
 
 describe('the platform view reads the distance through the one rule', () => {
   const view = readFileSync(
-    fileURLToPath(new URL('../index.vue', import.meta.url)),
+    fileURLToPath(new URL('../../../views/platform/index.vue', import.meta.url)),
     'utf8',
   )
 

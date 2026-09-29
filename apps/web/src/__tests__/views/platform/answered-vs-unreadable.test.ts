@@ -6,8 +6,8 @@ import {
   type MountedHost,
   type RecordedRequest,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import PlatformPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import PlatformPage from '../../../views/platform/index.vue'
 
 /**
  * 站台页的 F3/F4 界面层：一块屏上，「答了但没车」「读不到」「有车但没有分钟」是三种说法，
@@ -23,7 +23,7 @@ import PlatformPage from '../index.vue'
  * `<select>`，而 runtime-dom 的 `v-model` 要写 `options.length`，是本装置刻意不建模的 DOM API。
  */
 
-vi.mock('../components/platform-header.vue', async () => {
+vi.mock('../../../views/platform/components/platform-header.vue', async () => {
   const { h } = await import('vue')
   return {
     default: {

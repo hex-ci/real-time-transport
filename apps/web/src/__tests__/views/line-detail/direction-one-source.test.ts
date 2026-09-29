@@ -6,8 +6,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '../../settings/__tests__/settings-harness'
-import LineDetail from '../index.vue'
+} from '../settings/settings-harness'
+import LineDetail from '../../../views/line-detail/index.vue'
 
 /**
  * 详情页「这条线路现在显示的是哪个方向」只能有一个来源。
@@ -34,11 +34,11 @@ import LineDetail from '../index.vue'
  * 规则中「谁属于谁」的部分由此按行为可查；弹窗本身是真的，按钮也是用户按的那个。
  */
 
-vi.mock('../components', async () => {
+vi.mock('../../../views/line-detail/components', async () => {
   const vue = await import('vue')
-  const StationPopover = (await import('../components/station-popover.vue')).default
+  const StationPopover = (await import('../../../views/line-detail/components/station-popover.vue')).default
   // 真实的方向切换条：角标（🏠 上班方向 / 🏢 下班方向）就在它里面，桩件会让这一条断言变空。
-  const DesktopActionBar = (await import('../components/desktop-action-bar.vue')).default
+  const DesktopActionBar = (await import('../../../views/line-detail/components/desktop-action-bar.vue')).default
   const Empty = vue.defineComponent({ name: 'EmptyStub', render: () => null })
   const RouteBoard = vue.defineComponent({
     name: 'RouteBoardStub',

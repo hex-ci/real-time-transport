@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
  */
 
 const tsconfig = readFileSync(
-  fileURLToPath(new URL('../tsconfig.app.json', import.meta.url)),
+  fileURLToPath(new URL('../../../tsconfig.app.json', import.meta.url)),
   'utf8',
 )
 

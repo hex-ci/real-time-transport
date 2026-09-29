@@ -6,8 +6,8 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import LinesPage from '../lines.vue'
-import FavoriteEditorPage from '../favorite-editor.vue'
+import LinesPage from '../../../views/settings/lines.vue'
+import FavoriteEditorPage from '../../../views/settings/favorite-editor.vue'
 
 /**
  * 关注线路两页在 320 / 375 / 1024 / 1280 上的宽度与高度预算，按**声明**算出来。

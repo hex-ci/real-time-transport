@@ -6,8 +6,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import OverviewPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import OverviewPage from '../../../views/overview/index.vue'
 
 /**
  * 关注线路页的顶部信息区：**两块互斥的工具栏**，各自持有自己那一档的样子。

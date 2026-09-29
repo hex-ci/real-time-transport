@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import * as pendingEstimate from '../pending-estimate'
+import * as pendingEstimate from '../../../views/line-detail/pending-estimate'
 import {
   ARRIVAL_ESTIMATE_FLOOR_SECONDS,
   estimateSubwayArrivalSeconds,
-} from '../pending-estimate'
+} from '../../../views/line-detail/pending-estimate'
 
 /**
  * F-E：页面自己的「等待窗口」估时必须是**服务端**的算术。
@@ -39,7 +39,7 @@ describe('the estimated seconds are floored, as the server floors them', () => {
  * （副本正是下限丢失的原因，也是纯逻辑测试看不到的一半）。
  */
 describe('the line page prices only the model the server still states', () => {
-  const view = readFileSync(fileURLToPath(new URL('../index.vue', import.meta.url)), 'utf8')
+  const view = readFileSync(fileURLToPath(new URL('../../../views/line-detail/index.vue', import.meta.url)), 'utf8')
 
   it('imports the subway estimate from the module instead of inlining the arithmetic', () => {
     expect(view).toContain('estimateSubwayArrivalSeconds')

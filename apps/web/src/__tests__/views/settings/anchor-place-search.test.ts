@@ -9,9 +9,9 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import AnchorsIndexPage from '../anchors.vue'
-import { anchorSummaryOf, pickAnchors } from '../anchors'
-import { anchorOf } from '../anchor-catalog'
+import AnchorsIndexPage from '../../../views/settings/anchors.vue'
+import { anchorSummaryOf, pickAnchors } from '../../../views/settings/anchors'
+import { anchorOf } from '../../../views/settings/anchor-catalog'
 
 /**
  * 组件自己发起的跳转，按顺序记下。
@@ -114,7 +114,7 @@ async function anchorDetailComponent(): Promise<Component> {
   vi.stubEnv('VITE_GPS_SIM_LAT', '')
   vi.stubEnv('VITE_GPS_SIM_LNG', '')
   vi.resetModules()
-  return (await import('../anchor-detail.vue')).default
+  return (await import('../../../views/settings/anchor-detail.vue')).default
 }
 
 async function mountIndex(options: Parameters<typeof routes>[0] = {}): Promise<MountedHost> {

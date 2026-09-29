@@ -6,8 +6,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import OverviewPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import OverviewPage from '../../../views/overview/index.vue'
 
 /**
  * 首页在 §4.1 规则中的那一份：**失败**的关注线路读取不是空的关注线路列表。

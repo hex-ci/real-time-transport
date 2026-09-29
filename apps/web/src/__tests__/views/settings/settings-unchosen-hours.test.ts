@@ -7,9 +7,9 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import { hoursText, settingsReadOf } from '../index-summary'
-import SchedulePage from '../schedule.vue'
-import CommuteHoursForm from '../components/commute-hours-form.vue'
+import { hoursText, settingsReadOf } from '../../../views/settings/index-summary'
+import SchedulePage from '../../../views/settings/schedule.vue'
+import CommuteHoursForm from '../../../views/settings/components/commute-hours-form.vue'
 
 /**
  * T2 的读/报一面：「行在、但四个通勤时刻从没选过」。

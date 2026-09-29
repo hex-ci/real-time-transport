@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChainMarginBand } from '@real-time-transport/shared'
 import { CHAIN_TIGHT_MARGIN_MINUTES, chainMarginBandOf } from '@real-time-transport/shared'
-import { MARGIN_BAND_COPY, chainConclusionOf, transferRowOf } from '../margin'
+import { MARGIN_BAND_COPY, chainConclusionOf, transferRowOf } from '../../../views/commute-chain/margin'
 import { conclusion, leg } from './chain-fixtures'
 
 /**

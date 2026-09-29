@@ -9,10 +9,10 @@ import {
   type MountedHost,
   type Route,
 } from './settings-harness'
-import LinesPage from '../lines.vue'
-import FavoriteEditorPage from '../favorite-editor.vue'
-import AnchorDetailPage from '../anchor-detail.vue'
-import CommuteHoursForm from '../components/commute-hours-form.vue'
+import LinesPage from '../../../views/settings/lines.vue'
+import FavoriteEditorPage from '../../../views/settings/favorite-editor.vue'
+import AnchorDetailPage from '../../../views/settings/anchor-detail.vue'
+import CommuteHoursForm from '../../../views/settings/components/commute-hours-form.vue'
 
 /**
  * 设置页每一处写操作，成与败各说一句。

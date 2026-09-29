@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
  */
 describe('报站板的上车点角标只出现在它自己那个方向上', () => {
   const board = readFileSync(
-    fileURLToPath(new URL('../components/route-board.vue', import.meta.url)),
+    fileURLToPath(new URL('../../../views/line-detail/components/route-board.vue', import.meta.url)),
     'utf8',
   )
 

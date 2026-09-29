@@ -7,9 +7,9 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '../../settings/__tests__/settings-harness'
-import MobileLineHeader from '../components/mobile-line-header.vue'
-import LineDetail from '../index.vue'
+} from '../settings/settings-harness'
+import MobileLineHeader from '../../../views/line-detail/components/mobile-line-header.vue'
+import LineDetail from '../../../views/line-detail/index.vue'
 
 /**
  * 移动端头部上的通勤方向标识（🏠 上班方向 / 🏢 下班方向）。
@@ -25,11 +25,11 @@ import LineDetail from '../index.vue'
  * 与收藏行自己的号相反，移动端若另算一份就会与桌面端各说一句话。
  * 报站板（Konva）与弹窗由桩件替掉 —— 本文件钉的是头部，它们各自有自己的测试台。
  */
-vi.mock('../components', async () => {
+vi.mock('../../../views/line-detail/components', async () => {
   const vue = await import('vue')
   // 两处头部都是真的：这一条标识要按同一次渲染里两处各自说出的话来比。
-  const MobileLineHeader = (await import('../components/mobile-line-header.vue')).default
-  const DesktopActionBar = (await import('../components/desktop-action-bar.vue')).default
+  const MobileLineHeader = (await import('../../../views/line-detail/components/mobile-line-header.vue')).default
+  const DesktopActionBar = (await import('../../../views/line-detail/components/desktop-action-bar.vue')).default
   const Empty = vue.defineComponent({ name: 'EmptyStub', render: () => null })
   return {
     MobileLineHeader,
@@ -270,8 +270,8 @@ describe('两处头部说的是同一句话，且只有一个词表', () => {
         return ''
       }
     }
-    const bar = source('../components/desktop-action-bar.vue')
-    const header = source('../components/mobile-line-header.vue')
+    const bar = source('../../../views/line-detail/components/desktop-action-bar.vue')
+    const header = source('../../../views/line-detail/components/mobile-line-header.vue')
 
     for (const [name, file] of [['桌面端', bar], ['移动端', header]] as const) {
       expect(file, `${name}头部没有用那个共享词表`).toContain('purposeBadgeOf(')

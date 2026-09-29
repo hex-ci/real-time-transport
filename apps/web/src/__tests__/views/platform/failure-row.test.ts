@@ -16,15 +16,15 @@ import { describe, expect, it } from 'vitest'
  */
 
 const board = readFileSync(
-  fileURLToPath(new URL('../components/departure-board.vue', import.meta.url)),
+  fileURLToPath(new URL('../../../views/platform/components/departure-board.vue', import.meta.url)),
   'utf8',
 )
 const view = readFileSync(
-  fileURLToPath(new URL('../index.vue', import.meta.url)),
+  fileURLToPath(new URL('../../../views/platform/index.vue', import.meta.url)),
   'utf8',
 )
 const rows = readFileSync(
-  fileURLToPath(new URL('../departure-row.ts', import.meta.url)),
+  fileURLToPath(new URL('../../../views/platform/departure-row.ts', import.meta.url)),
   'utf8',
 )
 

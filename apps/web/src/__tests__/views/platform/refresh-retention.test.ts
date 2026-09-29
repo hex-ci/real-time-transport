@@ -5,8 +5,8 @@ import {
   type MountedHost,
   type RecordedRequest,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import PlatformPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import PlatformPage from '../../../views/platform/index.vue'
 
 /**
  * 站台页：刷新不清空已在屏上的行。
@@ -36,7 +36,7 @@ import PlatformPage from '../index.vue'
  * 算法（本地时区的 HH:MM:SS），因此断言与时区无关。
  */
 
-vi.mock('../components/platform-header.vue', async () => {
+vi.mock('../../../views/platform/components/platform-header.vue', async () => {
   const { h } = await import('vue')
   return {
     default: {

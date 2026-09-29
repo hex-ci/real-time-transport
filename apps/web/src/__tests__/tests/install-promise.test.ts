@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 const repoFile = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 
-const manifestSource = readFileSync(repoFile('../public/manifest.webmanifest'), 'utf8')
+const manifestSource = readFileSync(repoFile('../../../public/manifest.webmanifest'), 'utf8')
 const manifest = JSON.parse(manifestSource) as {
   name?: string
   short_name?: string
@@ -31,11 +31,11 @@ const manifest = JSON.parse(manifestSource) as {
   [key: string]: unknown
 }
 
-const publicDir = repoFile('../public')
-const sourceDir = repoFile('../src')
-const indexHtml = readFileSync(repoFile('../index.html'), 'utf8')
-const viteConfig = readFileSync(repoFile('../vite.config.ts'), 'utf8')
-const routerSource = readFileSync(repoFile('../src/router/index.ts'), 'utf8')
+const publicDir = repoFile('../../../public')
+const sourceDir = repoFile('../..')
+const indexHtml = readFileSync(repoFile('../../../index.html'), 'utf8')
+const viteConfig = readFileSync(repoFile('../../../vite.config.ts'), 'utf8')
+const routerSource = readFileSync(repoFile('../../router/index.ts'), 'utf8')
 
 /**
  * 只读 PNG 的 IHDR：签名之后第一个块就是它，宽高在其前 8 个字节。
@@ -50,10 +50,15 @@ function pngSize(file: string): { width: number, height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
 }
 
-/** 应用源码里出现某个调用点的文件，按相对路径。 */
+/**
+ * 扫描范围**排除测试树本身**：自测试搬进 `src/__tests__/` 之后，扫描会把测试里作为**断言字面量**
+ * 出现的那些名字（本文件就写着 `serviceWorker`、`pushManager`）读成调用点，从而让这条守卫
+ * 永远红着 —— 它要问的是应用源码里有没有调用点。
+ */
 function sourceFilesMatching(pattern: RegExp): string[] {
   return readdirSync(sourceDir, { recursive: true })
     .filter(entry => /\.(?:ts|vue|js)$/.test(entry))
+    .filter(entry => !entry.startsWith('__tests__/'))
     .filter(entry => pattern.test(readFileSync(`${sourceDir}/${entry}`, 'utf8')))
 }
 

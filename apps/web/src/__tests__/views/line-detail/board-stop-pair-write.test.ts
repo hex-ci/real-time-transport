@@ -5,8 +5,8 @@ import {
   type HostElement,
   type MountedHost,
   type Route,
-} from '../../settings/__tests__/settings-harness'
-import LineDetail from '../index.vue'
+} from '../settings/settings-harness'
+import LineDetail from '../../../views/line-detail/index.vue'
 
 /**
  * 详情页弹窗里的上车点写入：写下去的是 (站名, 站序) 一对，清空是两列一起 null。
@@ -21,11 +21,11 @@ import LineDetail from '../index.vue'
  * 也是使用者按的那个；被钉的是这一页自己拼出来的请求体。
  */
 
-vi.mock('../components', async () => {
+vi.mock('../../../views/line-detail/components', async () => {
   const vue = await import('vue')
   // 真正的弹窗：被测控件是其中的按钮（`设为上班上车点` / `上班上车点 ✓`），
   // 桩件只会断言桩件自己的 emit。
-  const StationPopover = (await import('../components/station-popover.vue')).default
+  const StationPopover = (await import('../../../views/line-detail/components/station-popover.vue')).default
   const Empty = vue.defineComponent({ name: 'EmptyStub', render: () => null })
   // 报告板是 Konva，无 DOM 无法挂载：该桩件扮演交互所需的唯一部分——用户点一个站，
   // 带锚点打开弹窗。

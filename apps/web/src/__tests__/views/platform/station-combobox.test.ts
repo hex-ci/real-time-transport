@@ -7,8 +7,8 @@ import {
   type MountedHost,
   type RecordedRequest,
   type Route,
-} from '@/views/settings/__tests__/settings-harness'
-import PlatformPage from '../index.vue'
+} from '@/__tests__/views/settings/settings-harness'
+import PlatformPage from '../../../views/platform/index.vue'
 
 /**
  * 站台屏的站台选择器：屏上不再有原生 `<select>`，换的是共用的带搜索的下拉。

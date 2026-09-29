@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { anchorForPurpose } from '@real-time-transport/shared'
-import { anchorForPurpose as webAnchorForPurpose, emptyStateOf } from '../empty-state'
-import { anchorUnsetSentenceOf } from '../refusal'
+import { anchorForPurpose as webAnchorForPurpose, emptyStateOf } from '../../../views/commute-chain/empty-state'
+import { anchorUnsetSentenceOf } from '../../../views/commute-chain/refusal'
 
 /**
  * 页面的空态：本目的没有任何记录。

@@ -4,8 +4,8 @@ import {
   press,
   type HostElement,
   type MountedHost,
-} from '../../../views/settings/__tests__/settings-harness'
-import RefreshControl from '../main.vue'
+} from '../../views/settings/settings-harness'
+import RefreshControl from '../../../components/refresh-control/main.vue'
 
 /**
  * 本控件的两半（按钮与那一行读数）常分处页面上两处，故 `variant` 决定只渲染哪一半。

@@ -151,7 +151,7 @@ function decodePng(name: string, bytes: Buffer): DecodedPng {
 
 /* -------------------------------------------------------------- 夹具 */
 
-const publicDir = fileURLToPath(new URL('../public', import.meta.url))
+const publicDir = fileURLToPath(new URL('../../../public', import.meta.url))
 
 const publicFile = (name: string) => join(publicDir, name)
 
@@ -189,7 +189,7 @@ const appleTouchIcon = 'apple-touch-icon.png'
 const manifestIconFiles = iconEntries.map(entry => entry.src.replace(/^\//, ''))
 
 /** `index.html` 位于包根，在 `public/` 旁——不在其内。 */
-const indexHtml = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8')
+const indexHtml = readFileSync(fileURLToPath(new URL('../../../index.html', import.meta.url)), 'utf8')
 
 /** head 的 `meta` 与 `link` 标签按 `name`/`rel` 键的属性，作为数据。 */
 function headTags(tag: 'meta' | 'link'): Array<Record<string, string>> {
@@ -393,14 +393,16 @@ describe('F7 · no service worker', () => {
     expect(Object.keys(manifest).filter(key => /service-?worker|workbox|^prefer_related_applications$/i.test(key))).toEqual([])
     expect(indexHtml).not.toMatch(/service-?worker|workbox/i)
 
-    const viteConfig = readFileSync(fileURLToPath(new URL('../vite.config.ts', import.meta.url)), 'utf8')
+    const viteConfig = readFileSync(fileURLToPath(new URL('../../../vite.config.ts', import.meta.url)), 'utf8')
     expect(viteConfig).not.toMatch(/workbox|vite-plugin-pwa|serviceWorker/i)
   })
 
   it('registers no worker from the app source either (structural: no call sites)', () => {
-    const sourceDir = fileURLToPath(new URL('../src', import.meta.url))
+    const sourceDir = fileURLToPath(new URL('../..', import.meta.url))
+    // 排除测试树：见 `install-promise.test.ts` 里同一个扫描的说明 —— 断言字面量不是调用点。
     const files = readdirSync(sourceDir, { recursive: true })
       .filter(entry => /\.(?:ts|vue|js)$/.test(entry))
+      .filter(entry => !entry.startsWith('__tests__/'))
     const registrations = files.filter((entry) => {
       const source = readFileSync(`${sourceDir}/${entry}`, 'utf8')
       return /navigator\.serviceWorker|serviceWorker\.register|registerSW/.test(source)

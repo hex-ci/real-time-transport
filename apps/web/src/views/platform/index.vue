@@ -166,6 +166,8 @@ function buildRulesForStation(stationName: string): PlatformLineRule[] {
         direction: dir,
         terminal: detail.directionName,
         stationOrder: stop.order,
+        // 数据源没给轨迹时没有道路距离可陈述：null，该行不陈述距离（零假数据）。
+        stationDistanceMeters: detail.stationDistances?.[stop.order - 1] ?? null,
         operatingText: operatingTextOf(operating),
       })
     }

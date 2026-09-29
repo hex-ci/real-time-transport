@@ -1,17 +1,17 @@
 /**
- * 线路详情：切方向与「设为上班上车点」。
+ * 线路详情：切方向与站点弹窗。
  *
  * 两条行为在这里被钉住：
  *  - 屏幕上显示的站点列表、方向名与站数，全部来自**同一个**事实源（那一次详情读取的载荷）；
  *    切方向之后站点列表必须换成另一个方向的站表，而不是原地不动或两者混排；
- *  - 点「设为上班上车点」写出的请求体里，方向是**屏幕上此刻显示的那个方向**换算到收藏行的编号，
- *    站点是屏幕上点开的那一站（站名与站序）。这是真修过的一个缺陷：写下的号曾指反方向，
- *    于是站序属于另一个方向。
+ *  - 点画布上的站点打开站点弹窗，弹窗是关于那一站的（到站列表、步行决策）。
+ *    上车点/下班的**写入入口**不在这一屏：它只在设置页的编辑页里（见 docs/PRD.md §4.1）——
+ *    故这一屏的弹窗不再提供那两个按钮。
  *
  * 站点是画布（Konva）上的节点，故点它要走真实鼠标事件：先问出那一站的视口坐标，再按坐标点。
  */
-import { WEB_ORIGIN, goto, pageEval, waitForValue, cli, delay, recordedRequests, installFetchRecorder, clearRecordedRequests } from '../harness.mjs'
-import { favorites, lineDetail } from '../fixtures.mjs'
+import { WEB_ORIGIN, goto, pageEval, waitForValue, cli, delay, installFetchRecorder } from '../harness.mjs'
+import { lineDetail } from '../fixtures.mjs'
 
 export const name = '线路详情'
 
@@ -56,21 +56,6 @@ const CANVAS_STOPS = `JSON.stringify((() => {
     .map(t => t.text())
 })())`
 
-/**
- * 收藏行的方向编号规则（与 `favoriteDirectionOfLine` 同一条）：
- * 公交两个方向是两条上游 lineId，哪条 lineId 就是哪个编号；同一条 id 服务两个方向时用载荷自己的号。
- */
-function favoriteDirectionOfLine(fav, lineId, payloadDirection) {
-  const primary = fav.preferredDirection === 1 ? 1 : 0
-  if (fav.reverseLineId && fav.reverseLineId !== fav.lineId) {
-    if (lineId === fav.lineId) return primary
-    if (lineId === fav.reverseLineId) return 1 - primary
-    return null
-  }
-  if (lineId !== fav.lineId) return null
-  return payloadDirection === 1 ? 1 : 0
-}
-
 async function clickStation(point) {
   await cli(['mousemove', String(point.x), String(point.y)])
   await cli(['mousedown'])
@@ -79,7 +64,6 @@ async function clickStation(point) {
 }
 
 export async function run({ check, equal, note, fixtures }) {
-  const fav = fixtures.favorites.a.favorite
   const up = fixtures.favorites.a.line.upLineId
   const down = fixtures.favorites.a.line.downLineId
   const upDetail = await lineDetail(up, 0)
@@ -112,29 +96,17 @@ export async function run({ check, equal, note, fixtures }) {
   note(`将要点击的站点：${targetStop.name} 第${targetStop.order}站（${target.x},${target.y}）`)
 
   await clickStation(target)
+  const wanted = JSON.stringify(targetStop.name)
   const popoverText = await waitForValue(
-    `JSON.stringify(document.querySelector('[role=dialog]')?.innerText ?? document.body.innerText.slice(0, 400))`,
-    text => String(text).includes('设为上班上车点'),
+    `JSON.stringify((() => { const t = document.querySelector('[role=dialog]')?.innerText ?? ''; return t.includes(` + wanted + `) ? t : null })())`,
+    text => typeof text === 'string' && text.length > 0,
     { what: '站点弹窗打开', timeout: 15_000 },
   ).catch(() => null)
-  check('点画布上的站点打开了站点弹窗', popoverText !== null, `目标站 ${targetStop.name}`)
   check('弹窗是关于点中的那一站的', String(popoverText).includes(targetStop.name), `期望含「${targetStop.name}」，实际 ${JSON.stringify(String(popoverText).slice(0, 200))}`)
 
-  await clearRecordedRequests()
-  await cli(['click', `getByRole('button', { name: '设为上班上车点' })`])
-  await waitForValue(
-    'JSON.stringify((window.__e2eFetch || []).filter(r => r.method === "PATCH" && r.url.includes("/favorites/")).length)',
-    count => typeof count === 'number' && count > 0,
-    { what: '上车点写入发出', timeout: 15_000 },
-  )
-  const patches = (await recordedRequests()).filter(r => r.method === 'PATCH' && r.url.includes('/favorites/'))
-  const body = JSON.parse(patches[0].requestBody)
-  const expectedDirection = favoriteDirectionOfLine(fav, up, upDetail.direction)
-  equal('写出的方向 = 屏幕上显示的方向（换算到收藏行编号）', body.morningDirection, expectedDirection)
-  equal('写出的站点 = 屏幕上点开的那一站', { name: body.morningStopName, order: body.morningStopOrder }, { name: targetStop.name, order: targetStop.order })
-
-  const stored = (await favorites()).find(f => f.id === fav.id)
-  equal('服务端存下的上车点与请求体一致', { name: stored.morningStopName, order: stored.morningStopOrder, direction: stored.morningDirection }, { name: targetStop.name, order: targetStop.order, direction: expectedDirection })
+  // 上车点/下班的写入入口不在这一屏（它在设置页的编辑页，见 docs/PRD.md §4.1）：弹窗不再提供那两个按钮。
+  const pinButtons = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=dialog] button, [role=dialog] [role=button]')].map(b => b.innerText.trim()).filter(t => /上车点/.test(t)))`)
+  check('弹窗里不再有「设为上班/下班上车点」的入口', (pinButtons ?? []).length === 0, JSON.stringify(pinButtons))
 
   // ---- 切方向：站点列表跟着变 ---------------------------------------------------
   await cli(['click', `getByRole('tab', { name: ${JSON.stringify(`开往 ${upDetail.stops[0].name}`)} })`])
@@ -160,21 +132,11 @@ export async function run({ check, equal, note, fixtures }) {
 
   await clickStation(targetDown)
   await waitForValue(
-    'JSON.stringify(document.body.innerText.includes("设为上班上车点"))',
+    `JSON.stringify(document.querySelector('[role=dialog]')?.innerText?.includes(${JSON.stringify(targetStopDown.name)}) ?? false)`,
     value => value === true,
     { what: '反向的站点弹窗打开', timeout: 15_000 },
   )
-  await clearRecordedRequests()
-  await cli(['click', `getByRole('button', { name: '设为上班上车点' })`])
-  await waitForValue(
-    'JSON.stringify((window.__e2eFetch || []).filter(r => r.method === "PATCH" && r.url.includes("/favorites/")).length)',
-    count => typeof count === 'number' && count > 0,
-    { what: '反向的上车点写入发出', timeout: 15_000 },
-  )
-  const patchesDown = (await recordedRequests()).filter(r => r.method === 'PATCH' && r.url.includes('/favorites/'))
-  const bodyDown = JSON.parse(patchesDown[0].requestBody)
-  const expectedDown = favoriteDirectionOfLine(fav, down, downDetail.direction)
-  equal('反向写出的方向 = 屏幕上显示的那个方向', bodyDown.morningDirection, expectedDown)
-  check('两个方向的编号确实不同（这条断言才不会恒真）', expectedDirection !== expectedDown, `两次都是 ${expectedDirection}`)
-  equal('反向写出的站点 = 屏幕上点开的那一站', { name: bodyDown.morningStopName, order: bodyDown.morningStopOrder }, { name: targetStopDown.name, order: targetStopDown.order })
+  // 反向同样：弹窗不再有写入入口（与正向同一条规则）。
+  const pinButtonsDown = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=dialog] button, [role=dialog] [role=button]')].map(b => b.innerText.trim()).filter(t => /上车点/.test(t)))`)
+  check('反向的弹窗里也不再有「设为上班/下班上车点」的入口', (pinButtonsDown ?? []).length === 0, JSON.stringify(pinButtonsDown))
 }

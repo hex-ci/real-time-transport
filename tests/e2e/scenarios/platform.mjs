@@ -112,9 +112,9 @@ export async function run({ check, note, fixtures }) {
   check('载荷里至少有一行给了分钟（否则下面的断言无从谈起）', withMinutes.length > 0, JSON.stringify(received))
   for (const row of withMinutes) {
     const shown = (rows ?? []).find(text => text.split('\n')[0] === row.lineName && text.includes(row.terminal))
-    // 分钟与距站数必须来自**同一份**载荷：混着两次读数的行会在下面失败。
+    // 分钟与站数必须来自**同一份**载荷：混着两次读数的行会在下面失败。
     const matched = row.pairs.some(pair => typeof shown === 'string'
-      && shown.includes(`${pair.minutes} 分钟`) && shown.includes(`距 ${pair.stopsAway} 站`))
+      && shown.includes(`${pair.minutes} 分钟`) && shown.includes(`${pair.stopsAway} 站`))
     check(
       `「${row.lineName} ${row.terminal}」的分钟与距站数来自它收到过的那一份载荷`,
       matched,
@@ -129,10 +129,39 @@ export async function run({ check, note, fixtures }) {
   const ascending = minutesShown.every((value, index) => index === 0 || minutesShown[index - 1] <= value)
   check('按预计到站升序排列', ascending, `屏幕上的分钟序列 ${JSON.stringify(minutesShown)}`)
 
+  // ---- 距离与表头/行对齐（F5）---------------------------------------------------
+  // 表头与数据行是同一套两列网格：左列线路与开往、右列预计到站与拥挤度 —— 落到真实坐标上断言，
+  // 只按类名查会让「网格换回 12 列那套」这类回归照样通过。
+  const alignment = await pageEval(`JSON.stringify((() => {
+    const header = [...document.querySelectorAll('main [class*=grid]')].find(e => /线路.*开往/.test(e.innerText) && e.children.length === 2)
+    if (!header) return { missingHeader: true }
+    const leftCol = Math.round(header.children[0].getBoundingClientRect().left)
+    const row = document.querySelector('main .divide-y > div')
+    if (!row) return { missingRow: true }
+    const firstCell = Math.round(row.children[0].getBoundingClientRect().left)
+    const headerText = header.innerText
+    const headerBottom = Math.round(header.getBoundingClientRect().bottom)
+    const rowTop = Math.round(row.getBoundingClientRect().top)
+    return { leftCol, firstCell, headerText, headerBottom, rowTop }
+  })())`)
+  check('表头是两列（线路/开往 + 预计到站·拥挤度）', alignment?.headerText?.includes('线路 / 开往') && alignment?.headerText?.includes('预计到站 · 拥挤度'), JSON.stringify(alignment))
+  check('数据行左列与表头左列对齐（同一套网格）', alignment && Math.abs(alignment.leftCol - alignment.firstCell) <= 2, JSON.stringify(alignment))
+  check('数据行与表头相接（表头的下缘就是行的上缘，不是另一套布局）', alignment && Math.abs(alignment.rowTop - alignment.headerBottom) <= 1, JSON.stringify(alignment))
+
   const reads = (await recordedRequests()).filter(r => r.url.includes('/live?'))
   const namedTarget = reads.filter(r => /[?&]order=\d+/.test(r.url))
   note(`屏幕发过的实时读数：${reads.length} 次，其中点名目标站 ${namedTarget.length} 次`)
   check('屏幕的实时读数点名了目标站（分钟正是它带来的）', namedTarget.length === reads.length && reads.length > 0, JSON.stringify(reads.map(r => r.url)))
+
+  // 距离：真实 live 载荷带 distanceFromStart、detail 带 stationDistances（接口本身实测带这两个字段），
+  // 故该行陈述道路距离 —— 与「距 N 站」并存（F5）；缺的行不冒充（模拟层未必给这个字段，零假数据）。
+  const DISTANCE_WORD = String.raw`距 [0-9]+(\.[0-9]+)? (米|公里)`
+  const distanceClaims = await pageEval(`JSON.stringify([...document.querySelectorAll('main .divide-y > div')]
+    .map(r => new RegExp('${DISTANCE_WORD}').exec(r.innerText)?.[0] ?? null).filter(Boolean))`)
+  for (const claim of distanceClaims ?? []) {
+    check(`屏上的距离「${claim}」是它所给的字（米/公里），不是站数拼出来的`, new RegExp(DISTANCE_WORD).test(claim), claim)
+  }
+  note(`屏上陈述距离的行：${JSON.stringify(distanceClaims)}`)
 
   // ---- 「最后更新」= 响应自己的 updatedAt（用一份规定的载荷来分辨它与本机时钟）--------
   //

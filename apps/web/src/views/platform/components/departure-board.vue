@@ -57,6 +57,15 @@ const freshnessText = computed(() => {
 function markOf(item: DepartureItem): string | null {
   return provenanceLabelOf(item.provenance)
 }
+/**
+ * 行的距离措辞：与剩余站数并排陈述（「距 1.2 公里 · 2 站」）。
+ * 缺失就什么都不陈述（零假数据：绝不按站数估出一个距离）。
+ */
+function distanceText(meters: number | null): string | null {
+  if (typeof meters !== 'number' || !Number.isFinite(meters)) return null
+  if (meters >= 1000) return `距 ${(meters / 1000).toFixed(1)} 公里`
+  return `距 ${Math.round(meters)} 米`
+}
 </script>
 
 <template>
@@ -71,12 +80,11 @@ function markOf(item: DepartureItem): string | null {
       {{ freshnessText }}
     </div>
 
-    <!-- 桌面表头：移动端隐藏，两行卡片布局不需要表头 -->
-    <div class="hidden grid-cols-12 border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider md:grid">
-      <div class="col-span-3">线路 / 始发</div>
-      <div class="col-span-4">开往方向</div>
-      <div class="col-span-3 text-right">预计到站</div>
-      <div class="col-span-2 text-right">车况</div>
+    <!-- 表头与数据行是**同一套**两列网格（见 PRD F5）：左列线路与开往、右列预计到站与拥挤度。
+         移动端同样两列（只是排成两行），故移动端不隐藏任何信息。 -->
+    <div class="grid grid-cols-[1fr_auto] border-b border-slate-800 bg-slate-900/90 px-3 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider md:px-4">
+      <div>线路 / 开往</div>
+      <div class="text-right">预计到站 · 拥挤度</div>
     </div>
 
     <!-- loading 体与行是两个独立状态，不是 v-if/v-else：体只在屏上无物可留时出现，
@@ -118,10 +126,10 @@ function markOf(item: DepartureItem): string | null {
       <div
         v-for="item in items"
         :key="item.id"
-        class="px-3 py-3 transition hover:bg-slate-900/50 md:grid md:grid-cols-12 md:items-center md:px-4 md:py-3.5"
+        class="grid grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-3 transition hover:bg-slate-900/50 md:px-4 md:py-3.5"
       >
-        <!-- 第 1 行（移动端）：线路徽标 + 方向 -->
-        <div class="flex items-center gap-2.5 md:col-span-4 md:col-start-1 md:row-start-1">
+        <!-- 左列：线路徽标 + 开往方向（与表头左列同列） -->
+        <div class="flex min-w-0 items-center gap-2.5">
           <span
             class="flex h-7 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2 font-mono font-bold text-cyan-400 whitespace-nowrap"
             :class="item.lineName.length > 4 ? 'text-xs min-w-[58px]' : 'text-xs min-w-[44px]'"
@@ -131,16 +139,18 @@ function markOf(item: DepartureItem): string | null {
           <span class="min-w-0 truncate text-xs font-medium text-slate-200 lg:text-base">{{ item.terminal }}</span>
         </div>
 
-        <!-- 第 2 行（移动端）：到站与车况，与第 1 行的徽标列右对齐 -->
-        <div class="mt-2 flex items-end justify-between md:col-span-6 md:col-start-7 md:row-start-1 md:mt-0 md:justify-end md:gap-4">
-          <div class="font-mono">
+        <!-- 右列：预计到站（含距离与站数）与拥挤度，与表头右列同列 -->
+        <div class="flex items-center justify-end gap-3 md:gap-4">
+          <div class="text-right font-mono">
             <template v-if="item.etaMinutes !== null">
               <span class="text-base font-bold text-cyan-400">{{ item.etaMinutes }}</span>
               <span class="text-xs text-slate-400"> 分钟</span>
               <!-- 分钟是哪一类数字，取自本行自己的来源。没有陈述的行不渲染任何标记，
                    故未归类的分钟绝不借用好看的那个词。 -->
               <span v-if="markOf(item)" class="ml-1 text-xs font-normal text-slate-400"><span aria-hidden="true">·</span> {{ markOf(item) }}</span>
-              <span v-if="item.stopsAway !== null" class="block text-xs text-slate-400">距 {{ item.stopsAway }} 站</span>
+              <span v-if="item.stopsAway !== null" class="block text-xs text-slate-400">
+                <template v-if="distanceText(item.distanceMeters)">{{ distanceText(item.distanceMeters) }} · </template>{{ item.stopsAway }} 站
+              </span>
             </template>
             <!-- 没有车带 ETA 时陈述运营事实：已收班、未开班，或运营中而范围内无车。 -->
             <template v-else-if="item.operatingText">
@@ -159,9 +169,10 @@ function markOf(item: DepartureItem): string | null {
             </template>
           </div>
 
-          <!-- 拥挤度芯片是判决，词与色都只来自等级：绝不来自分钟是否存在，
-               也绝不来自数字列已陈述的失败。 -->
+          <!-- 拥挤度芯片是判决，词与色都只来自等级：绝不来自分钟是否存在。
+               请求失败的行**不渲染**它（同一行不能同时说「这趟车取不到」和「这趟车未知」）。 -->
           <span
+            v-if="!item.unavailable"
             class="inline-block rounded px-1.5 py-0.5 text-xs font-medium"
             :class="congestionChipClass(item.congestion)"
           >

@@ -3,7 +3,6 @@ import {
   RouterLinkStub,
   mountComponent,
   press,
-  type HostElement,
   type MountedHost,
   type Route,
 } from '../settings/settings-harness'
@@ -132,19 +131,6 @@ const DETAIL_DOWN = {
   ],
 }
 
-/** 地铁：两个方向共用一条 lineId，payload 自己的号就是收藏行的号。 */
-const SUBWAY_FAVOURITE = {
-  id: 'fav-subway',
-  userId: 'default_user',
-  cityCode: '027',
-  lineId: 'subway_027_1',
-  reverseLineId: 'subway_027_1',
-  lineName: '地铁1号线支线',
-  preferredDirection: 0,
-  morningDirection: 1,
-  displayOrder: 2,
-}
-
 const SUBWAY_DETAIL = {
   lineId: 'subway_027_1',
   direction: 1,
@@ -221,23 +207,12 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-function writes(host: MountedHost): Array<{ url: string, method: string, body: any }> {
-  return host.server.requests.filter(request => request.method === 'PATCH')
-}
-
 async function openPopover(host: MountedHost): Promise<void> {
   const board = host.node(
     item => item.props['data-role'] === 'board-station',
     'the board station control',
   )
   await press(host, board)
-}
-
-function toggleStop(host: MountedHost, label: string): HostElement {
-  return host.node(
-    item => item.tag === 'button' && host.textOf(item).trim() === label,
-    `the popover control 「${label}」`,
-  )
 }
 
 /** 报站板桩件收到的 props，键名统一成驼峰（模板里的 kebab 属性名也算在内）。 */
@@ -252,52 +227,6 @@ function boardProps(host: MountedHost): Record<string, any> {
 }
 
 describe('详情页：显示的方向与写下的方向是同一个方向', () => {
-  it('报站板切过去的那一页：角标语出这个方向上的通勤目的，写下的号是收藏行自己的号', async () => {
-    // 从 /line/010-52-0?direction=0 按「另一个方向」的页签切过来就是这一页：报站板的页签写的是
-    // payload 的号（1），而收藏行自己的号是 0 —— 两套号在这一行上恰好相反。
-    const host = await mountDetail(DOWN, '1', [FAVOURITE])
-
-    // 屏幕上的方向：这条线是收藏行编号里的方向 0，也就是使用者的上班方向。
-    expect(host.text()).toContain('🏠 上班方向')
-
-    await openPopover(host)
-    await press(host, toggleStop(host, '设为上班上车点'))
-
-    const patch = writes(host)
-    expect(patch, 'the popover sent no write').toHaveLength(1)
-    expect(patch[0]!.body).toEqual({ morningStopName: '劲松', morningStopOrder: 7, morningDirection: 0 })
-    host.unmount()
-  })
-
-  it('正对照：首页卡片给的主方向页（URL 的号与收藏行的号本来就一致），写的仍是收藏行的号', async () => {
-    // 首页卡片把收藏行的号写进 URL（方向 1 → lineId 010-52-0），payload 却说自己方向 0。
-    const host = await mountDetail(UP, '1', [FAVOURITE])
-
-    expect(host.text(), 'a direction that is not this leg’s purpose showed its badge').not.toContain('上班方向')
-
-    await openPopover(host)
-    await press(host, toggleStop(host, '设为上班上车点'))
-
-    const patch = writes(host)
-    expect(patch, 'the popover sent no write').toHaveLength(1)
-    expect(patch[0]!.body).toEqual({ morningStopName: '劲松', morningStopOrder: 12, morningDirection: 1 })
-    host.unmount()
-  })
-
-  it('正对照：地铁两个方向共用一条 lineId 时，payload 的号就是收藏行的号', async () => {
-    const host = await mountDetail('subway_027_1', '1', [SUBWAY_FAVOURITE])
-
-    expect(host.text()).toContain('🏠 上班方向')
-
-    await openPopover(host)
-    await press(host, toggleStop(host, '设为上班上车点'))
-
-    const patch = writes(host)
-    expect(patch, 'the popover sent no write').toHaveLength(1)
-    expect(patch[0]!.body).toEqual({ morningStopName: '八角游乐园', morningStopOrder: 4, morningDirection: 1 })
-    host.unmount()
-  })
-
   it('控制：不是关注的线路，没有角标，也没有设上车点的控件', async () => {
     const host = await mountDetail(UP, '0', [])
 

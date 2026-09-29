@@ -22,6 +22,7 @@ const rule: PlatformLineRule = {
   direction: 0,
   terminal: '开往建国门',
   stationOrder: 4,
+  stationDistanceMeters: 1200,
   operatingText: '运营中，本方向暂无来车',
 }
 
@@ -67,6 +68,31 @@ describe('H1: a reading that carries this platform\'s minute is stated as a minu
     expect(row.etaMinutes).toBe(1)
     expect(row.stopsAway).toBe(1)
     expect(row.congestion).toBe('high')
+  })
+})
+
+describe('H1: 距离由道路几何得出，两端任何一个缺失都不陈述', () => {
+  it('由所请求站的路线距减车的连续位置，下限 0', () => {
+    const row = rowWith([{ order: 2, nextOrder: 3, travelTimeSec: 480, distanceFromStart: 400, congestion: 'low' }])
+    expect(row.distanceMeters).toBe(800)
+
+    // 车已到所请求的站（或越过它）：陈述 0，不是负值。
+    const at = rowWith([{ order: 3, nextOrder: 4, travelTimeSec: 0, distanceFromStart: 1200, congestion: 'low' }])
+    expect(at.distanceMeters).toBe(0)
+  })
+
+  it('读数没带连续位置时不陈述距离（绝不按站数估）', () => {
+    const row = rowWith([{ order: 2, nextOrder: 3, travelTimeSec: 480, congestion: 'low' }])
+    expect(row.distanceMeters).toBeNull()
+  })
+
+  it('规则里本站没有路线距时不陈述距离', () => {
+    const row = departureRowOf({
+      id: 'dep_1',
+      rule: { ...rule, stationDistanceMeters: null },
+      answer: answer([{ order: 2, nextOrder: 3, travelTimeSec: 480, distanceFromStart: 400, congestion: 'low' }]),
+    })
+    expect(row.distanceMeters).toBeNull()
   })
 })
 

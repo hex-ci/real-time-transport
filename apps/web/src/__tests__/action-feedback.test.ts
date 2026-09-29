@@ -214,7 +214,7 @@ describe('文案表是唯一来源', () => {
       'views/settings/components/commute-hours-form.vue': 1,
       // 首页只推置顶，线路页只推上车点。
       'views/overview/index.vue': 1,
-      'views/line-detail/index.vue': 1,
+      'views/line-detail/index.vue': 0,
       // 五个结局（取到、不支持、被拒、取不到、开发模拟下取到）都在 store 里说。
       'stores/location.store.ts': 5,
       // 而下面这些一个都不推：它们的动作在屏幕上立刻看得见。

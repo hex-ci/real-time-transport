@@ -165,9 +165,11 @@ describe('另外两处按名字认站的地方，也改成按 (站名, 站序) �
     expect(detail).toContain(':evening-stop-order="matchingFavorite?.eveningStopOrder ?? null"')
   })
 
-  it('弹窗里的「上班上车点 ✓」比的是一对，不是一个名字', () => {
-    expect(detail).toContain('isStoredStop(fav, \'morning\', station)')
-    expect(detail, 'the popover badge is placed by name, so both same-named stops claim it')
-      .not.toContain('fav.morningStopName === selectedStation.value.name')
+  it('报站板的上车点角标比的是一对，不是一个名字', () => {
+    // 角标显示仍在（报站板，Konva 静态层）：旧的比较是 `name === morningStopName`，
+    // 它会把两个同名站都标上 —— 其中一个是使用者没选的站台。
+    expect(board).toContain('storedStopAt(pt.station, morningStopName, morningStopOrder)')
+    expect(board, 'the board badges every station that shares the stored name')
+      .not.toContain('pt.station.name === morningStopName')
   })
 })

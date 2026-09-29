@@ -7,6 +7,8 @@ export interface PlatformLineRule {
   direction: number
   terminal: string
   stationOrder: number
+  /** 自线路起点到本站的累计道路距离（米）；上游没给轨迹时为 null，该行不陈述距离。 */
+  stationDistanceMeters: number | null
   /**
    * 线路自己的运营事实，取自该线路的首末班。无车可报时呈现，
    * 故「已过末班」不会被通用的无车文案顶替。数字列陈述它，芯片陈述拥挤度。
@@ -21,6 +23,8 @@ export interface DepartureItem {
   terminal: string
   etaMinutes: number | null
   stopsAway: number | null
+  /** 车到本站台的道路距离（米）；来源几何缺失或不可算时为 null，该行不陈述距离。 */
+  distanceMeters: number | null
   congestion: string
   /**
    * 该行背后的请求失败：车辆与运营日都未知。

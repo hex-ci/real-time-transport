@@ -7,7 +7,7 @@ import {
   PopoverPortal,
   PopoverRoot,
 } from 'reka-ui'
-import { Footprints, House, Building2, X } from '@lucide/vue'
+import { Footprints, X } from '@lucide/vue'
 import type { ArrivalRow, Station, WalkDecision } from '@real-time-transport/shared'
 import { statedArrivalMinutes } from '@real-time-transport/shared'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
@@ -38,18 +38,11 @@ const props = defineProps<{
   etaMark?: string | null
   freshness: string
   isRefreshing?: boolean
-  /** 本线路未被关注时为 false，因为没有地方存上车点。 */
-  canPin?: boolean
-  /** 打开的站绑定到哪个通勤目的，若有。 */
-  stationPurpose?: 'morning' | 'evening' | null
-  stopSaving?: boolean
-  stopError?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'compute-walk'): void
-  (e: 'toggle-stop', purpose: 'morning' | 'evening'): void
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
@@ -236,38 +229,6 @@ const decisionStyle = computed(() => {
           >
             {{ arrivals.note }}
           </p>
-
-          <!-- 上车点控件：使本站成为首页卡片在所见方向上的目标站。 -->
-          <!-- 通勤上车点：把本站绑定到一个目的。一个站可以服务两腿；再点已激活的目的即解绑。 -->
-          <div v-if="canPin" class="space-y-1">
-            <div class="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
-                :class="stationPurpose === 'morning'
-                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
-                  : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'"
-                :disabled="stopSaving"
-                @click="emit('toggle-stop', 'morning')"
-              >
-                <House class="h-3.5 w-3.5 shrink-0" :class="stationPurpose === 'morning' ? 'fill-current' : ''" />
-                <span>{{ stationPurpose === 'morning' ? '上班上车点 ✓' : '设为上班上车点' }}</span>
-              </button>
-              <button
-                type="button"
-                class="flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition active:scale-[0.99] lg:gap-2 lg:px-2.5 lg:py-2.5 lg:text-base"
-                :class="stationPurpose === 'evening'
-                  ? 'border-violet-500/50 bg-violet-500/15 text-violet-300'
-                  : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-violet-500/50 hover:text-violet-300'"
-                :disabled="stopSaving"
-                @click="emit('toggle-stop', 'evening')"
-              >
-                <Building2 class="h-3.5 w-3.5 shrink-0" :class="stationPurpose === 'evening' ? 'fill-current' : ''" />
-                <span>{{ stationPurpose === 'evening' ? '下班上车点 ✓' : '设为下班上车点' }}</span>
-              </button>
-            </div>
-            <p v-if="stopError" class="text-xs text-rose-400 lg:text-base">{{ stopError }}</p>
-          </div>
 
           <!-- 步行决策 -->
           <div

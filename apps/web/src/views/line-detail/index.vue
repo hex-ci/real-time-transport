@@ -28,7 +28,6 @@ import {
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { RefreshControl } from '@/components/refresh-control'
-import { runWithFeedback } from '@/action-feedback'
 import { useGis } from '@/composables/use-gis'
 import {
   DesktopActionBar,
@@ -40,8 +39,8 @@ import {
   type StationAnchor,
 } from './components'
 import type { DirectionOption } from './types'
-import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station, UserFavoriteLine } from '@real-time-transport/shared'
-import { effectiveCommuteDirection, favoriteDirectionOfLine, resolveBoardStopRef } from '@real-time-transport/shared/line-group'
+import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@real-time-transport/shared'
+import { effectiveCommuteDirection, favoriteDirectionOfLine } from '@real-time-transport/shared/line-group'
 import { statedArrivalMinutes, vehicleProvenanceOf } from '@real-time-transport/shared'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
@@ -426,68 +425,6 @@ const activePurpose = computed<'morning' | 'evening' | null>(() => {
   return null
 })
 
-/**
- * 弹窗里打开的站是否为某个目的存下来的那一站。
- *
- * 问的是收藏行持有的**一对** (站名, 站序)，不是它的名字：同名站在一条线路上出现两次时按名字比，
- * 会把两个都标上，从而把使用者从未选的站台说成他的上车点。只留了名字的旧行没有站序，那时名字是
- * 徽标唯一的依据。
- *
- * 此处刻意不看屏幕上的方向：一个目的乘哪个方向是另一个存下来的字段。
- */
-function isStoredStop(
-  fav: UserFavoriteLine,
-  purpose: 'morning' | 'evening',
-  station: { name: string, order: number },
-): boolean {
-  const ref = resolveBoardStopRef(fav, purpose)
-  if (!ref || ref.name !== station.name) return false
-  return ref.order === null || ref.order === station.order
-}
-
-/** 弹窗里当前打开的那个站的上车点状态。 */
-const stationPurpose = computed<'morning' | 'evening' | null>(() => {
-  const fav = matchingFavorite.value
-  const station = selectedStation.value
-  if (!fav || !station) return null
-  if (isStoredStop(fav, 'morning', station)) return 'morning'
-  if (isStoredStop(fav, 'evening', station)) return 'evening'
-  return null
-})
-
-const stopSaving = shallowRef(false)
-const stopError = shallowRef<string | null>(null)
-
-/**
- * 把打开的站绑定到某个通勤目的，或解绑。
- *
- * 设站时也把屏幕上当前的方向记为那个目的的方向：使用者在指定上车点时所看的就是这个方向的站，
- * 没有方向的站定位不到任何东西。清空一个站不动方向，故日后重选只需该站。
- */
-async function toggleBoardStop(purpose: 'morning' | 'evening'): Promise<void> {
-  const fav = matchingFavorite.value
-  const station = selectedStation.value
-  const dir = favoriteDirection.value
-  if (!fav?.id || !station || dir === null) return
-  // 在闭包里读到的 id 不再是被守卫过的那个属性，故先取出它。
-  const favoriteId = fav.id
-
-  stopSaving.value = true
-  stopError.value = null
-  try {
-    const clearing = stationPurpose.value === purpose
-    await runWithFeedback('favorite-board-stop', () => transitStore.updateCommuteSlot(favoriteId, purpose, clearing
-      ? { stop: null }
-      : { stop: { name: station.name, order: station.order }, direction: dir }))
-  }
-  catch (err) {
-    stopError.value = err instanceof Error ? err.message : '上车点保存失败'
-  }
-  finally {
-    stopSaving.value = false
-  }
-}
-
 async function computeWalkDecision(): Promise<void> {
   const coords = locationStore.userCoords
   if (!coords || !selectedStation.value) return
@@ -753,13 +690,8 @@ onUnmounted(() => {
         :eta-mark="selectedStationEta.mark"
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
-        :can-pin="Boolean(matchingFavorite)"
-        :station-purpose="stationPurpose"
-        :stop-saving="stopSaving"
-        :stop-error="stopError"
         @close="onCloseStationPopover"
         @compute-walk="computeWalkDecision"
-        @toggle-stop="toggleBoardStop"
       />
     </div>
   </div>

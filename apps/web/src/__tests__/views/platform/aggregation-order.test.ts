@@ -249,9 +249,9 @@ describe('站台屏：一行只陈述自己那条读数', () => {
     expect(rowTextOf(host, '环线 3 路')).toContain('9 分钟')
     expect(rowTextOf(host, '夜班 4 路')).toContain('9 分钟')
 
-    // 站数同理：数的是本行那辆车头到本站台的距离（环线尚 2 站，快线只剩 1 站）。
-    expect(rowTextOf(host, '环线 3 路')).toContain('距 2 站')
-    expect(rowTextOf(host, '快线 1 路')).toContain('距 1 站')
+    // 站数同理：数的是本行那辆车头到本站台还有几站（环线尚 2 站，快线只剩 1 站）。
+    expect(rowTextOf(host, '环线 3 路')).toContain('2 站')
+    expect(rowTextOf(host, '快线 1 路')).toContain('1 站')
 
     // 跨线借用的形状：别的线路的分钟出现在这一行上。逐行逐线地查，故任何一次借用在屏上都留痕。
     for (const line of LINES) {
@@ -300,7 +300,7 @@ describe('站台屏：按到站耗时排序', () => {
 
     // 环线尚 2 站而快线只剩 1 站，但 540 s < 600 s，故环线在前。
     const text = rowTextOf(host, '环线 3 路')
-    expect(text).toContain('距 2 站')
+    expect(text).toContain('2 站')
     expect(text).toContain('9 分钟')
     const order = boardOrder(host)
     expect(order.indexOf('环线 3 路')).toBeLessThan(order.indexOf('快线 1 路'))

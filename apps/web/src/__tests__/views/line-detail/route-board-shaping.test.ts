@@ -109,13 +109,6 @@ const SHUFFLED_STOPS: Station[] = [
   { id: 'st-乙', name: '乙站', order: 2, interchanges: [] },
 ]
 
-/** 同名两站：一个线路上合法地出现两次，认站必须靠 (名字, 站序) 这一对。 */
-const TWIN_STOPS: Station[] = [
-  { id: 'tw-a1', name: '甲站', order: 2, interchanges: [] },
-  { id: 'tw-b', name: '乙站', order: 5, interchanges: [] },
-  { id: 'tw-a2', name: '甲站', order: 7, interchanges: [] },
-]
-
 /** 52 路的收藏行：存的是上游方向 0 的 lineId，自己把它编号成方向 1，早上坐的是方向 0。 */
 const FAVOURITE = {
   id: 'fav-52',
@@ -361,24 +354,6 @@ describe('F6 · 站台面板与上车点角标', () => {
     // 缺分钟的一行不得被造出一个数字：这里没有「预计 N 分钟」这种陈述。
     expect(withoutMinute.text()).not.toMatch(/预计\s*\d+\s*分钟/)
     withoutMinute.unmount()
-  })
-
-  it('同名的两站里恰有一个算这个目的的上车点：认站靠(名字, 站序)这一对', async () => {
-    const host = await mountDetail({
-      lineId: UP,
-      direction: '1',
-      stops: TWIN_STOPS,
-      favourites: [FAVOURITE],
-    })
-
-    // 收藏行存的是 (甲站, 第 2 站)：这一个才是上车点。
-    await openStation(host, 0)
-    expect(host.text()).toContain('上班上车点 ✓')
-    await press(host, host.node(item => item.props['data-role'] === 'board-station-2', 'the twin station'))
-    // 同名但站序不同：它不是使用者选的那一站，绝不能被一起标上。
-    expect(host.text()).toContain('设为上班上车点')
-    expect(host.text()).not.toContain('上班上车点 ✓')
-    host.unmount()
   })
 
   it('当前方向的角标恰有一个；切到反方向后一个也没有', async () => {

@@ -63,6 +63,18 @@ function servedMinuteOf(bus: LiveBus): number | null {
  * `answer: null` 只表示请求失败；到达了响应但没有读数（线路 404、车列表为空）是
  * 「已作答、范围内无车」，此时陈述线路的运营事实而非失败。
  */
+/**
+ * 车到本站台的道路距离：所请求站自起点累计的路线距 − 车自起点的连续位置。
+ *
+ * 两端任何一个缺失都没有可陈述的距离（数据源没有轨迹、或这条读数没带连续位置），
+ * 返回 null 而**不**退回站数估 —— 那正是本仓禁止的「看着像真值的估算」。
+ */
+function distanceToStation(bus: LiveBus, stationDistanceMeters: number | null): number | null {
+  if (typeof bus.distanceFromStart !== 'number' || !Number.isFinite(bus.distanceFromStart)) return null
+  if (typeof stationDistanceMeters !== 'number' || !Number.isFinite(stationDistanceMeters)) return null
+  return Math.max(0, stationDistanceMeters - bus.distanceFromStart)
+}
+
 export function departureRowOf(params: {
   /** 行的 id，由调用方按其来源规则构造。 */
   id: string
@@ -80,6 +92,7 @@ export function departureRowOf(params: {
       ...base,
       etaMinutes: null,
       stopsAway: null,
+      distanceMeters: null,
       congestion: 'unknown',
       unavailable: true,
       operatingText: null,
@@ -95,6 +108,7 @@ export function departureRowOf(params: {
       ...base,
       etaMinutes: null,
       stopsAway: null,
+      distanceMeters: null,
       congestion: 'unknown',
       unavailable: false,
       operatingText: rule.operatingText,
@@ -110,6 +124,8 @@ export function departureRowOf(params: {
     // 从车头到本站台的站数，下限 1——与服务端定价到站行
     // 用同一算式，两个界面不会数出不同结果。
     stopsAway: Math.max(1, rule.stationOrder - (bus.nextOrder ?? bus.order!)),
+    // 距离由道路几何得出；两端任何一个缺失都不陈述（见 `distanceToStation`）。
+    distanceMeters: distanceToStation(bus, rule.stationDistanceMeters),
     // 拥挤度判决属于车辆自己，无分钟时依然成立。
     congestion: bus.congestion,
     unavailable: false,

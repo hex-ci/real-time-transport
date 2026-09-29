@@ -52,6 +52,12 @@ describe('the failed-request row states its failure once', () => {
     expect(board).toContain('congestionLabel(item.congestion)')
   })
 
+  it('does not render the chip at all on a failed row — 「无法获取」与「未知」不同行', () => {
+    // 同一行不能同时说「这趟车取不到」和「这趟车未知」：芯片按 `!item.unavailable` 才渲染
+    // （F5：拥挤度不与行自己的失败并存）。
+    expect(board).toContain('v-if="!item.unavailable"')
+  })
+
   it('marks exactly the failed row as unavailable', () => {
     // 一个状态，设在行构造器里一次。有车的行与有运营事实的行都有答案；
     // 只有请求失败的那行不可用。

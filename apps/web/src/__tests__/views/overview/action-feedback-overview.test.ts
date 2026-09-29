@@ -20,7 +20,6 @@ import OverviewPage from '../../../views/overview/index.vue'
  */
 
 const { pushed } = vi.hoisted(() => ({ pushed: [] as string[] }))
-const { routed } = vi.hoisted(() => ({ routed: [] as string[] }))
 
 vi.mock('vue-sonner', () => ({
   toast: Object.assign(
@@ -30,14 +29,6 @@ vi.mock('vue-sonner', () => ({
     },
     { dismiss: () => {}, custom: () => {} },
   ),
-}))
-
-vi.mock('vue-router', () => ({
-  useRouter: () => ({
-    push: (target: { path?: string }) => {
-      routed.push(String(target?.path ?? ''))
-    },
-  }),
 }))
 
 const LINE_NAME = '快线 1 路'
@@ -102,7 +93,6 @@ function routes(pinned = false, ...overrides: Route[]): Route[] {
 
 async function mountOverview(pinned = false, ...overrides: Route[]): Promise<MountedHost> {
   pushed.length = 0
-  routed.length = 0
   const host = await mountComponent(OverviewPage, {
     routes: routes(pinned, ...overrides),
     components: { RouterLink: RouterLinkStub },
@@ -123,12 +113,14 @@ function pinButton(host: MountedHost, pinned: boolean): HostElement {
   )
 }
 
-/** 卡片自己的点击面：那一枚置顶控件带着 `@click.stop`，故它的根会接下卡片的一次点按。 */
-function cardSurface(host: MountedHost, pinned: boolean): HostElement {
-  let node: HostElement | null = pinButton(host, pinned).parent
-  while (node && node.props.onClick === undefined) node = node.parent
-  if (!node) throw new Error('the card renders no click surface of its own')
-  return node
+/** 卡片主体那枚链接：指向线路详情，与操作栏里那格「线路详情」是两处入口。 */
+function cardBodyLink(host: MountedHost): HostElement {
+  return host.node(
+    (node: HostElement) => node.tag === 'a'
+      && String(node.props.href ?? '').startsWith('/line/')
+      && !host.textOf(node).includes('线路详情'),
+    'the card body link',
+  )
 }
 
 /** 某一档里那枚模式按钮。 */
@@ -185,20 +177,20 @@ describe('屏幕上立刻看得见的动作一个字都不推', () => {
     host.unmount()
   })
 
-  it('点卡片：那是一次导航，不是一次写入', async () => {
+  it('点卡片主体：那是一次导航，不是一次写入', async () => {
     const host = await mountOverview()
 
-    await press(host, cardSurface(host, false))
+    const link = cardBodyLink(host)
 
-    // 它确实导航了（故这一条不是空转），而一个提示都没有。
-    expect(routed).toEqual([`/line/${LINE_ID}`])
+    // 它确实是一条通往详情的链接（故这一条不是空转），而一个提示都没有。主体是真正的链接而不是
+    // 脚本跳转 —— 键盘可达与「在新标签页打开」都来自这一点。
+    expect(link.props.href).toBe(`/line/${LINE_ID}?direction=0&cityCode=027`)
     expect(pushed).toEqual([])
     host.unmount()
   })
 
   it('换城市：那一行自己换了样，故不推话', async () => {
     const host = await mountOverview()
-    routed.length = 0
 
     host.city.setCity('010')
 

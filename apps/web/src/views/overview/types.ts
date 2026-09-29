@@ -77,11 +77,10 @@ export interface MiniCardConfig {
   legState: CommuteLegState | null
   primaryDirection: 0 | 1 | null
   /**
- * 点按卡片去哪里：一条线路无论用户有没有为它配好通勤段都看得了，所以这来自关注行，绝不来自
- * `rows`（后者在方向未选或详情未加载时合法地是空的）。
+ * 卡片主体作为链接指向的地址 —— 线路详情。由调用方拼好：一条线路无论用户有没有为它配好
+ * 通勤段都看得了，所以这来自关注行，绝不来自 `rows`（后者在方向未选或详情未加载时合法地是空的）。
  */
-  detailLineId: string
-  detailDirection: 0 | 1
+  detailHref: string
   /** 这张卡片属于哪个关注，使一次方向选择能记在它上面。 */
   favoriteId: string | null
 }

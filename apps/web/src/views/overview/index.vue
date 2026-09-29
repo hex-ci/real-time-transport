@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { House, LocateFixed, Building2, Wand2, TriangleAlert } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
@@ -28,7 +27,6 @@ import {
 import type { ReadState } from '@/read-state'
 import { runWithFeedback } from '@/action-feedback'
 
-const router = useRouter()
 const transitStore = useTransitStore()
 const locationStore = useLocationStore()
 const cityStore = useCityStore()
@@ -361,8 +359,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         rows,
         legState: null,
         primaryDirection: nearbyPrimaryDirection(f, both, rows),
-        detailLineId: rows[0]?.lineId ?? f.lineId,
-        detailDirection: rows[0]?.direction ?? 0,
+        detailHref: detailHrefOf(rows[0]?.lineId ?? f.lineId, rows[0]?.direction ?? 0),
         favoriteId: f.id ?? null,
       })
       continue
@@ -389,8 +386,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         rows: [],
         legState: commuteLegStateOf({ direction: null, stop: boardStop, stops: undefined }),
         primaryDirection: null,
-        detailLineId: f.lineId,
-        detailDirection: (f.preferredDirection === 1 ? 1 : 0) as 0 | 1,
+        detailHref: detailHrefOf(f.lineId, (f.preferredDirection === 1 ? 1 : 0) as 0 | 1),
         favoriteId: f.id ?? null,
       })
       continue
@@ -421,8 +417,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
       // 通勤卡片只有一行，所以领起的就是那一行，无论如何。
       primaryDirection: null,
       // 方向在这里是选了的，但上车点可能未设：回退到该方向自己的 lineId，使卡片两种情况都点得动。
-      detailLineId: resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId,
-      detailDirection: direction,
+      detailHref: detailHrefOf(resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId, direction),
       favoriteId: f.id ?? null,
     })
   }
@@ -523,11 +518,18 @@ async function refreshAllArrivals(): Promise<void> {
   arrivalsMap.value = nextMap
 }
 
-function goToDetail(lineId: string, direction: number): void {
-  router.push({
-    path: `/line/${encodeURIComponent(lineId)}`,
-    query: { direction: String(direction), cityCode: cityStore.currentCode },
+/**
+ * 卡片主体作为链接指向的线路详情地址。
+ *
+ * 一条线路的详情地址由「线路 id + 方向 + 城市」三件事决定，而它们都在这里定：线路 id 与方向
+ * 来自卡片自己那一段通勤（没配好时回退到关注行的锚点），城市取当下选中的那个。
+ */
+function detailHrefOf(lineId: string, direction: 0 | 1): string {
+  const qs = new URLSearchParams({
+    direction: String(direction),
+    cityCode: cityStore.currentCode,
   })
+  return `/line/${encodeURIComponent(lineId)}?${qs.toString()}`
 }
 
 /**
@@ -831,7 +833,6 @@ onMounted(() => {
       :mode="currentMode"
       :arrivals="arrivalsMap"
       :nearby-location="nearbyLocation"
-      @open="goToDetail"
       @switch-direction="onSwitchDirection"
       @toggle-pin="onTogglePin"
     />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ArrowLeftRight, Pin, PinOff } from '@lucide/vue'
+import { ArrowLeftRight, ChevronRight, Pin, PinOff } from '@lucide/vue'
 import { statedArrivalMinutes } from '@real-time-transport/shared/departure'
 import type { DepartureReference } from '@real-time-transport/shared/departure'
 import { referenceLineOf } from '../reference-line'
@@ -22,6 +22,12 @@ const props = defineProps<{
    * 都没解析出来」的情形（没设上车点、或这里没有站台）。
    */
   directionName: string
+  /**
+   * 卡片主体作为链接指向的地址 —— 线路详情。由调用方拼好：一条线路无论用户有没有为它配好
+   * 通勤段都看得了，所以它来自关注行，绝不来自 `rows`（后者在方向未选或详情未加载时合法地
+   * 是空的）。
+   */
+  detailHref: string
   /** 正在报告的那个站：通勤模式是上车点，附近模式是定位到的站台。 */
   stopName: string | null
   /** 到那个站的 GPS 距离，米 —— 仅附近模式。 */
@@ -58,8 +64,7 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
-  (e: 'click'): void
-  /** 用户点按了尾部那个方向，把它提上来。 */
+  /** 用户点按了操作栏那一格，要求改用另一个方向领起。 */
   (e: 'switch-direction', direction: 0 | 1): void
   /** 用户点了置顶控件：钉住这张卡片，或在它已被钉住时取消钉住。 */
   (e: 'toggle-pin'): void
@@ -323,22 +328,21 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 </script>
 
 <template>
+  <!-- 卡片是两个区域：主体（通往线路详情的链接）与底部操作栏。动作全在操作栏里，主体只负责
+       「看这条线路」，两者不抢同一个手势。
+       纵向 flex：网格把同一行的卡片拉成等高，主体吃掉富余高度，操作栏因此始终贴着卡片底边 ——
+       内容不足的卡片不会把操作栏留在半空。 -->
   <div
-    class="group relative cursor-pointer overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition hover:bg-slate-900"
+    class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition hover:bg-slate-900"
     :class="accent.hoverBorder"
-    @click="$emit('click')"
   >
-    <!-- 置顶标记：卡片自己顶边上的一条。刻意中性 —— 青色/琥珀色强调的是线路「类型」，
-         借用其中任一的状态标记会被读成另一种线路。 -->
-    <div
-      v-if="isPinned"
-      class="flex items-center gap-1.5 bg-slate-800/90 px-4 py-1.5 text-xs font-semibold text-slate-100"
+    <!-- 主体是真正的链接：可聚焦、键盘可开、辅助技术读得出「这里通往线路详情」。原先它是一个
+         挂着 click 的 div —— 键盘打不开，屏幕阅读器也不认为它可操作。 -->
+    <RouterLink
+      :to="detailHref"
+      class="block flex-1 p-4 transition focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-400"
+      :aria-label="`查看${lineName}线路详情`"
     >
-      <Pin class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>置顶</span>
-    </div>
-
-    <div class="p-4">
       <!-- 卡片头部 -->
       <div class="flex items-center justify-between">
         <div class="flex min-w-0 items-center gap-2.5">
@@ -374,24 +378,6 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             ></span>
             {{ aheadBadgeText }}
           </span>
-
-          <!-- 置顶入口与取消，都在卡片上：这个开关点名它执行的动作，所以被钉住的卡片自带从顶上退
-               下来的路。按项目对次要控件的 40px 下限 —— 卡片主体是打开详情，所以过小的点按
-               目标会换来一次错误的跳转。 -->
-          <button
-            type="button"
-            class="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition"
-            :class="isPinned
-              ? 'border-slate-600 bg-slate-800 text-slate-100'
-              : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:bg-slate-700 hover:text-slate-100'"
-            :aria-label="isPinned ? '取消置顶' : '置顶此线路'"
-            :title="isPinned ? '取消置顶' : '置顶此线路'"
-            :aria-pressed="isPinned"
-            @click.stop="$emit('toggle-pin')"
-          >
-            <PinOff v-if="isPinned" class="h-4 w-4" aria-hidden="true" />
-            <Pin v-else class="h-4 w-4" aria-hidden="true" />
-          </button>
         </div>
       </div>
 
@@ -450,21 +436,15 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             {{ primaryOperatingText }}
           </div>
 
-          <!-- 同一个站台上的反方向。点按它把那个方向提到头条；标签说出它开往哪里，所以两行从不
-               含糊。 -->
-          <button
+          <!-- 同一个站台上的反方向。它只报告那个方向的到站情况，不再自己承担动作 —— 切换方向
+               在下面的操作栏里。原先它是一个按钮，于是与卡片主体成了嵌套的两个可点区域：
+               手指差几像素就是另一个动作。标签说出它开往哪里，所以两行从不含糊。 -->
+          <div
             v-if="secondaryRow"
-            type="button"
-            class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs transition lg:gap-2.5 lg:pt-2.5 lg:text-base"
-            :class="canSwitch ? 'cursor-pointer hover:opacity-80 active:scale-[0.99]' : 'cursor-default'"
-            :disabled="!canSwitch"
-            :aria-label="canSwitch
-              ? `切换到${secondaryRow.directionName}方向`
-              : undefined"
-            @click.stop="canSwitch && $emit('switch-direction', secondaryRow.direction)"
+            class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs lg:gap-2.5 lg:pt-2.5 lg:text-base"
           >
             <span class="flex min-w-0 items-center gap-1 text-slate-400">
-              <ArrowLeftRight v-if="canSwitch" class="h-3 w-3 shrink-0" aria-hidden="true" />
+              <ArrowLeftRight class="h-3 w-3 shrink-0" aria-hidden="true" />
               <span class="truncate">{{ secondaryRow.directionName }}</span>
             </span>
             <span class="flex shrink-0 items-baseline gap-1.5">
@@ -482,7 +462,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
               </template>
               <span v-else class="text-slate-400">{{ secondaryOperatingText }}</span>
             </span>
-          </button>
+          </div>
 
           <!-- 首行的后续车次。feed 混了种类时每行说出自己的种类（F4）；一个词对整个列表成立时它
                已经搭在上面首行的分钟上。`flex-wrap` 使标记在 375px 手机上不挤压分钟数。 -->
@@ -519,6 +499,44 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
           </div>
         </div>
       </template>
+    </RouterLink>
+
+    <!-- 操作栏：这张卡片的动作归属地。每格等宽、各自 ≥44px，故三个动作互不误触，也不与「点
+         主体看详情」抢同一个手势。置顶按下的状态由那一格自己表示。 -->
+    <div class="flex items-stretch border-t border-slate-800/80 bg-slate-950/45">
+      <button
+        type="button"
+        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        :class="isPinned ? 'bg-cyan-500/8 text-cyan-400' : ''"
+        :aria-label="isPinned ? '取消置顶' : '置顶此线路'"
+        :aria-pressed="isPinned"
+        @click="$emit('toggle-pin')"
+      >
+        <PinOff v-if="isPinned" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <Pin v-else class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{{ isPinned ? '已置顶' : '置顶' }}</span>
+      </button>
+
+      <!-- 切换方向只在真的有另一个方向时成立；单向线路上这一格说不出它要切到哪儿，故不摆。 -->
+      <button
+        v-if="canSwitch"
+        type="button"
+        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        :aria-label="`切换到${secondaryRow?.directionName}方向`"
+        @click="$emit('switch-direction', secondaryRow!.direction)"
+      >
+        <ArrowLeftRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>切换方向</span>
+      </button>
+
+      <RouterLink
+        :to="detailHref"
+        class="flex min-h-11 flex-1 items-center justify-center gap-1.5 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        :aria-label="`查看${lineName}线路详情`"
+      >
+        <span>线路详情</span>
+        <ChevronRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      </RouterLink>
     </div>
   </div>
 </template>

@@ -15,7 +15,6 @@ defineProps<{
 }>()
 
 defineEmits<{
-  (e: 'open', lineId: string, direction: number): void
   (e: 'switch-direction', card: MiniCardConfig, direction: 0 | 1): void
   (e: 'toggle-pin', card: MiniCardConfig): void
 }>()
@@ -25,12 +24,13 @@ defineEmits<{
   <!-- 流式响应网格：手机 1 列到超宽 4 列。间距跟随页面节奏（space-y），使卡片之间与导航到主区之间一致。 -->
   <div class="grid grid-cols-1 gap-2.5 sm:gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
     <!-- 用关注行自己的 id 做 key，不用下标：置顶会在运行时重排这个列表，用下标会让每张被挪动
-        的卡片卸载再挂载。`mode` 作为区分符留下；卡片背后没有关注行时用 detailLineId 兜底。 -->
+        的卡片卸载再挂载。`mode` 作为区分符留下；卡片背后没有关注行时用详情地址兜底。 -->
     <LineMiniCard
       v-for="line in cards"
-      :key="`${line.favoriteId ?? line.detailLineId}_${mode}`"
+      :key="`${line.favoriteId ?? line.detailHref}_${mode}`"
       :line-name="line.lineName"
       :direction-name="line.directionName"
+      :detail-href="line.detailHref"
       :stop-name="line.stopName"
       :stop-distance-meters="line.stopDistanceMeters"
       :rows="line.rows.map(r => ({
@@ -44,7 +44,6 @@ defineEmits<{
       :detail-loaded="line.detailLoaded"
       :is-subway="line.isSubway"
       :is-pinned="line.isPinned"
-      @click="$emit('open', line.detailLineId, line.detailDirection)"
       @switch-direction="$emit('switch-direction', line, $event)"
       @toggle-pin="$emit('toggle-pin', line)"
     />

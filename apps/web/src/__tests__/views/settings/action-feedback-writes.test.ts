@@ -287,8 +287,8 @@ describe('关注线路：五个写操作各说一句（两个在列表页，三�
     await save(host)
 
     expect(messages()).toEqual(['保存失败 · 该站不在本方向停靠'])
-    // 内联那一份仍在，它才是持久的那份记录。
-    expect(host.text()).toContain('该站不在本方向停靠')
+    // 操作反馈只说一次：页上不再留第二处。
+    expect(host.text()).not.toContain('该站不在本方向停靠')
     host.unmount()
   })
 
@@ -432,7 +432,7 @@ describe('位置锚点：保存各说一句', () => {
     host.unmount()
   })
 
-  it('被拒：说一句未能保存，且指向定位权限', async () => {
+  it('被拒：说一句未能保存', async () => {
     const host = await mountAnchorPage([
       /\/api\/transit\/settings/,
       request => (request.method === 'PATCH'
@@ -443,7 +443,9 @@ describe('位置锚点：保存各说一句', () => {
     await searchAndSelect(host)
     await press(host, saveButton(host))
 
-    expect(messages()).toEqual(['未能保存「家」的位置，请检查定位权限后重试'])
+    // 「写入失败」是页面自己的缺省句（以「失败」收尾），故不再说一遍；
+    // 服务端把成因写成一整句时它才会跟上来（见 action-feedback.test.ts）。
+    expect(messages()).toEqual(['未能保存「家」的位置'])
     host.unmount()
   })
 })
@@ -467,7 +469,9 @@ describe('通勤时段：保存各说一句', () => {
     await press(host, host.node(item => item.tag === 'button' && host.textOf(item).includes('保存时段'), 'the save button'))
 
     expect(messages()).toEqual(['通勤时段保存失败'])
-    expect(host.text()).toContain('写入失败')
+    // 只说一次：页上不留第二处，「已保存」也不出现。
+    expect(host.text()).not.toContain('写入失败')
+    expect(host.text()).not.toContain('已保存')
     host.unmount()
   })
 })

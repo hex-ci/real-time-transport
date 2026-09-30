@@ -30,6 +30,19 @@ vi.mock('vue-router', () => ({
   }),
 }))
 
+/** 推出去的提示：操作反馈只说在这里，页上不再留第二处。 */
+const { messages } = vi.hoisted(() => ({ messages: [] as string[] }))
+
+vi.mock('vue-sonner', () => ({
+  toast: Object.assign(
+    (message: string) => {
+      messages.push(message)
+      return messages.length
+    },
+    { dismiss: () => {}, custom: () => {} },
+  ),
+}))
+
 /**
  * F2 的两段式：`/settings/anchors` 两行整行可点，每个锚点自己一页（搜索 → 选中 → 保存）。
  *
@@ -375,6 +388,7 @@ describe('锚点页：选中不写库，保存才写', () => {
 
   it('保存失败留在这一页：跳走会把原因也带走', async () => {
     pushedRoutes.length = 0
+    messages.length = 0
     const host = await mountDetail()
     host.server.on(/\/api\/transit\/settings/, () => ({ success: false, error: '写入失败' }))
     await search(host)
@@ -382,7 +396,8 @@ describe('锚点页：选中不写库，保存才写', () => {
     await press(host, saveButton(host))
     await host.flush()
 
-    expect(host.text()).toContain('写入失败')
+    // 原因由 toast 带着说，且这一页不跳走 —— 跳走那句话就没地方读了。
+    expect(messages).toEqual(['未能保存「家」的位置'])
     expect(pushedRoutes).toEqual([])
     host.unmount()
   })
@@ -422,14 +437,16 @@ describe('锚点页：选中不写库，保存才写', () => {
     host.unmount()
   })
 
-  it('写库被拒：留在页面上说出原因，且不说成保存成功', async () => {
+  it('写库被拒：说一句带原因的话，且不说成保存成功', async () => {
+    messages.length = 0
     const host = await mountDetail()
     host.server.on(/\/api\/transit\/settings/, () => ({ success: false, error: '写入失败' }))
     await search(host)
     await press(host, resultRows(host)[0]!)
     await press(host, saveButton(host))
 
-    expect(host.text()).toContain('写入失败')
+    expect(messages).toEqual(['未能保存「家」的位置'])
+    expect(host.text()).not.toContain('已保存')
     host.unmount()
   })
 })
@@ -455,15 +472,16 @@ describe('锚点页：两处入口汇进同一个保存动作', () => {
     host.unmount()
   })
 
-  it('用当前位置失败：留在页上说出原因，且不写库、不跳走', async () => {
+  it('用当前位置失败：说一句带原因的话，且不写库、不跳走', async () => {
     pushedRoutes.length = 0
+    messages.length = 0
     const host = await mountDetail({ search: 'empty' })
     await search(host)
     host.server.on(/\/api\/transit\/settings/, () => ({ success: false, error: '写入失败' }))
     await press(host, control(host, '用当前位置'))
     await host.flush()
 
-    expect(host.text()).toContain('写入失败')
+    expect(messages).toEqual(['未能保存「家」的位置'])
     expect(pushedRoutes).toEqual([])
     host.unmount()
   })

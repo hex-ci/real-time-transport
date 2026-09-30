@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { House, LocateFixed, Building2, Wand2, TriangleAlert } from '@lucide/vue'
+import { House, LocateFixed, Building2, Wand2, TriangleAlert, ChevronRight } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
 import {
   useTransitStore,
@@ -173,9 +173,6 @@ function onSwitchDirection(card: MiniCardConfig, direction: 0 | 1): void {
   setPrimaryDirection(card.favoriteId, direction)
 }
 
-/** 上一次置顶写入失败的原因，显示在网格上方。 */
-const pinError = shallowRef<string | null>(null)
-
 /**
  * 置顶写入仍在途的那个关注。
  *
@@ -196,12 +193,12 @@ const pinMotionTargetId = shallowRef<string | null>(null)
  * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
  * 都在首页卡片上。
  *
- * 写入失败已经由 store 回滚，所以原因在这里浮出来，而不是让卡片无声地停在原处。
+ * 成与败各说一句（`runWithFeedback` 推到 toast 上），页上不再留第二处：卡片本身会被 store 回滚，
+ * 那一下的样式变化就是记录。
  */
 async function onTogglePin(card: MiniCardConfig): Promise<void> {
   const favoriteId = card.favoriteId
   if (!favoriteId || pinningFavoriteId.value === favoriteId) return
-  pinError.value = null
   pinningFavoriteId.value = favoriteId
   // 与 store 的乐观写入落在同一个 tick，于是列表的重排与这个点名同批渲染 —— 动画因此拿得到
   // 「重排前」的坐标。
@@ -214,8 +211,8 @@ async function onTogglePin(card: MiniCardConfig): Promise<void> {
       { name: card.lineName },
     )
   }
-  catch (err) {
-    pinError.value = err instanceof Error ? err.message : '置顶设置失败'
+  catch {
+    // 失败的原因已经由 toast 说过一次；这里只是接住那个重抛，别让它变成未处理的拒绝。
   }
   finally {
     pinningFavoriteId.value = null
@@ -688,11 +685,11 @@ onMounted(() => {
         <!-- 模式切换（自动/上班/下班/附近）。 -->
         <div
           v-if="canSwitchAny"
-          class="flex h-11 min-w-max-content flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0 shadow-sm"
+          class="flex h-11 min-w-max flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0 shadow-sm"
         >
           <!-- 自动：把控制权交回配置的通勤时段。用户没有为当前时段钉住模式时它处于选中态。 -->
           <button
-            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            class="flex h-11 min-w-max flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
             :class="!isManual ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
             :title="`自动：按通勤时段判断（当前 ${autoModeLabel}）`"
             @click="useAutoMode"
@@ -700,35 +697,27 @@ onMounted(() => {
             <span>自动</span>
           </button>
           <button
-            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            class="flex h-11 min-w-max flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
             :class="currentMode === 'morning' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
             @click="setMode('morning')"
           >
             <span>上班</span>
           </button>
           <button
-            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            class="flex h-11 min-w-max flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
             :class="currentMode === 'evening' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
             @click="setMode('evening')"
           >
             <span>下班</span>
           </button>
           <button
-            class="flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
+            class="flex h-11 min-w-max flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium whitespace-nowrap transition"
             :class="currentMode === 'nearby' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-300 hover:text-slate-100'"
             @click="setMode('nearby')"
           >
             <span>附近</span>
           </button>
         </div>
-
-        <!-- 从未存过通勤时段的用户：只说这一句，且它不是可点之物。存过即无。 -->
-        <p
-          v-if="commuteWindowUnset"
-          class="shrink-0 text-xs font-medium text-amber-400"
-        >
-          ⚠ 未设置通勤时段
-        </p>
 
         <button
           type="button"
@@ -749,9 +738,25 @@ onMounted(() => {
           @refresh="onRefresh"
         />
       </div>
+      <!-- 本页的提示位：工具行之下。本页的提示一律进这里，不进工具行 ——
+           工具行只有模式切换与两枚动作，提示挤进去会把档位压到它自己的字以下。 -->
+      <div data-prompt-area="narrow">
+        <RouterLink
+          v-if="commuteWindowUnset"
+          to="/settings/schedule"
+          class="mt-2 flex min-h-11 items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 text-amber-300 transition hover:bg-amber-500/20 active:scale-95"
+        >
+          <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span class="min-w-0 flex-1 text-xs font-medium">未设置通勤时段</span>
+          <span class="flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-400">
+            去设置
+            <ChevronRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          </span>
+        </RouterLink>
+      </div>
     </div>
 
-    <!-- 宽屏（≥768）：一行 —— 模式与提示在左，定位与刷新两枚图标按钮贴着卡片右内边。 -->
+    <!-- 宽屏（≥768）：一行 —— 模式与两枚图标按钮贴在卡片右内边。 -->
     <div
       data-info-area="wide"
       class="hidden md:block relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/30 p-3.5 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-5 md:p-6"
@@ -799,14 +804,6 @@ onMounted(() => {
           </button>
         </div>
 
-        <!-- 从未存过通勤时段的用户：只说这一句，且它不是可点之物。存过即无。 -->
-        <p
-          v-if="commuteWindowUnset"
-          class="shrink-0 text-xs font-medium text-amber-400"
-        >
-          ⚠ 未设置通勤时段
-        </p>
-
         <button
           type="button"
           aria-label="定位最近站"
@@ -826,18 +823,22 @@ onMounted(() => {
           @refresh="onRefresh"
         />
       </div>
+      <!-- 提示位：与窄屏那一份同一个位置（工具行之下），故两档说的是同一件事、同一个入口。 -->
+      <div data-prompt-area="wide">
+        <RouterLink
+          v-if="commuteWindowUnset"
+          to="/settings/schedule"
+          class="mt-2.5 flex min-h-11 items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 text-amber-300 transition hover:bg-amber-500/20 active:scale-95"
+        >
+          <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span class="min-w-0 flex-1 text-xs font-medium">未设置通勤时段</span>
+          <span class="flex shrink-0 items-center gap-1 text-xs font-semibold text-amber-400">
+            去设置
+            <ChevronRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          </span>
+        </RouterLink>
+      </div>
     </div>
-
-    <!-- 一次失败的置顶写入：store 已经把卡片回滚了，所以原因就是唯一剩下要说的话。
-         role="alert" 把它作为状态消息播报，而不是让它等着被注意到。 -->
-    <p
-      v-if="pinError"
-      role="alert"
-      class="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400 lg:gap-2 lg:text-base"
-    >
-      <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{{ pinError }}</span>
-    </p>
 
     <!-- 卡片网格：流式响应网格，手机 1 列到超宽 4 列。间距跟随页面节奏（space-y），使卡片之间
          与导航到主区之间一致。 -->

@@ -11,7 +11,7 @@
  * 名字 —— 故名字取「显式名优先，其次可见文字」，再要求名字里含有可见文字。真正会被抓到的是
  * 两类缺陷：有可见文字却给了**另一句话**的 aria-label，以及只有图标的控件根本没有名字。
  */
-import { WEB_ORIGIN, goto, pageEval, waitForValue, cli, delay } from '../harness.mjs'
+import { WEB_ORIGIN, goto, pageEval, waitForValue, cli, delay, api, apiData } from '../harness.mjs'
 
 export const name = '移动端可访问性'
 
@@ -157,6 +157,7 @@ export async function run({ check, equal, note, fixtures }) {
         hasFreshness: /最后更新/.test(bar.innerText),
         tops: [...new Set(controls.map(el => Math.round(el.getBoundingClientRect().top)))],
         rowHeight: Math.round(bar.getBoundingClientRect().height),
+        boxMinWidth: getComputedStyle([...bar.children].find(el => String(el.className).includes('overflow-hidden')) ?? bar).minWidth,
         overflow: document.documentElement.scrollWidth > window.innerWidth,
       }
     })())`)
@@ -174,7 +175,75 @@ export async function run({ check, equal, note, fixtures }) {
       JSON.stringify({ tops: bar.tops, rowHeight: bar.rowHeight }),
     )
     check(`${area.name} 窄屏没有横向溢出`, bar.overflow === false, JSON.stringify(bar))
+    // 宽度下限必须是框架里真有的那一档：`min-w-max`（→ `max-content`）。名字像而**不是**类的那个
+    // （`min-w-max-content`：本版主题里没有这一档）不生成任何规则，computed 会退回 `0px` ——
+    // 容器于是可以被压到比它的四个档位还窄，而那是裁字，不是换行。
+    check(
+      `${area.name} 模式容器的宽度下限是真的（computed = max-content）`,
+      bar.boxMinWidth === 'max-content',
+      JSON.stringify(bar.boxMinWidth),
+    )
     note(`${area.name} 工具栏控件：${JSON.stringify(bar.controls)}`)
+  }
+
+  // 通勤时段没设过时那句提示：它必须**不**在工具行里，且模式容器一个字都不许被裁。
+  //
+  // 钉的是一件真被踩到的事：提示原来与模式切换同处一行，而模式容器是 `flex-1` + `overflow:hidden`
+  // （滚动容器的自动最小尺寸是 0），于是它被压到比四个档位还窄 —— 375 上「附近」整格看不见。
+  // 上面那条「没有横向溢出」量的是**页面**的溢出，裁在容器里的事它看不见，故一直绿着；
+  // 这里量的是容器自己的 `scrollWidth - clientWidth`。
+  {
+    const before = await apiData('/api/transit/settings')
+    const hours = {
+      morningStart: before.morningStart,
+      morningEnd: before.morningEnd,
+      eveningStart: before.eveningStart,
+      eveningEnd: before.eveningEnd,
+    }
+    await api('/api/transit/settings', {
+      method: 'PATCH',
+      body: { morningStart: null, morningEnd: null, eveningStart: null, eveningEnd: null },
+    })
+    try {
+      await goto(`${WEB_ORIGIN}/`)
+      await waitForValue(
+        `JSON.stringify(document.querySelector('[data-prompt-area="narrow"]')?.getBoundingClientRect().height ?? 0)`,
+        height => typeof height === 'number' && height > 0,
+        { what: '未设置通勤时段的提示就位', timeout: 20_000 },
+      )
+      const probe = await pageEval(`JSON.stringify((() => {
+        const bar = [...document.querySelectorAll('[data-toolbar]')].find(el => el.getBoundingClientRect().height > 1)
+        const box = [...bar.children].find(el => el.innerText.includes('自动'))
+        const area = [...document.querySelectorAll('[data-prompt-area]')].find(el => el.getBoundingClientRect().height > 0)
+        const link = area?.querySelector('a')
+        return {
+          clipped: box.scrollWidth - box.clientWidth,
+          switchWords: ['自动', '上班', '下班', '附近'].filter(word => box.innerText.includes(word)),
+          inToolbar: bar.innerText.includes('未设置通勤时段'),
+          barWidth: Math.round(bar.getBoundingClientRect().width),
+          promptHref: link?.getAttribute('href') ?? null,
+          promptHeight: Math.round(link?.getBoundingClientRect().height ?? 0),
+          promptWidth: Math.round(link?.getBoundingClientRect().width ?? 0),
+          promptTop: Math.round(link?.getBoundingClientRect().top ?? 0),
+          barBottom: Math.round(bar.getBoundingClientRect().bottom),
+        }
+      })())`)
+
+      check('未设置通勤时段：四个档位一个都不被裁', probe.clipped === 0 && probe.switchWords.length === 4, JSON.stringify(probe))
+      check('未设置通勤时段：那一句不在工具行里', probe.inToolbar === false, JSON.stringify(probe))
+      check(
+        '未设置通勤时段：提示是工具行之下的整行 44px 入口',
+        probe.promptHref === '/settings/schedule'
+        && probe.promptHeight >= 44
+        && probe.promptWidth === probe.barWidth
+        && probe.promptTop >= probe.barBottom,
+        JSON.stringify(probe),
+      )
+      note(`未设置通勤时段时的工具栏：${JSON.stringify(probe)}`)
+    }
+    finally {
+      await api('/api/transit/settings', { method: 'PATCH', body: hours })
+    }
   }
 
   // 按下刷新要有回话：成功说「已刷新」，窗口没走完说剩余多少秒。

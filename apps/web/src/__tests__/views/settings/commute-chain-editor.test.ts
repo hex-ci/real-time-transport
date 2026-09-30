@@ -475,11 +475,6 @@ function refusalText(host: MountedHost): string | null {
   return found ? host.textOf(found) : null
 }
 
-function serverErrorText(host: MountedHost): string | null {
-  const found = host.nodes(item => 'data-chain-error' in item.props)[0]
-  return found ? host.textOf(found) : null
-}
-
 function recordWrites(host: MountedHost): Array<{ url: string, method: string, body: any }> {
   return host.server.requests.filter(request => request.url.startsWith('/api/transit/commute-chains')
     && request.method !== 'GET')
@@ -905,7 +900,7 @@ describe('写出去的东西，就是 PRD 要求服务端收到的东西', () =>
 })
 
 describe('服务端拒绝时如实报错', () => {
-  it('把 400 的消息原样显示，表单不关、列表不变', async () => {
+  it('把 400 的消息原样说一句，表单不关、列表不变', async () => {
     const host = await mountChainEditor({
       chains: [storedChain()],
       chainWrite: () => httpStatus(400, { success: false, error: '下车站的站序必须大于上车站的站序' }),
@@ -916,8 +911,9 @@ describe('服务端拒绝时如实报错', () => {
     await pickStation(host, 0, 'alight', '建国门', 4)
     await save(host)
 
-    expect(host.text()).toContain('下车站的站序必须大于上车站的站序')
-    expect(serverErrorText(host)).toBe('下车站的站序必须大于上车站的站序')
+    // 操作反馈只说在 toast 上：页上不再留第二处。
+    expect(pushed).toEqual(['链路保存失败 早上上班 · 下车站的站序必须大于上车站的站序'])
+    expect(host.text()).not.toContain('下车站的站序必须大于上车站的站序')
     // 表单仍带草稿开着，故无需重新输入任何内容。
     expect(nameField(host)).toBeDefined()
     expect(refusalText(host)).toBeNull()
@@ -946,7 +942,7 @@ describe('说过的句子不会留在原地，说着用户已经离开的状态'
     host.unmount()
   })
 
-  it('服务端拒绝之后改了草稿，那条服务端的消息也消失（它说的是改动前的草稿）', async () => {
+  it('服务端拒绝之后改了草稿，页上不留任何关于旧草稿的话', async () => {
     const host = await mountChainEditor({
       chains: [storedChain()],
       chainWrite: () => httpStatus(400, { success: false, error: '下车站的站序必须大于上车站的站序' }),
@@ -956,10 +952,11 @@ describe('说过的句子不会留在原地，说着用户已经离开的状态'
     await pickStation(host, 0, 'board', '东大桥', 3)
     await pickStation(host, 0, 'alight', '建国门', 4)
     await save(host)
-    expect(serverErrorText(host)).toBe('下车站的站序必须大于上车站的站序')
+    expect(pushed).toEqual(['链路保存失败 早上上班 · 下车站的站序必须大于上车站的站序'])
 
     await type(host, nameField(host), '早上上班（改）')
-    expect(serverErrorText(host)).toBeNull()
+    // 那句话只在 toast 上，页上从来没有过它，故也就没有「活得比草稿更久」的那种残留。
+    expect(host.text()).not.toContain('下车站的站序必须大于上车站的站序')
     host.unmount()
   })
 })
@@ -1659,7 +1656,7 @@ describe('链路的三处写操作成与败各说一句', () => {
     host.unmount()
   })
 
-  it('保存：被拒时带上服务端给的原因，内联那一份照旧留着', async () => {
+  it('保存：被拒时带上服务端给的原因，只说一次', async () => {
     const host = await mountChainEditor({
       chainWrite: () => ({ success: false, error: '一条链路至少要有一段乘车段' }),
     })
@@ -1667,7 +1664,7 @@ describe('链路的三处写操作成与败各说一句', () => {
     await save(host)
 
     expect(pushed).toEqual(['链路保存失败 早上上班 · 一条链路至少要有一段乘车段'])
-    expect(serverErrorText(host)).toBe('一条链路至少要有一段乘车段')
+    expect(host.text()).not.toContain('一条链路至少要有一段乘车段')
     host.unmount()
   })
 

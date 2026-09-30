@@ -262,14 +262,14 @@ onMounted(() => {
           <RadioGroupRoot
             aria-label="通勤目的"
             :model-value="purpose"
-            class="flex h-11 min-w-max-content flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0"
+            class="flex h-11 min-w-max flex-1 items-center gap-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 p-0"
             @update:model-value="onPickPurpose"
           >
             <RadioGroupItem
               v-for="option in PURPOSES"
               :key="option.purpose"
               :value="option.purpose"
-              class="inline-flex h-11 min-w-max-content flex-1 items-center justify-center rounded-lg px-2.5 text-xs font-medium whitespace-nowrap text-slate-300 transition data-[state=checked]:bg-cyan-500/20 data-[state=checked]:text-cyan-300"
+              class="inline-flex h-11 min-w-max flex-1 items-center justify-center rounded-lg px-2.5 text-xs font-medium whitespace-nowrap text-slate-300 transition data-[state=checked]:bg-cyan-500/20 data-[state=checked]:text-cyan-300"
             >
               {{ option.label }}
             </RadioGroupItem>

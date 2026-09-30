@@ -54,23 +54,21 @@ const lastKeyword = shallowRef('')
  */
 const unreadableNote = followedLinesUnreadableText('暂时无法显示已关注的线路')
 
-/** 上一次排序写入的失败，好让被拒绝的拖放绝不沉默。 */
-const orderError = shallowRef<string | null>(null)
-
 /**
  * 落一次拖放：被拖动的行占据它落在其上的行的位置。
  *
  * 两行按**名字**而非下标命名，因为顺序是覆盖**每一条**已关注线路的一份列表，
  * 而本页一次只展示一个城市。对着整份列表解析这次落放，才让本页不展示的行保持它们自己的
  * 相对位置，而不是在用户背后被重编号。
+ *
+ * 成败由 toast 说一次：写入失败的顺序会弹回存储里的那个，列表自己跳回去就是那一下的记录。
  */
 async function onReorder(movedId: string, anchorId: string): Promise<void> {
-  orderError.value = null
   try {
     await runWithFeedback('favorite-reorder', () => transitStore.moveFavorite(movedId, anchorId))
   }
-  catch (err) {
-    orderError.value = err instanceof Error ? err.message : '顺序保存失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
 }
 
@@ -298,16 +296,6 @@ function editorHref(item: UserFavoriteLine): string {
 
       <p v-else class="mt-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-6 text-center text-xs text-slate-400 lg:p-7 lg:text-base">
         暂无关注线路，请在上方搜索框中搜索并添加线路
-      </p>
-
-      <!-- 落下的行立即被写入，故被拒绝的写入必须在此说明：列表已经弹回存储顺序，
-           否则会看起来像那次拖拽从未发生。 -->
-      <p
-        v-if="orderError"
-        class="mt-2 flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base"
-      >
-        <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-        <span>{{ orderError }}</span>
       </p>
     </section>
   </div>

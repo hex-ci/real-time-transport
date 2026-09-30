@@ -111,7 +111,8 @@ export const ACTION_FEEDBACK = {
   },
   'anchor-save': {
     ok: context => `已保存${quoted(context)}的位置`,
-    fail: context => `未能保存${quoted(context)}的位置，请检查定位权限后重试`,
+    // 服务端的拒绝（例如坐标不在服务范围内）与设备定位失败是两件事，故原文跟上来。
+    fail: context => `未能保存${quoted(context)}的位置${why(context)}`,
   },
   'chain-save': {
     ok: context => `已保存链路${named(context)}`,
@@ -170,7 +171,8 @@ export function announceActionFeedback(
  * 运行体解析为 `false` 表示这一次什么都没改变（例如该线路已经被关注），于是什么都不说 ——
  * 界面自己那一处已经陈述了那个状态，而「已关注」不是这一次按下的成绩。
  *
- * 重抛而不是吞掉：页面自己的内联提示仍是那份持久的记录（手机上它在屏外，故提示这一份要补上）。
+ * 重抛而不是吞掉：页面可以据此在字段旁留下持久的那一份（toast 几秒就走）。不留内联的页面自己
+ * 吞掉它 —— 例如首页的置顶，卡片自身被回滚就是记录，页上不再说第二遍。
  */
 export async function runWithFeedback<T>(
   action: FeedbackAction,
@@ -191,8 +193,11 @@ export async function runWithFeedback<T>(
 /**
  * 被拒的原文，或 `undefined`。
  *
- * 表里那句话已经说了这是一次失败，故只有点出具体成因的原文才跟上去：又一句「……失败」的话
- * 只是同一件事换个说法（store 与界面自己的缺省消息就是这一类），而逐字相同的那句更不必说两遍。
+ * 表里那句话已经说了这是一次失败，故只有点出具体成因的原文才跟上去：store 与界面自己的缺省
+ * 消息就是一句「……失败」（`保存失败`、`位置保存失败`），跟上去只是同一件事换个说法，而逐字
+ * 相同的那句更不必说两遍。判据是**整句就是它**（以「失败」收尾），而不是「含这两个字」——
+ * 服务端的拒绝会把成因写在一句话里（`家位置坐标为 (0, 0)，通常是定位失败，请重新定位`），
+ * 那种恰恰是最该带上的。
  */
 function rejectionOf(
   action: FeedbackAction,
@@ -200,6 +205,6 @@ function rejectionOf(
   err: unknown,
 ): string | undefined {
   const message = err instanceof Error ? err.message.trim() : ''
-  if (!message || message.includes('失败')) return undefined
+  if (!message || message.endsWith('失败')) return undefined
   return feedbackTextOf(action, 'fail', context).includes(message) ? undefined : message
 }

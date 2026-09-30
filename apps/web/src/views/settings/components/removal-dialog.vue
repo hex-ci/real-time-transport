@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { TriangleAlert } from '@lucide/vue'
 import {
   AlertDialogCancel,
   AlertDialogContent,
@@ -16,7 +15,6 @@ defineProps<{
   /** 正在被取消关注的那条线路的名字。 */
   lineName: string | null
   removing: boolean
-  error: string | null
 }>()
 
 const emit = defineEmits<{
@@ -57,13 +55,6 @@ const emit = defineEmits<{
             {{ removing ? '处理中…' : '确认取消关注' }}
           </button>
         </div>
-        <p
-          v-if="error"
-          class="mt-3 flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base"
-        >
-          <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{{ error }}</span>
-        </p>
       </AlertDialogContent>
     </AlertDialogPortal>
   </AlertDialogRoot>

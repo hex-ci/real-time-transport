@@ -131,8 +131,6 @@ const formReady = computed(() => !loading.value && loadError.value === null
 const editorLines = computed(() => editorOptionsFor(chain.value, chainLineOptions.value))
 
 const saving = shallowRef(false)
-/** 服务端对上一次保存的拒绝，逐字。 */
-const saveError = shallowRef<string | null>(null)
 
 /**
  * 保存：草稿落库的唯一时刻，成功之后回列表。
@@ -143,7 +141,6 @@ const saveError = shallowRef<string | null>(null)
 async function onSubmit(write: CommuteChainWrite): Promise<void> {
   if (saving.value) return
   saving.value = true
-  saveError.value = null
   try {
     await runWithFeedback(
       'chain-save',
@@ -152,33 +149,20 @@ async function onSubmit(write: CommuteChainWrite): Promise<void> {
     )
     await router.push('/settings/chains')
   }
-  catch (err) {
-    // 契约自己的消息，按服务端的措辞。
-    saveError.value = err instanceof Error ? err.message : '链路保存失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
   finally {
     saving.value = false
   }
 }
 
-/**
- * 已作答的保存之后，草稿又变了。
- *
- * 服务端的拒绝是关于**那份**草稿产生的请求，故一旦它点名的输入被编辑，那句话就在描述一个
- * 不再存在的请求——与表单退回它自己的拒绝是同一个「声称活得比状态久」，此处为服务端的
- * 拒绝而退回。没有任何损失：下一次保存会重新作答。
- */
-function onDraftEdit(): void {
-  saveError.value = null
-}
-
-/** 删除确认开着没有，以及上一次尝试的失败。 */
+/** 删除确认开着没有。 */
 const removalOpen = shallowRef(false)
 const removing = shallowRef(false)
-const removalError = shallowRef<string | null>(null)
 
 /**
- * 移除这一条，并让对话框保持到请求落定：拒绝会把原因留在用户刚按下的控件上，
+ * 移除这一条，并让对话框保持到请求落定：失败时它留在原地，原因由 toast 说一次 ——
  * 而不是那一行静默地原地不动。
  *
  * 成功之后回列表：这一条已经不在存储里，留在这一页只会渲染成「这条链路不存在」。
@@ -189,7 +173,6 @@ async function confirmRemoval(): Promise<void> {
   // 在闭包里读到的 id 不再是被守卫过的那个属性，故先取出它。
   const chainId = target.id
   removing.value = true
-  removalError.value = null
   try {
     await runWithFeedback(
       'chain-remove',
@@ -199,8 +182,8 @@ async function confirmRemoval(): Promise<void> {
     removalOpen.value = false
     await router.push('/settings/chains')
   }
-  catch (err) {
-    removalError.value = err instanceof Error ? err.message : '链路删除失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
   finally {
     removing.value = false
@@ -264,9 +247,7 @@ async function confirmRemoval(): Promise<void> {
           :lines-read="favoritesRead"
           :anchors-read="anchorsRead"
           :saving="saving"
-          :error="saveError"
           @submit="onSubmit"
-          @edit="onDraftEdit"
           @retry-lines="readFavorites"
         >
           <!-- 破坏性动作：新建页没有它（一条还不存在的链路没什么可删的），且它要进得来看过
@@ -290,7 +271,6 @@ async function confirmRemoval(): Promise<void> {
       :open="removalOpen"
       :chain-name="chain?.name ?? null"
       :removing="removing"
-      :error="removalError"
       @confirm="confirmRemoval"
       @cancel="removalOpen = false"
     />

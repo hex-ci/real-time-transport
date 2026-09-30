@@ -50,14 +50,10 @@ const props = defineProps<{
    */
   anchorsRead: ReadValue<StoredAnchors>
   saving: boolean
-  /** 服务端自己的拒绝，逐字——绝不在此改写。 */
-  error: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'submit', write: ReturnType<typeof chainBodyOf>): void
-  /** 草稿变了：之前就它所说的一切，都是关于一个已不存在的草稿。 */
-  (e: 'edit'): void
   /** 关注集合读不到：在它被拥有的地方重读。 */
   (e: 'retry-lines'): void
 }>()
@@ -72,13 +68,9 @@ const refusal = ref<ChainRefusal | null>(null)
  * 用户照它说的做了之后它还站着，就在断言一个已不存在的屏幕：下车选择器读作「建国门 第4站」，
  * 而下面那句话否认它。规则不跨编辑保留；下一次保存从头重新评判草稿，
  * 故仍然错的会再说一遍，已改好的就不再提及。
- *
- * 通知父级同理：服务端对一次保存的答案是关于**那份**草稿产生的请求，
- * 故一次编辑也把它退掉。
  */
 watch(draft, () => {
   refusal.value = null
-  emit('edit')
 }, { deep: true })
 
 const ANCHOR_NOTE = '起点由通勤目的决定：上班从家出发、下班从公司出发'
@@ -256,16 +248,6 @@ function onSave(): void {
       <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span>{{ refusal.message }}</span>
     </p>
-    <p
-      v-if="error"
-      data-chain-error
-      role="alert"
-      class="flex items-start gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400"
-    >
-      <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{{ error }}</span>
-    </p>
-
     <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-4">
       <button
         type="submit"

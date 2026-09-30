@@ -75,7 +75,6 @@ const selected = shallowRef<{ kind: 'place', place: PlaceSuggestion } | null>(nu
 
 const capturing = shallowRef(false)
 const saving = shallowRef(false)
-const saveError = shallowRef<string | null>(null)
 
 /** 本页显示的是哪一个锚点现在的值；未设置时说清代价。 */
 const currentText = computed(() => {
@@ -155,21 +154,25 @@ function isSelected(place: PlaceSuggestion): boolean {
  * 「用当前位置」：取一次设备定位，**当场保存**，然后回锚点列表。
  *
  * 它不再经过「待保存」那一步：这个动作的结果是唯一的（没有可选项），而屏幕上一串坐标人眼
- * 本来也验不了 —— 中间那一步只多一次点击。抓取失败从不沉默（点名这次失败让用户失去了什么：
- * 没有锚点就没有出门时间），写库失败也一样留在页上。
+ * 本来也验不了 —— 中间那一步只多一次点击。
+ *
+ * 抓取与写库合成**一次**动作：按下的是「用当前位置」这一件事，故两种失败也由那一句回话
+ * 说完（抓取失败时原因就是设备报的那一句，写库被拒时是服务端的原文）。
  */
 async function useCurrentLocation(): Promise<void> {
   const target = entry.value
   if (!target || capturing.value) return
   capturing.value = true
-  saveError.value = null
   try {
-    const fix = await locationStore.captureAnchorFix()
     // 设备定位是原始 WGS-84，来源记为 `device`，由服务端换算一次；它没有地点名。
-    await writeAnchor({ lat: fix.lat, lng: fix.lng }, 'device', null)
-  }
-  catch (err) {
-    saveError.value = err instanceof Error ? err.message : '没有取到当前位置'
+    await writeAnchor(
+      async () => {
+        const fix = await locationStore.captureAnchorFix()
+        return { lat: fix.lat, lng: fix.lng }
+      },
+      'device',
+      null,
+    )
   }
   finally {
     capturing.value = false
@@ -185,26 +188,38 @@ async function useCurrentLocation(): Promise<void> {
  *
  * 成功之后回锚点列表：这一页的事已经办完，留着它只会让人再点一次保存。
  */
-async function writeAnchor(point: { lat: number, lng: number }, source: AnchorSource, placeName: string | null): Promise<void> {
+async function writeAnchor(
+  pointOf: () => Promise<{ lat: number, lng: number }>,
+  source: AnchorSource,
+  placeName: string | null,
+): Promise<void> {
   const target = entry.value
   if (!target) return
-  await runWithFeedback('anchor-save', async () => {
-    const res = await fetch('/api/transit/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        [target.latKey]: point.lat,
-        [target.lngKey]: point.lng,
-        [target.sourceKey]: source,
-        [target.placeNameKey]: placeName,
-      }),
-    })
-    const json = await res.json()
-    if (!json.success) throw new Error(json.error || '位置保存失败')
-    stored.value = { state: 'read', value: pickAnchors(json.data) }
-    // 写完了，就没有「待保存」了：留下的选中态会让「保存」看起来还没落库。
-    selected.value = null
-  }, { name: target.label })
+  try {
+    await runWithFeedback('anchor-save', async () => {
+      // 取点也在这一次回话之内：抓取失败的原因与写库被拒的原因一样，都是这次按下的结局。
+      const point = await pointOf()
+      const res = await fetch('/api/transit/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [target.latKey]: point.lat,
+          [target.lngKey]: point.lng,
+          [target.sourceKey]: source,
+          [target.placeNameKey]: placeName,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || '位置保存失败')
+      stored.value = { state: 'read', value: pickAnchors(json.data) }
+      // 写完了，就没有「待保存」了：留下的选中态会让「保存」看起来还没落库。
+      selected.value = null
+    }, { name: target.label })
+  }
+  catch {
+    // 原因已由那一句带着说过了（抓取失败时是设备报的整句，写库被拒时是服务端的原文）。
+    return
+  }
   await router.push('/settings/anchors')
 }
 
@@ -213,12 +228,11 @@ async function save(): Promise<void> {
   const pick = selected.value
   if (!pick || saving.value) return
   saving.value = true
-  saveError.value = null
   try {
-    await writeAnchor({ lat: pick.place.lat, lng: pick.place.lng }, 'search', pick.place.name)
+    await writeAnchor(async () => ({ lat: pick.place.lat, lng: pick.place.lng }), 'search', pick.place.name)
   }
-  catch (err) {
-    saveError.value = err instanceof Error ? err.message : '位置保存失败'
+  catch {
+    // 写库被拒：原因由 `anchor-save` 那一句带着原文说过了。
   }
   finally {
     saving.value = false
@@ -367,11 +381,6 @@ async function save(): Promise<void> {
           当前设置：<span class="font-semibold text-slate-200">{{ currentText }}</span>
         </p>
 
-        <!-- 保存失败从不沉默：服务端或设备给了原因就原样带上。 -->
-        <p v-if="saveError" role="alert" class="mt-2 flex items-start gap-1.5 text-xs text-rose-400 lg:text-base">
-          <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{{ saveError }}</span>
-        </p>
       </div>
     </template>
   </div>

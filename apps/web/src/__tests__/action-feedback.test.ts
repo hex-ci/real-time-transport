@@ -91,6 +91,13 @@ describe('每一个动作两种结局各有一句话', () => {
     await expect(runWithFeedback('chain-save', () => Promise.reject(new Error('链路保存失败')))).rejects.toThrow()
     await expect(runWithFeedback('chain-save', () => Promise.reject(new Error('保存失败')))).rejects.toThrow()
     expect(messages().slice(1)).toEqual(['链路保存失败', '链路保存失败'])
+
+    // 判据是整句就是那句缺省，而不是「含『失败』二字」：服务端把成因写在一句话里时，
+    // 它正是最该带上的那一种。
+    await expect(runWithFeedback('anchor-save', () => Promise.reject(
+      new Error('家位置坐标为 (0, 0)，通常是定位失败，请重新定位'),
+    ), { name: '家' })).rejects.toThrow()
+    expect(messages().at(-1)).toBe('未能保存「家」的位置 · 家位置坐标为 (0, 0)，通常是定位失败，请重新定位')
   })
 })
 

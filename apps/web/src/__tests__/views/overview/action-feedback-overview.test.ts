@@ -159,8 +159,8 @@ describe('置顶：这一个写操作成与败各说一句', () => {
     await press(host, pinButton(host, false))
 
     expect(pushed).toEqual([`置顶失败 ${LINE_NAME} · 该线路不在关注列表中`])
-    // 内联那一份照旧是持久的记录。
-    expect(host.text()).toContain('该线路不在关注列表中')
+    // 页上不留第二处：这句话只在 toast 里说一次，卡片自己的回滚就是记录。
+    expect(host.text()).not.toContain('该线路不在关注列表中')
     host.unmount()
   })
 })

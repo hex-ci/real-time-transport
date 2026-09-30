@@ -126,8 +126,6 @@ function setStop(purpose: CommutePurpose, choice: StationChoice | null): void {
 }
 
 const saving = shallowRef(false)
-/** 上一次保存的失败，逐字。 */
-const saveError = shallowRef<string | null>(null)
 
 /** 一个目的在**存储里**的上车点这一对。清空时它是写 null 的依据：屏幕上没有值、存储里有值，
  * 说明使用者清掉了它，那就得把这两列一起写下去。 */
@@ -170,17 +168,16 @@ async function save(): Promise<void> {
   const fav = favorite.value
   if (!fav?.id || saving.value) return
   saving.value = true
-  saveError.value = null
   try {
     await runWithFeedback('favorite-save', () => writeSlots(fav), { name: fav.lineName })
     // 存下来的就是屏幕上那几件：草稿从存储值重新起草，故「改动过」回到空。
     redraft()
     // 这一页的事已经办完：留在它上面只会让人再点一次保存（与锚点页、链路编辑页同一条）。
-    // 写在成功这一支里 —— 失败要留在页上说出原因。
+    // 写在成功这一支里 —— 失败时留在页上，原因由 toast 说一次。
     await router.push('/settings/lines')
   }
-  catch (err) {
-    saveError.value = err instanceof Error ? err.message : '保存失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
   finally {
     saving.value = false
@@ -190,7 +187,6 @@ async function save(): Promise<void> {
 /** 排队等待移除的关注项，以及上一次尝试的失败。 */
 const removalOpen = shallowRef(false)
 const removing = shallowRef(false)
-const removalError = shallowRef<string | null>(null)
 
 /**
  * 取消关注。
@@ -200,11 +196,11 @@ const removalError = shallowRef<string | null>(null)
  * ——关闭先清空了排队的目标，故处理读到 `null` 并直接返回，永远没发出 DELETE。
  *
  * 成功之后回列表：这一条已经不在存储里，留在这一页只会渲染成「这条关注不存在」。
+ * 失败时对话框留在原地，原因由 toast 说一次 —— 页上不再说第二遍。
  */
 async function confirmRemoval(): Promise<void> {
   const fav = favorite.value
   if (!fav?.id || removing.value) return
-  removalError.value = null
   removing.value = true
   try {
     await runWithFeedback(
@@ -215,8 +211,8 @@ async function confirmRemoval(): Promise<void> {
     removalOpen.value = false
     await router.push('/settings/lines')
   }
-  catch (err) {
-    removalError.value = err instanceof Error ? err.message : '取消关注失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
   finally {
     removing.value = false
@@ -362,11 +358,6 @@ const directions = computed<Record<CommutePurpose, 0 | 1 | null>>(() => ({
           <span>{{ sameDirectionNote(favorite, directions) }}</span>
         </p>
 
-        <p v-if="saveError" role="alert" class="mt-4 flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
-          <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-          <span>{{ saveError }}</span>
-        </p>
-
         <!-- 底部：保存（草稿落库的唯一时刻），以及取消关注（破坏性动作，带确认）。 -->
         <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-4">
           <button
@@ -394,7 +385,6 @@ const directions = computed<Record<CommutePurpose, 0 | 1 | null>>(() => ({
       :open="removalOpen"
       :line-name="favorite?.lineName ?? null"
       :removing="removing"
-      :error="removalError"
       @confirm="confirmRemoval"
       @cancel="removalOpen = false"
     />

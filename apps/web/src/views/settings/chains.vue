@@ -51,22 +51,19 @@ onMounted(() => {
   void load()
 })
 
-/** 上一次排序写入的失败，好让被拒绝的拖放绝不沉默。 */
-const orderError = shallowRef<string | null>(null)
-
 /**
  * 落一次拖放：被拖动的链路占据它落在其上的那条链路的格子（`moveCommuteChain`）。
  *
- * 一次排序**不**碰链路的其他字段 —— 名字、目的、乘车段、接驳方式都不在这次写入里；
- * 写入失败的顺序会弹回存储里的那个，故拒绝在这里说出原因，而不是让列表悄悄变回去。
+ * 一次排序**不**碰链路的其他字段 —— 名字、目的、乘车段、接驳方式都不在这次写入里。
+ *
+ * 成败由 toast 说一次：写入失败的顺序会弹回存储里的那个，列表自己跳回去就是那一下的记录。
  */
 async function onReorder(movedId: string, anchorId: string): Promise<void> {
-  orderError.value = null
   try {
     await runWithFeedback('chain-reorder', () => transitStore.moveCommuteChain(movedId, anchorId))
   }
-  catch (err) {
-    orderError.value = err instanceof Error ? err.message : '顺序保存失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
 }
 
@@ -219,16 +216,6 @@ function legModeText(chain: CommuteChain, index: number): string {
           </RouterLink>
         </li>
       </DragOrderList>
-
-      <!-- 落下的行立即被写入，故被拒绝的写入必须在此说明：列表已经弹回存储顺序，
-           否则会看起来像那次拖拽从未发生。 -->
-      <p
-        v-if="orderError"
-        class="mt-2 flex items-center gap-1.5 text-xs text-rose-400 lg:text-base"
-      >
-        <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>{{ orderError }}</span>
-      </p>
     </section>
   </div>
 </template>

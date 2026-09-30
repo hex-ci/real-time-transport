@@ -245,8 +245,7 @@ describe('F10 链路列表由拖动排序', () => {
     const list = codeOf(LIST)
     expect(list).toContain(`runWithFeedback('chain-reorder'`)
     expect(list).toContain('() => transitStore.moveCommuteChain(movedId, anchorId)')
-    expect(list).toContain('orderError.value = err instanceof Error ? err.message')
-    expect(list).toContain('v-if="orderError"')
+    expect(list).not.toContain('orderError')
 
     // 而被拒的写入确实把顺序弹回存储里的那个（store 自己那一侧）。
     const host = await mountChainList()

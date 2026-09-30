@@ -15,7 +15,6 @@
  * 读取两边都不主张。
  */
 import { onMounted, shallowRef } from 'vue'
-import { TriangleAlert } from '@lucide/vue'
 import { DEFAULT_COMMUTE_HOURS, type UserSettings } from '@real-time-transport/shared'
 import { runWithFeedback } from '@/action-feedback'
 import { settingsReadOf } from '../index-summary'
@@ -30,8 +29,6 @@ const EDITOR_STARTING_POINT: UserSettings = { ...DEFAULT_COMMUTE_HOURS }
 
 const settingsDraft = shallowRef<UserSettings>({ ...EDITOR_STARTING_POINT })
 const settingsSaving = shallowRef(false)
-const settingsError = shallowRef<string | null>(null)
-const settingsSaved = shallowRef(false)
 
 /**
  * 四个时刻是否从未被保存过。`true` 是未设置/未选择——表单会陈述的事实；
@@ -64,8 +61,6 @@ onMounted(async () => {
 
 async function saveSettings(): Promise<void> {
   settingsSaving.value = true
-  settingsError.value = null
-  settingsSaved.value = false
   try {
     await runWithFeedback('commute-hours-save', async () => {
       const res = await fetch('/api/transit/settings', {
@@ -80,11 +75,10 @@ async function saveSettings(): Promise<void> {
       settingsDraft.value = json.data as UserSettings
       // 时段现已保存，故表单不再说它们从未被保存过。
       hoursNeverSaved.value = false
-      settingsSaved.value = true
     })
   }
-  catch (err) {
-    settingsError.value = err instanceof Error ? err.message : '保存失败'
+  catch {
+    // 原因已由 toast 说过；这里只是接住重抛，别让它变成未处理的拒绝。
   }
   finally {
     settingsSaving.value = false
@@ -151,11 +145,6 @@ async function saveSettings(): Promise<void> {
       >
         {{ settingsSaving ? '保存中…' : '保存时段' }}
       </button>
-      <span v-if="settingsSaved" class="text-xs text-emerald-400">已保存</span>
-      <span v-if="settingsError" class="flex items-center gap-1.5 text-xs text-rose-400 lg:gap-2 lg:text-base">
-        <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-        <span>{{ settingsError }}</span>
-      </span>
     </div>
   </div>
 </template>

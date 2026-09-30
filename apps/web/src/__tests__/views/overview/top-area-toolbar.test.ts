@@ -135,6 +135,22 @@ async function mountOverview(
   return host
 }
 
+/** 一份 `commute-profile` 答案：`windowState` 决定它说的是「没设过」还是「存过」。 */
+function profile(windowState: string): unknown {
+  return { success: true, data: { mode: 'auto', description: '未设置通勤时段', windowState } }
+}
+
+/**
+ * 那一行声明出来的宽度下限。
+ *
+ * 类名存在不等于下限存在：`min-w-max-content` 在主题里不是任何一档，不生成规则，
+ * 等于没有下限 —— 于是容器被压到比四个档位还窄。故断言分两类：真的那一档必须在，假的那个不许回来。
+ */
+function declaredMinWidths(row: HostElement): string[] {
+  return [modeBox(row), ...modeItems(row)]
+    .flatMap(node => tokens(node).filter(token => token.startsWith('min-w-')))
+}
+
 /** 一个节点子树里的每个节点，按文档顺序。宿主节点带 `children`，故这里自己走一遍。 */
 function descendants(node: HostElement): HostElement[] {
   const out: HostElement[] = []
@@ -455,9 +471,28 @@ describe('窄屏：一行，模式容器吃满余量与两枚图标同排', () =
       expect(tokens(item), `${item.tag} clips`).not.toContain('overflow-hidden')
     }
     // 容器自己不许被压到它的字以下：下限是它内容的最大宽度，故装不下时换行的是整行，不是字。
-    expect(tokens(modeBox(row))).toContain('min-w-max-content')
+    // 下限必须是框架里真有的那一档：`min-w-max`（主题的 `minWidth.max` → `max-content`）。
+    // `min-w-max-content` 不是任何一档 —— 它不生成规则，等于没有下限，而容器一旦没有下限就会被
+    // 压到比四个档位还窄（真机上量到过：375 上被裁 55px、320 上被裁 110px）。故两个都钉。
+    expect(tokens(modeBox(row))).toContain('min-w-max')
+    expect(declaredMinWidths(row)).not.toContain('min-w-max-content')
     expect(hiddenAt(row, NARROWEST_WIDTH)).toBe(false)
     host.unmount()
+  })
+
+  it('提示在场时工具行仍然装得下：那一句不在工具行里，故不动它的算术', async () => {
+    // 这是用户踩到的那一格：通勤时段没设过 → 提示出现 → 四个档位被压到字以下。
+    // 提示若在工具行里，这一行要的地方会多出它的整句宽度；现在它在提示位，故两个 profile 下
+    // 工具行要的宽度**相等** —— 这个等式就是「提示不再参与工具行的算术」的证据。
+    const withoutHint = await mountOverview()
+    const withHint = await mountOverview({ profile: profile('unchosen') })
+
+    expect(minWidthOf(toolbar(withHint, 'narrow'), withHint))
+      .toBe(minWidthOf(toolbar(withoutHint, 'narrow'), withoutHint))
+    expect(minWidthOf(toolbar(withHint, 'narrow'), withHint)).toBeLessThanOrEqual(AVAILABLE_AT_375)
+
+    withoutHint.unmount()
+    withHint.unmount()
   })
 
   it('模式容器吃满余量、四项等分，且都带内容宽度的下限', async () => {
@@ -466,14 +501,14 @@ describe('窄屏：一行，模式容器吃满余量与两枚图标同排', () =
     const box = modeBox(row)
 
     expect(tokens(box)).toContain('flex-1')
-    expect(tokens(box)).toContain('min-w-max-content')
+    expect(tokens(box)).toContain('min-w-max')
     expect(tokens(row)).toContain('flex-wrap')
 
     const items = modeItems(row)
     expect(items).toHaveLength(4)
     for (const item of items) {
       expect(tokens(item)).toContain('flex-1')
-      expect(tokens(item)).toContain('min-w-max-content')
+      expect(tokens(item)).toContain('min-w-max')
       expect(tokens(item)).toContain('whitespace-nowrap')
       // 项与容器同高，且自己的盒顶落在容器的外顶边上 —— 与相邻那枚 44 图标按钮同一条线。
       expect(itemBoxIn(box, item)).toEqual({ height: CONTROL_HEIGHT, offset: 0 })
@@ -529,25 +564,27 @@ describe('窄屏的分段项：图标撤掉，字与可访问名照旧', () => {
   })
 })
 
-describe('未设置通勤时段：一句琥珀色的提示，不是控件', () => {
-  const profile = (windowState: string): unknown => ({
-    success: true,
-    data: { mode: 'auto', description: '未设置通勤时段', windowState },
-  })
-
-  it('两档都只在没设过时出现，且它是纯文字', async () => {
+describe('未设置通勤时段：进提示位的一句话，不是工具行里的控件', () => {
+  it('两档都只在没设过时出现，且它不在工具行里、是整行 44px 的入口', async () => {
     for (const windowState of ['unset', 'unchosen']) {
       const host = await mountOverview({ profile: profile(windowState) })
 
       for (const which of ['narrow', 'wide'] as const) {
         const block = which === 'narrow' ? narrowBlock(host) : wideBlock(host)
-        const hints = subtree(block).filter(node => host.textOf(node).includes('未设置通勤时段') && tokens(node).includes('text-amber-400'))
+        const area = subtree(block).find(node => node.props['data-prompt-area'] === which)
+        expect(area, `${which} has no prompt area`).toBeTruthy()
+        const hints = subtree(area!).filter(node => node.props.href === '/settings/schedule')
         expect(hints, `${which} has no hint for ${windowState}`).toHaveLength(1)
-        // 它是纯文字：不是药丸、不是按钮、也不是可点之物。
-        expect(hints[0]!.tag).toBe('p')
-        expect(tokens(hints[0]!)).not.toContain('rounded-full')
-        expect(hints[0]!.props.disabled).toBeUndefined()
-        expect(hints[0]!.props.onClick).toBeUndefined()
+
+        // 它不在工具行里 —— 这是它原来被挤到字以下的位置。
+        const row = toolbar(host, which)
+        expect(subtree(row).some(node => host.textOf(node).includes('未设置通勤时段')),
+          `${which}: the hint is back inside the toolbar row`).toBe(false)
+
+        // 它是整行 44px 的入口，点名它自己那一页（不再是不可点的纯文字）。
+        expect(tokens(hints[0]!)).toContain('min-h-11')
+        expect(tokens(hints[0]!)).toContain('flex')
+        expect(minWidthOf(hints[0]!, host)).toBeLessThanOrEqual(NARROWEST_WIDTH - 2 * 10)
       }
       host.unmount()
     }

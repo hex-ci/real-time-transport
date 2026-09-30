@@ -72,9 +72,9 @@ function autoModeTitle(host: MountedHost): string {
   return [...titles][0]!
 }
 
-/** 没设过通勤时段时那一句琥珀提示。 */
+/** 没设过通勤时段时那一句的入口：每档一份，都指向通勤时段那一页。 */
 function hints(host: MountedHost): HostElement[] {
-  return host.nodes(node => String(node.props.class ?? '').includes('text-amber-400'))
+  return host.nodes((node: HostElement) => node.tag === 'a' && node.props.href === '/settings/schedule')
 }
 
 afterEach(async () => {

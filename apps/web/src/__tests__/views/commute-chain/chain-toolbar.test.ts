@@ -379,7 +379,7 @@ describe('窄屏：一行，页签容器吃满余量与刷新同排', () => {
     const group = purposeContainer(row)
 
     expect(tokens(group)).toContain('flex-1')
-    expect(tokens(group)).toContain('min-w-max-content')
+    expect(tokens(group)).toContain('min-w-max')
     expect(tokens(row)).toContain('flex-wrap')
     expect(heightOf(group)).toBe(CONTROL_HEIGHT)
 
@@ -387,7 +387,7 @@ describe('窄屏：一行，页签容器吃满余量与刷新同排', () => {
     expect(items).toHaveLength(2)
     for (const item of items) {
       expect(tokens(item)).toContain('flex-1')
-      expect(tokens(item)).toContain('min-w-max-content')
+      expect(tokens(item)).toContain('min-w-max')
       expect(tokens(item)).toContain('whitespace-nowrap')
       expect(itemBoxIn(group, item)).toEqual({ height: CONTROL_HEIGHT, offset: 0 })
     }

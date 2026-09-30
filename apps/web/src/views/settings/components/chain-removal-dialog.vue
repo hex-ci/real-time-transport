@@ -5,7 +5,6 @@
  * 删除在界面上不可撤销：每一段都是逐条录入的，要恢复就得重新录入。
  * 故它要求显式确认，而不是在行内单击即触发。
  */
-import { TriangleAlert } from '@lucide/vue'
 import {
   AlertDialogCancel,
   AlertDialogContent,
@@ -22,7 +21,6 @@ defineProps<{
   /** 正在删除的链路名。 */
   chainName: string | null
   removing: boolean
-  error: string | null
 }>()
 
 const emit = defineEmits<{
@@ -59,10 +57,6 @@ const emit = defineEmits<{
             {{ removing ? '处理中…' : '确认删除' }}
           </button>
         </div>
-        <p v-if="error" role="alert" class="mt-3 flex items-center gap-1.5 text-xs text-rose-400">
-          <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{{ error }}</span>
-        </p>
       </AlertDialogContent>
     </AlertDialogPortal>
   </AlertDialogRoot>

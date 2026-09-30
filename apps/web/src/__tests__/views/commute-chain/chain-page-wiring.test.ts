@@ -386,6 +386,33 @@ describe('the facts an answer is made of reach the screen', () => {
     page.unmount()
   })
 
+  it('puts the reading line at the top of the card, full width and with a divider — not at the bottom', async () => {
+    const page = await mountChainPage({
+      routes: [/commute-chains\/deductions/, () => chainsOf([
+        chainView(conclusion([leg({ seq: 0, lineId: 'bus_027_1', lineName: '快线 1 路' })])),
+      ])],
+    })
+
+    const card = page.node(item => item.tag === 'article', 'chain card')
+    const reading = page.node(
+      item => item.tag === 'p' && page.textOf(item).includes('最后更新'),
+      'the reading line',
+    )
+    // 它是这批数字的抬头，不是脚注：读屏顺序上「这批读数是什么时候取的」先于读数本身。
+    // 先前它在卡片末尾（`mt-2`、无分界线），与站台大屏那一处不一致。
+    expect(reading.parent === card, 'the reading is not the card\'s own child').toBe(true)
+    // 第一个**元素**子节点（模板里那两条说明注释也是子节点，故不能直接用 children[0]）。
+    expect(card.children.find(child => child.tag === 'p') === reading,
+      'the reading is not the card\'s first block').toBe(true)
+    const cls = String(reading.props.class)
+    expect(cls).toContain('border-b')
+    expect(cls).toContain('text-xs')
+    // 底色也是站台大屏那一套：那一条行比内容区深一档（实测 rgb(2,6,24) vs rgb(10,15,34)），
+    // 而不是只靠一条分界线 —— 只有分界线时它与内容区零差别，抬头带就立不起来。
+    expect(cls).toContain('bg-slate-950')
+    page.unmount()
+  })
+
   it('keeps the reading\'s internal vehicle ids out of everything it renders', async () => {
     const page = await mountChainPage({
       routes: [/commute-chains\/deductions/, () => chainsOf([

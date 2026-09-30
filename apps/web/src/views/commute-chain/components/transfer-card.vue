@@ -35,55 +35,65 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
 </script>
 
 <template>
-  <article class="rounded-3xl border border-slate-800 bg-slate-900/60 p-3.5 sm:p-5">
-    <header class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
-      <div class="min-w-0">
-        <h3 class="text-base font-semibold text-slate-100 lg:text-lg">{{ card.name }}</h3>
-        <p class="mt-0.5 text-xs text-slate-400 lg:text-base">{{ card.originText }}</p>
-      </div>
-      <BandChip
-        v-if="card.conclusion"
-        :band="card.conclusion.band"
-        :label="card.conclusion.bandLabel"
-      />
-    </header>
+  <article class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60">
+    <!-- 这批数字的抬头，不是脚注：读屏顺序上「这批读数是什么时候取的」先于读数本身，
+         放在末尾则要先读完内容才知道它可能已经过期。呈现方式与站台大屏同一种 ——
+         一条整宽的行 + 一条下分界线。 -->
+    <p
+      v-if="card.reading"
+      class="border-b border-slate-800/60 bg-slate-950 px-3.5 py-2 text-xs text-slate-400 sm:px-5 lg:text-base"
+    >
+      {{ card.reading?.text }}
+    </p>
 
-    <div v-if="card.conclusion" class="mt-2.5">
-      <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.conclusion?.verdict }}</p>
-      <p class="mt-0.5 text-xs text-slate-400 lg:text-base">
-        {{ card.conclusion?.bindingText }}<template v-if="card.conclusion?.marginText"> · {{ card.conclusion?.marginText }}</template>
-      </p>
-      <ul class="mt-2 space-y-2">
-        <TransferRow
-          v-for="row in card.conclusion?.legs ?? []"
-          :key="row.seq"
-          :row="row"
-          :mark-text="markFor(row)"
-          :branches="branchesFor(row)"
+    <div class="p-3.5 sm:p-5">
+      <header class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
+        <div class="min-w-0">
+          <h3 class="text-base font-semibold text-slate-100 lg:text-lg">{{ card.name }}</h3>
+          <p class="mt-0.5 text-xs text-slate-400 lg:text-base">{{ card.originText }}</p>
+        </div>
+        <BandChip
+          v-if="card.conclusion"
+          :band="card.conclusion.band"
+          :label="card.conclusion.bandLabel"
         />
-      </ul>
-    </div>
+      </header>
 
-    <!-- 拒绝：句子旁不得有任何可被读成答案的东西。 -->
-    <div v-else-if="card.refusal" class="mt-2.5">
-      <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.refusal?.sentence }}</p>
-      <p v-if="card.refusal?.legText" class="mt-0.5 text-xs text-slate-400 lg:text-base">
-        {{ card.refusal?.legText }}
-      </p>
-      <p v-if="card.refusal?.serviceText" class="mt-0.5 text-xs text-slate-300 lg:text-base">
-        {{ card.refusal?.serviceText }}
-      </p>
-      <!-- 动作属于设置里的一行，故点名那一页而非设置的索引。 -->
-      <RouterLink
-        v-if="card.refusal?.action === 'settings'"
-        to="/settings/anchors"
-        class="mt-2 inline-flex min-h-11 items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3.5 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:gap-1.5 lg:text-base"
-      >
-        <span>去设置起点位置</span>
-        <ChevronRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      </RouterLink>
-    </div>
+      <div v-if="card.conclusion" class="mt-2.5">
+        <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.conclusion?.verdict }}</p>
+        <p class="mt-0.5 text-xs text-slate-400 lg:text-base">
+          {{ card.conclusion?.bindingText }}<template v-if="card.conclusion?.marginText"> · {{ card.conclusion?.marginText }}</template>
+        </p>
+        <ul class="mt-2 space-y-2">
+          <TransferRow
+            v-for="row in card.conclusion?.legs ?? []"
+            :key="row.seq"
+            :row="row"
+            :mark-text="markFor(row)"
+            :branches="branchesFor(row)"
+          />
+        </ul>
+      </div>
 
-    <p v-if="card.reading" class="mt-2 text-xs text-slate-400 lg:text-base">{{ card.reading?.text }}</p>
+      <!-- 拒绝：句子旁不得有任何可被读成答案的东西。 -->
+      <div v-else-if="card.refusal" class="mt-2.5">
+        <p class="text-sm font-medium text-slate-100 lg:text-base">{{ card.refusal?.sentence }}</p>
+        <p v-if="card.refusal?.legText" class="mt-0.5 text-xs text-slate-400 lg:text-base">
+          {{ card.refusal?.legText }}
+        </p>
+        <p v-if="card.refusal?.serviceText" class="mt-0.5 text-xs text-slate-300 lg:text-base">
+          {{ card.refusal?.serviceText }}
+        </p>
+        <!-- 动作属于设置里的一行，故点名那一页而非设置的索引。 -->
+        <RouterLink
+          v-if="card.refusal?.action === 'settings'"
+          to="/settings/anchors"
+          class="mt-2 inline-flex min-h-11 items-center gap-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3.5 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:gap-1.5 lg:text-base"
+        >
+          <span>去设置起点位置</span>
+          <ChevronRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        </RouterLink>
+      </div>
+    </div>
   </article>
 </template>

@@ -249,6 +249,22 @@ describe('移动端抽屉里的刷新入口', () => {
     expect(ancestorsOf(block).includes(content)).toBe(true)
   })
 
+  it('刷新与关闭是一对同级控件：同一尺寸与圆角，主次只由配色说', async () => {
+    const host = await mountDetail()
+    await openDrawer(host)
+
+    const close = host.node(
+      node => node.tag === 'button' && node.props['aria-label'] === '关闭线路信息',
+      'the close control',
+    )
+    // 关闭曾经是 32px：既与 44px 的刷新不成比例（同一行里一个大一个小），也低于本仓 44px 的
+    // 触控目标。尺寸统一之后，主次由配色承担 —— 刷新青、关闭灰。
+    expect(classOf(close)).toContain('h-11')
+    expect(classOf(close)).toContain('w-11')
+    expect(classOf(close)).toContain('rounded-xl')
+    expect(classOf(drawerRefreshButton(host))).toContain('h-11')
+  })
+
   it('抽屉里只有一个可点的刷新入口', async () => {
     const host = await mountDetail()
     await openDrawer(host)

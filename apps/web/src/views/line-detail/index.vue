@@ -721,13 +721,15 @@ onUnmounted(() => {
             <!-- F11：移动端的刷新入口，坐在关闭按钮左边——常规位置，不再占内容末尾的一整行。
                  它是本控件的一半，另一半（那两行字）跟在头部下方，故两者共用同一个 idPrefix。 -->
             <RefreshControl v-bind="refreshControl" variant="button" @refresh="onRefresh" />
+            <!-- 与刷新同一尺寸与圆角：两者是一对同级控件，主次由配色说 —— 刷新是青色，
+                 关闭是中性灰。原先关闭只有 32px，既与刷新不成比例，也低于本仓 44px 的触控目标。 -->
             <DialogClose as-child>
               <button
                 type="button"
-                class="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-400 active:scale-95"
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 transition active:scale-95"
                 aria-label="关闭线路信息"
               >
-                <X class="h-4 w-4" />
+                <X class="h-4 w-4 shrink-0" />
               </button>
             </DialogClose>
           </div>

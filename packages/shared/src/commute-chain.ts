@@ -160,7 +160,7 @@ export type ChainMarginBand = 'comfortable' | 'tight' | 'uncertain' | 'insuffici
  * - `provenance-unknown`           某读数声明了本版本不认识的来源
  * - `inconsistent-live`            某车辆的下车分钟早于它自己的上车分钟
  *
- * 两个接驳码确切的原因集，陈述一次，使页面作者不必猜某个码背后是哪个事实：
+ * 三个接驳码确切的原因集，陈述一次，使页面作者不必猜某个码背后是哪个事实：
  *
  *  - `anchor-unset` 只覆盖链将要起步的那个锚点，别无其他。它是接驳未计价中唯一用户可行动的原因：
  *    链的起点由目的决定而目的地从不记录，故那个锚点从未保存坐标时根本不留下可出发的点，修法在设置页。
@@ -168,27 +168,25 @@ export type ChainMarginBand = 'comfortable' | 'tight' | 'uncertain' | 'insuffici
  *    反过来也成立，且靠的是**优先顺序**而不是运气：装配层在读取某路段的线路、
  *    定位车站**之前**先问锚点，故锚点从未保存的链即使其详情、停靠表或路线也会失败时仍答 `anchor-unset`。
  *    用户被告知的是他能修的原因，而不是他修不了的那个。
- *  - `connection-unpriced` 覆盖其余四个原因，每一个都不给用户任何动作：
+ *  - `route-unpriced` 只有两端都解析成功、路径服务这一次没计价出路线这一个原因。
+ *    它是**暂时**的：定价失败不入缓存，下一次读取会重新向路径服务问，故这句话可以点名重读 ——
+ *    页面自己的刷新入口真的会重花一次上游读取并重载答案。
+ *  - `connection-unpriced` 覆盖其余三个原因，每一个都不给用户任何动作，也不承诺重试 ——
+ *    它们都不是本次读取的暂时失败：
  *    线路详情读不到（`line-unavailable`）—— 一次本应用无法完成的上游读取；
  *    已存车站不在该方向的停靠列表里（`station-unlocated`）—— 一份记录，本版本不再用那个停靠列表来读它，
  *    也不是页面能修的。让已存配对在**写入**时保持同步的是链编辑器（车站从线路自己的停靠列表里选），
  *    而 schema 只校验配对自身的一致（站名带站序，二者同在或同缺）与路段方向，
  *    它从来看不到停靠列表，故无法保证配对在列表里。
  *    或停靠列表确实有该站却没给坐标（`station-without-coordinate`）—— 记录完好，位置是上游从未给出的，
- *    故没有可步行的点，也没有任何页面能补上。或两端都解析成功而路径服务没计价出路线（`route-unpriced`）。
- *    完全说不清原因的调用方也落在这里。命中的是哪个原因由代码披露、绝不由数量披露，
+ *    故没有可步行的点，也没有任何页面能补上。
+ *    完全说不清原因的调用方也落在这个码里。命中的是哪个原因由代码披露、绝不由数量披露，
  *    页面为该码写一句话，而不是假装知道是哪一个。
- *
- *    那一句话不得承诺可重试，因为这四个原因**不**共享同一持久性：
- *    未落点的站（`station-without-coordinate`）是上游**陈述**上的缺口，不是本次读取的暂时失败；
- *    而没计价出的路线（`route-unpriced`）是暂时的，下次读取可能就计价得出。
- *    「稍后重试」对后者为真、对前者没有依据，而这行无法告诉页面是哪一个。
- *    故那句话只陈述该码携带的事实 —— 这段接驳没有计价时长 —— 既不承诺重试，
- *    也不声称没有什么可等，且不给出动作，因为这些原因没有用户能做的事。
  *
  * `ChainConnectionUnpricedReason` 是调用方对这些原因的词汇；
  * 它到这些码的映射属于引擎（见 `connectionRefusalCode`），
- * 故知道原因的那一层可以精确陈述原因，而不必让每种精度都变成一个线上码。
+ * 故知道原因的那一层可以精确陈述原因，而不必让每种精度都变成一个线上码 ——
+ * 加一个码的门槛是**页面能诚实写下的字不同**，而不是内部分得越来越细。
  */
 export type ChainNoConclusionReason
   = | 'no-legs'
@@ -196,6 +194,7 @@ export type ChainNoConclusionReason
     | 'leg-recorded-backwards'
     | 'anchor-unset'
     | 'connection-unpriced'
+    | 'route-unpriced'
     | 'no-live'
     | 'no-vehicle'
     | 'no-shared-vehicle'
@@ -728,10 +727,11 @@ function alightMinutesOf(vehicle: ChainLegVehicle): number | null {
  * 某个码背后的原因集因此从这张表读出（测试用 `Object.keys` 推导它），绝不手数 ——
  * 手写在 union 旁边的计数只能是一份没人校验的副本。
  *
- * 链自身起点所在的锚点（由目的决定）是用户唯一可行动的原因，故只有它走自己的码 ——
- * 与 F1 的空状态对同一事实所用的同一个词。其余每个原因
- * （今天四个：此处除 `anchor-unset` 之外的每个键），以及说不清原因的调用方，
- * 都是通用的 `connection-unpriced`：命中哪一个不改变页面能诚实写下的字，也不改变它能给出的动作；
+ * 链自身起点所在的锚点（由目的决定）是用户唯一可行动的成因，故它走自己的码 ——
+ * 与 F1 的空状态对同一事实所用的同一个词。路径服务这一次没定出路线也走自己的码：
+ * 它是**暂时**的失败，那句话点名重读，而这是页面能诚实写下的、别的成因写不出的字。
+ * 其余每个成因（今天三个：此处映射到 `connection-unpriced` 的每个键），
+ * 以及说不清成因的调用方，都共用一个码：命中哪一个不改变页面能诚实写下的字，也不改变它能给出的动作。
  * 它们确切的原因集陈述在 `ChainNoConclusionReason` 上，连同支配该码那句话的持久性约束。
  */
 export const CONNECTION_REFUSAL_CODES: Record<ChainConnectionUnpricedReason, ChainNoConclusionReason> = {
@@ -739,7 +739,7 @@ export const CONNECTION_REFUSAL_CODES: Record<ChainConnectionUnpricedReason, Cha
   'line-unavailable': 'connection-unpriced',
   'station-unlocated': 'connection-unpriced',
   'station-without-coordinate': 'connection-unpriced',
-  'route-unpriced': 'connection-unpriced',
+  'route-unpriced': 'route-unpriced',
 }
 
 /**

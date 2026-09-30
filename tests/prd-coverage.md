@@ -192,11 +192,17 @@
 | 站名与站序成对（半对被拒） | `api/f10-…` ·「站名与站序成对：只给一半的写入被拒，且不留行」 | 400 + 零行 | 2 |
 | `transferExtraMinutes`：`null` ≠ `0` | `api/f10-…` ·「接驳方式按段存：null 是没选过，0 是确实没有额外时间」 | 两种值存成不同结果 | 2 |
 | 每段时长可溯源、数字来自被点名的那两次读数 | `api/f10-…` ·「一条可推演的链路：余量、带位与每个数字都来自被点名的那两次读数」 | 数字 == 夹具读数（非重算） | 2 |
-| 拒绝码各有各的形状 | `api/f10-…` ·anchor-unset / station-unset / no-vehicle / no-shared-vehicle / no-vehicle-after-connection / leg-recorded-backwards / connection-unpriced 各一例 | 状态码 + refusal code + 不花多余读数 | 2 |
+| 拒绝码各有各的形状 | `api/f10-…` ·anchor-unset / station-unset / no-vehicle / no-shared-vehicle / no-vehicle-after-connection / leg-recorded-backwards / route-unpriced 各一例 | 状态码 + refusal code + 不花多余读数 | 2 |
+| 接驳算不出时长：暂时的那一类单独一个码、单独一句话并点名重读，其余三类共用一个码且不承诺重读 | `shared/__tests__/commute-chain.test.ts` ·「keeps every cause the user cannot act on in one code, and the temporary one in its own」+ `web/__tests__/views/commute-chain/chain-refusal.test.ts` ·「names the re-read on the one code whose cause is temporary, and nowhere else」+ `server/__tests__/commute-chain-deduction.test.ts` ·「reports a connection the path service priced no route for as the temporary failure it is」+ `api/f10-…` ·「接驳定不了价时，录反了的那一段也先答自己的接驳码」+ `server/__tests__/station-position-absence.test.ts` | `route-unpriced` 单独成组、其余三个键映射到 `connection-unpriced`、三组并集 == 词汇表键数；只有 `route-unpriced` 的句子含重读词；**变异验证**：把 `route-unpriced` 映射回通用码 → shared 1 条 + server 2 条 + api 1 条红；把句子里的重读词去掉 → web 1 条红 | 1+2 |
 | 余量带位与分钟数并存 | `web/__tests__/views/commute-chain/chain-margin.test.ts` ·「bands a leg by the very margin it prints」「prints the number…」 | 带位由它自己打印的分钟推得 | 1 |
 | 链路列表可拖动排序 | `web/__tests__/views/settings/commute-chain-order-list.test.ts` ·「列表渲染存储顺序：拖动之后的行序就是拖动后的顺序」 | 拖后行序 == 写入序 | 1 |
 | 一级入口、与首页并列 | `web/__tests__/views/commute-chain/chain-page-wiring.test.ts` ·「is in the top-level nav…has a route of its own」 | 导航与路由都注册 | 1 |
 | 首页不露出链路结论 | `web/__tests__/views/commute-chain/chain-page-wiring.test.ts` ·「names every leg of a deduced chain…」 | 结论只在链路页 | 1 |
+| 录入屏可逐段加到上限（4 段），到上限的按钮禁用并说明边界 | `web/__tests__/views/settings/commute-chain-editor.test.ts` ·「逐段加到上限」 | 段数 == `MAX_CHAIN_LEGS`，按钮 `disabled`；**变异验证**：拆掉 `atLegLimit` 闸门 → 红（这条钉的是机制，不钉那个数 —— 改数由下一条负责） | 1 |
+| 上限以上的段数一次写完：段序就是数组顺序 | 同上 ·「上限以上的段数一次写完」 | POST 体里 `legs` 四条，逐段线路/上下车站按数组序；**变异验证**：`chainBodyOf` 里 `slice(0, 2)` → 红；上限改回 2 → 也红 | 1 |
+| 推演引擎的段数没有上限：最紧的那次可以落在第三段 | `shared/__tests__/commute-chain.test.ts` ·「reaches a tight boarding past the second leg」 | 三段余量 8/3/2 → `bindingSeq=2`、各段下车分钟逐段累加；**变异验证**：结论只看前两段 → 红 | 1 |
+| 六段照样得出结论（段数不是引擎的一维） | 同上 ·「has no leg-count ceiling: six legs deduce like two」 | 六段余量各 3 分、并列取靠前 → `bindingSeq=0` | 1 |
+| 读取侧按段渲染：一段一行，段数没有上限 | `web/__tests__/views/commute-chain/chain-leg-rows.test.ts` ·「三段就是三行」「六段也是六行」 | `li` 段行数为 3 / 6，且结论那句点到第 3 段 | 1 |
 
 ## F11 · 手动刷新
 

@@ -695,10 +695,11 @@ describe('F10 server: a gap in the data keeps the engine\'s own code', () => {
     }
   })
 
-  it('keeps a connection the path service priced no route for in the generic code', async () => {
+  it('reports a connection the path service priced no route for as the temporary failure it is', async () => {
     freezeAt(NOW_MS)
     // 锚点已保存、两个存下来的站都定位到了，所以换乘确实被尝试 —— 而路径服务答「没有路线」。
-    // 那是上游的失败而不是用户的，所以拒绝保留通用的换乘码，而不是去报一行完整的设置行的锚点。
+    // 那是上游**这一次**没答，不是用户的记录有问题：定价失败不入缓存，下一次读取会重新问，
+    // 故它走那个点名重读的码，而不是通用换乘码，也不是一行完整的设置行的锚点。
     const { service, walking } = serviceFor({
       chains: [storedChain([LEG_A])],
       settings: SETTINGS,
@@ -713,7 +714,7 @@ describe('F10 server: a gap in the data keeps the engine\'s own code', () => {
     try {
       expect((await onlyDeduction(service)).deduction).toEqual({
         status: 'no-conclusion',
-        reason: 'connection-unpriced',
+        reason: 'route-unpriced',
         leg: { seq: 0, lineId: '101', lineName: '101路' },
       })
       // 问了路线而它什么都没答，所以没有读任何站台：没有换乘就没有东西可以拿上车来比较。
@@ -1376,7 +1377,7 @@ describe('F10 server: the stored connection mode decides the connection', () => 
     try {
       expect((await onlyDeduction(service)).deduction).toEqual({
         status: 'no-conclusion',
-        reason: 'connection-unpriced',
+        reason: 'route-unpriced',
         leg: { seq: 0, lineId: LINE_A, lineName: '101路' },
       })
       // 它问的是骑行那条路线，且没有退到步行那条上。

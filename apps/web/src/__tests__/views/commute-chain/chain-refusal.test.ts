@@ -57,18 +57,34 @@ describe('every refusal code the contract declares has exactly one sentence', ()
   })
 })
 
+/**
+ * 「重读一次」的任意说法。
+ *
+ * 只有**这一次**没取到的东西才配得上这句：对记录与数据上的缺口，重读永远无用，
+ * 让那句话暗示可重试就是对用户说谎。故它是一个具名常量 + 一组守卫，
+ * 而不是每个码各自记一遍该说什么。
+ */
+const RETRY_HINT = /重试|稍后|再试|稍候|过一会儿|刷新|重读/
+
 describe('an unpriced connection promises no retry it cannot keep', () => {
   it('states only that the connection has no duration', () => {
     const sentence = REFUSAL_SENTENCE['connection-unpriced']({ anchor: 'home' })
     expect(sentence).toBe('这一段接驳的时长取不到，无法判断余量')
-    // 其成因中两个是永久的（站表携带却没有坐标的站，上游可能永不陈述）而一个是暂时的（路径服务恰好
-    // 未定价的路径）。「稍后重试」对后者为真、对前者为假，而该行无法告诉页面是哪一个触发——故不说。
-    expect(sentence).not.toMatch(/重试|稍后|再试|稍候|过一会儿/)
+    // 其三个成因都不是本次读取的暂时失败（站表携带却没有坐标的站、上游可能永不陈述；已存站不在该方向的
+    // 站序里；本构建读不了该线路）。重读对它们中任何一个都无用，故这句话不说任何重读的动作。
+    expect(sentence).not.toMatch(RETRY_HINT)
   })
 
-  it('promises no code a retry', () => {
+  it('names the re-read on the one code whose cause is temporary, and nowhere else', () => {
+    // 暂时的那一类有自己的码，且**只有**它承诺重读：路径服务的定价失败不入缓存，
+    // 下一次读取会重新问，而页面自己的刷新入口会真的重花一次上游读取并重载答案。
+    const temporary = REFUSAL_SENTENCE['route-unpriced']({ anchor: 'home' })
+    expect(temporary).toBe('这一段接驳的时长这次没取到 · 刷新一次')
+    expect(temporary).toMatch(RETRY_HINT)
+
     for (const [reason, sentence] of sentencesOf()) {
-      expect(sentence, reason).not.toMatch(/重试|稍后|再试|稍候|过一会儿/)
+      if (reason === 'route-unpriced') continue
+      expect(sentence, reason).not.toMatch(RETRY_HINT)
     }
   })
 })

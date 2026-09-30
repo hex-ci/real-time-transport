@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   LAST_LEG_REASON,
+  MAX_CHAIN_LEGS,
   emptyChainDraft,
   emptyLegDraft,
   lineOptionLabel,
@@ -1169,14 +1170,45 @@ describe('房子里的结构规则', () => {
     expect(hover!.ratio).toBeCloseTo(8.31, 1)
   })
 
-  it('添加乘车段的边界与本版一致：到上限的按钮禁用，并在原地说明这是首版的边界', async () => {
+  it('逐段加到上限：到上限的按钮禁用，并在原地说明这条边界', async () => {
     const host = await mountChainEditor()
-    await press(host, buttonWith(host, '添加乘车段'))
+    for (let legs = 1; legs < MAX_CHAIN_LEGS; legs += 1) {
+      await press(host, buttonWith(host, '添加乘车段'))
+    }
 
-    expect(host.nodes(item => item.props['data-chain-leg'] !== undefined)).toHaveLength(2)
+    expect(host.nodes(item => item.props['data-chain-leg'] !== undefined)).toHaveLength(MAX_CHAIN_LEGS)
     const add = host.node(item => item.tag === 'button'
-      && host.textOf(item).includes('首版一条链路最多 2 段乘车'), 'the add control at its limit')
+      && host.textOf(item).includes(`一条链路最多 ${MAX_CHAIN_LEGS} 段乘车`), 'the add control at its limit')
     expect(add.props.disabled).toBe(true)
+    host.unmount()
+  })
+
+  it('上限以上的段数一次写完：段序就是数组顺序，链路的段数没有隐含上限', async () => {
+    const host = await mountChainEditor()
+    await type(host, nameField(host), '四段通勤')
+
+    // 逐个把每一段填满（线路与上下车站），再加下一段。夹具里只有两种线路，故交替使用 ——
+    // 本用例看的是**段数**能不能穿过写入路径，不是线路的多样性。
+    const plan = [
+      { line: '快线 1 路 · 开往建国门', board: ['东大桥', 3], alight: ['建国门', 4] },
+      { line: '地铁 88 号线 · 开往平安里', board: ['车公庄', 2], alight: ['平安里', 3] },
+      { line: '快线 1 路 · 开往建国门', board: ['东大桥', 3], alight: ['建国门', 4] },
+      { line: '地铁 88 号线 · 开往平安里', board: ['车公庄', 2], alight: ['平安里', 3] },
+    ]
+    for (const [index, step] of plan.entries()) {
+      if (index > 0) await press(host, buttonWith(host, '添加乘车段'))
+      await chooseLine(host, index, step.line)
+      await pickStation(host, index, 'board', step.board[0] as string, step.board[1] as number)
+      await pickStation(host, index, 'alight', step.alight[0] as string, step.alight[1] as number)
+    }
+    await save(host)
+
+    const posts = recordWrites(host).filter(request => request.method === 'POST')
+    expect(posts).toHaveLength(1)
+    const legs = (posts[0]!.body as { legs: Array<{ lineName: string, boardStationName: string }> }).legs
+    expect(legs).toHaveLength(4)
+    expect(legs.map(leg => leg.lineName)).toEqual(['快线 1 路', '地铁 88 号线', '快线 1 路', '地铁 88 号线'])
+    expect(legs.map(leg => leg.boardStationName)).toEqual(['东大桥', '车公庄', '东大桥', '车公庄'])
     host.unmount()
   })
 

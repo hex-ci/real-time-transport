@@ -9,9 +9,10 @@ import type { RefusalView } from './types'
  * 只对一部分成因成立的句子对其余是假话。下表对 `ChainNoConclusionReason` 是 TOTAL 的
  * （`Record` 而非一串比较），故上游新增一个码是编译错误，而不是一行悄悄失效。
  *
- * 三个码需要小心：`anchor-unset` 是唯一用户可行动的成因，且动作取该成因自己的；
+ * 四个码需要小心：`anchor-unset` 是唯一用户可行动的成因，且动作取该成因自己的；
  * `leg-recorded-backwards` 覆盖两类无共同顺序的成因，故措辞不能提顺序；
- * `connection-unpriced` 的成因永久性不同，故不承诺重试、也不给动作。
+ * `route-unpriced` 的成因是暂时的（失败不入缓存，下次读取会重新向路径服务问），故那句话点名重读；
+ * `connection-unpriced` 的成因没有一个是暂时的，故不承诺重试、也不给动作。
  *
  * 拒绝是一个码，不是更小的答案：它不带分钟，也不描述数字是怎么算出来的。
  */
@@ -37,6 +38,7 @@ export const REFUSAL_SENTENCE: Record<ChainNoConclusionReason, (params: RefusalS
   'leg-recorded-backwards': () => '这条链路有乘车段的上车站与下车站填得走不通',
   'anchor-unset': ({ anchor }) => anchorUnsetSentenceOf(anchor),
   'connection-unpriced': () => '这一段接驳的时长取不到，无法判断余量',
+  'route-unpriced': () => '这一段接驳的时长这次没取到 · 刷新一次',
   'no-live': () => '这一段线路没有读到车况数据',
   'no-vehicle': () => '暂时没有开往这一站的车',
   'no-shared-vehicle': () => '这一段暂时无法确认可乘的班车',

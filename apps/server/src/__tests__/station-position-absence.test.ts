@@ -169,7 +169,6 @@ describe('F10 server: a stored stop marked (0, 0) is not walked to', () => {
         // 锚点确实存过，存下来的那一对在这个方向上也确实定位到了，
         // 所以缺的是站台自己的位置 —— 这让使用者无计可施，
         // 因而给出通用的换乘码而不是 设置。
-        // than 设置.
         reason: 'connection-unpriced',
         leg: { seq: 0, lineId: '101', lineName: '101路' },
       })

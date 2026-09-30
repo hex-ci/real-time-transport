@@ -254,6 +254,40 @@ describe('F10 deduction: the tightest boarding decides the chain', () => {
     expect(result.bindingSeq).toBe(0)
   })
 
+  it('reaches a tight boarding past the second leg — not only the first two', () => {
+    // 三段：余量依次 8 / 3 / 2，最紧的是**第三**段。断言落在它身上，
+    // 否则一个只看前两段的实现会照样通过。各段的就绪时刻逐段累加
+    // （上一段的下车时刻 + 本段接驳），故第三段的分钟本身就是链式推导的证据。
+    const result = deduced(chainInput([
+      { vehicles: [vehicle('A', minutes(13), minutes(25))] },
+      { lineId: '202', vehicles: [vehicle('C', minutes(33), minutes(45))] },
+      { lineId: '303', vehicles: [vehicle('E', minutes(52), minutes(65))] },
+    ]))
+
+    expect(result.legs).toHaveLength(3)
+    expect(result.legs.map(leg => leg.marginMinutes)).toEqual([8, 3, 2])
+    expect(result.legs.map(leg => leg.alightMinutes)).toEqual([25, 45, 65])
+    expect(result.marginMinutes).toBe(2)
+    expect(result.bindingSeq).toBe(2)
+    expect(result.band).toBe('tight')
+  })
+
+  it('has no leg-count ceiling: six legs deduce like two', () => {
+    // 段数不是引擎的一维：六段照样得出结论。每段的余量都是 3 分钟（同一构造逐个平移），
+    // 并列时取靠前那次 —— 故 bindingSeq 是 0，而段序列完整到第六段。
+    const result = deduced(chainInput(
+      [0, 1, 2, 3, 4, 5].map(n => ({
+        lineId: `${101 + n}`,
+        vehicles: [vehicle(`V${n}`, minutes(8 + n * 20), minutes(20 + n * 20))],
+      })),
+    ))
+
+    expect(result.legs).toHaveLength(6)
+    expect(result.legs.map(leg => leg.marginMinutes)).toEqual([3, 3, 3, 3, 3, 3])
+    expect(result.bindingSeq).toBe(0)
+    expect(result.marginMinutes).toBe(3)
+  })
+
   it('chains leg 1\'s ready time off the vehicle leg 0 is boarded on', () => {
     // 第 0 段在 20 分钟到达；换乘步行 5 分钟，故用户 25 分钟到第二段的上车站。
     // 26 分钟到的车赶得上、富余 1 分钟；22 分钟到的赶不上。
@@ -497,7 +531,7 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
     expect(result.leg).toEqual({ seq: 0, lineId: '101', lineName: '101路' })
   })
 
-  it('keeps every cause the user cannot act on in ONE code, whichever one the caller names', () => {
+  it('keeps every cause the user cannot act on in one code, and the temporary one in its own', () => {
     // 原因集**推导**自引擎自己的表，绝不在此手写：`CONNECTION_REFUSAL_CODES` 是
     // `ChainConnectionUnpricedReason` 上的全量 `Record`，故它的键**就是**整套词汇 ——
     // 任何原因缺码时引擎都编译不过。手写的集合不可能精确，因为它唯一会变旧的时刻正是没人看的时刻：
@@ -511,19 +545,34 @@ describe('F10 deduction: 无法给出结论 rather than a guessed number', () =>
     expect(CAUSES.filter(cause => CONNECTION_REFUSAL_CODES[cause] === 'anchor-unset'))
       .toEqual(['anchor-unset'])
 
-    // 其余每个原因 —— 线路详情读不到、已存车站不在该方向的停靠列表里、列表有该站但没给坐标、
-    // 或路径服务没计价出路线 —— 共用一个码。它们都不给用户任何动作，也不是关于答案的事实，
+    // 路径服务这一次没定出路线的成因是**暂时**的，故它走自己的码：那句话点名重读，
+    // 而这是页面能为它写、别个成因写不出的字。持久性不同的原因共用一句话，
+    // 会让那句话要么在这里承诺一个它兑现不了的等待，要么在那边漏掉唯一一件能做的事。
+    const temporary = CAUSES.filter(cause => cause !== 'anchor-unset'
+      && CONNECTION_REFUSAL_CODES[cause] === 'route-unpriced')
+    expect(temporary).toEqual(['route-unpriced'])
+    for (const cause of temporary) {
+      expect(refusal(chainInput([{ connectionSeconds: null, connectionUnpricedReason: cause }])), cause)
+        .toBe('route-unpriced')
+    }
+
+    // 其余每个原因 —— 线路详情读不到、已存车站不在该方向的停靠列表里、列表有该站但没给坐标 ——
+    // 共用一个码。它们都不给用户任何动作，也不是本次读取的暂时失败，
     // 故各自由一个页面能用一句诚实的话作答的码披露：`connection-unpriced`。
-    // 那句话不承诺可重试，因为这些原因的持久性不同（见 `ChainNoConclusionReason`）。
-    const unactable = CAUSES.filter(cause => cause !== 'anchor-unset')
-    expect(unactable.length).toBeGreaterThan(0)
-    for (const cause of unactable) {
-      expect(CONNECTION_REFUSAL_CODES[cause], cause).toBe('connection-unpriced')
+    // 那句话不承诺可重试，因为这些原因的重读永远无用（见 `ChainNoConclusionReason`）。
+    const settled = CAUSES.filter(cause => cause !== 'anchor-unset'
+      && CONNECTION_REFUSAL_CODES[cause] === 'connection-unpriced')
+    expect(settled.length).toBe(3)
+    for (const cause of settled) {
       expect(refusal(chainInput([{ connectionSeconds: null, connectionUnpricedReason: cause }])), cause)
         .toBe('connection-unpriced')
     }
 
-    // 说不清原因的调用方就什么都不给，落到同一个码 —— 那是进入该码唯一不自带原因的途径。
+    // 三组就是整张表：漏掉一个新原因会让上面任一组少一项，故在此断言并集 ——
+    // 否则「每个成因都被钉住」这句话会因为守卫自己少列了一行而变成假的。
+    expect(new Set([...temporary, ...settled, 'anchor-unset']).size).toBe(CAUSES.length)
+
+    // 说不清原因的调用方就什么都不给，落到通用码 —— 那是进入该码唯一不自带原因的途径。
     expect(refusal(chainInput([{ connectionSeconds: null }]))).toBe('connection-unpriced')
   })
 

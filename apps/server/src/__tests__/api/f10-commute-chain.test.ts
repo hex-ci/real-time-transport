@@ -562,7 +562,7 @@ describeEachStore('F10 通勤链路', (store) => {
     })
   })
 
-  it('接驳定不了价时，录反了的那一段也先答 connection-unpriced', async () => {
+  it('接驳定不了价时，录反了的那一段也先答自己的接驳码', async () => {
     if (store !== 'sql') return
 
     // 判定顺序是有意的：接驳能定价才证明两个站都在这个方向的站序表里定位到了，站序才可比。
@@ -581,9 +581,10 @@ describeEachStore('F10 通勤链路', (store) => {
 
     const res = await deductions()
     expect(res.statusCode, res.body).toBe(200)
+    // 路径服务这一次没定出路线 —— 接驳码先于「录反了」，故这里答的是它而不是录反。
     expect(res.json().data.chains[0].deduction).toMatchObject({
       status: 'no-conclusion',
-      reason: 'connection-unpriced',
+      reason: 'route-unpriced',
       leg: { seq: 0, lineId: LINE_A, lineName: '甲线' },
     })
   })

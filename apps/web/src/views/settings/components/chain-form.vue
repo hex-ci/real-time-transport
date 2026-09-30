@@ -237,11 +237,11 @@ function onSave(): void {
         type="button"
         class="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-950 text-xs text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300 active:scale-95"
         :disabled="atLegLimit || !hasLines"
-        :title="atLegLimit ? `首版一条链路最多 ${MAX_CHAIN_LEGS} 段乘车` : undefined"
+        :title="atLegLimit ? `一条链路最多 ${MAX_CHAIN_LEGS} 段乘车` : undefined"
         @click="addLeg"
       >
         <Plus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>{{ atLegLimit ? `首版一条链路最多 ${MAX_CHAIN_LEGS} 段乘车` : '添加乘车段' }}</span>
+        <span>{{ atLegLimit ? `一条链路最多 ${MAX_CHAIN_LEGS} 段乘车` : '添加乘车段' }}</span>
       </button>
     </div>
 

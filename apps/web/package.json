@@ -13,7 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@lucide/vue": "^1.48.0",
+    "@lucide/vue": "^1.49.0",
     "@real-time-transport/shared": "workspace:*",
     "@use-gesture/vanilla": "^10.3.1",
     "@vueuse/core": "^15.0.0",

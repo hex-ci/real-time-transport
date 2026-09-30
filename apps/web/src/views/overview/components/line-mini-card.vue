@@ -383,23 +383,23 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
       <!-- 加载态：详情还没从接口解析出来。与下面两条空状态一样吃掉主体余下的高度、文字居中 ——
            富余空间落在深色面板内部，故卡片深浅两块的比例与内容满的卡片一致。 -->
-      <div v-if="!detailLoaded" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
+      <div v-if="!detailLoaded" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
         <span class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600" :class="accent.spinner"></span>
         正在加载线路数据...
       </div>
 
       <template v-else>
         <!-- 诚实的空状态，一种成因一条 -->
-        <div v-if="nearbyNotice" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-if="nearbyNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ nearbyNotice }}
         </div>
-        <div v-else-if="legNotice" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
 
         <!-- 这一块也必须吃掉余下高度：同一行里内容少的卡片会被拉高，富余空间若落在面板外
              就露出浅色底 —— 卡片深浅两块的比例随行内邻居而变，那是同一屏里同一张卡两种样子。 -->
-        <div v-else-if="stopName" class="my-3.5 grow space-y-2.5 rounded-xl bg-slate-950/80 p-3">
+        <div v-else-if="stopName" class="mt-3.5 grow space-y-2.5 rounded-xl bg-slate-950/80 p-3">
           <!-- 这张卡片报告的那个站 -->
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">

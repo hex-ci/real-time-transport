@@ -280,6 +280,22 @@ describe('操作栏始终贴着卡片底边', () => {
     const radii = new Set(panels.map((c: string) => c.match(/rounded-[a-z0-9]+/)?.[0]))
     expect([...radii]).toEqual(['rounded-xl'])
   })
+
+  it('面板只给上边距：它下方那处间距就是主体的下内边距，两层不再叠加', async () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),
+      'utf-8',
+    )
+    // 面板曾经是 `my-3.5`，于是它到操作栏之间是 14 + 16 = 30px，而卡片内其余间距都在 10~16px：
+    // 同一张卡里一处比别处大一倍，看起来像内容与动作分成了两块。四块面板一个都不能漏。
+    const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
+    expect(panels).toHaveLength(4)
+    for (const cls of panels) {
+      expect(cls).toContain('mt-3.5')
+      expect(cls).not.toContain('my-3.5')
+      expect(cls).not.toContain('mb-')
+    }
+  })
 })
 
 describe('置顶横幅不再占卡片顶边', () => {

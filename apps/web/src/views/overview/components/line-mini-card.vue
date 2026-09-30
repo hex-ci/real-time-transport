@@ -469,7 +469,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
           <!-- 首行的后续车次。feed 混了种类时每行说出自己的种类（F4）；一个词对整个列表成立时它
                已经搭在上面首行的分钟上。`flex-wrap` 使标记在 375px 手机上不挤压分钟数。 -->
-          <div v-if="primarySubsequent.length > 0" class="flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-2 text-xs">
+          <div v-if="primarySubsequent.length > 0" class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-t border-slate-800/60 pt-2 text-xs">
             <span class="shrink-0 text-slate-400">后续</span>
             <span
               v-for="(a, i) in primarySubsequent"
@@ -477,10 +477,12 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
               class="flex items-baseline gap-1"
             >
               <!-- 后续行说出自己的分钟或说没有 —— 与首行同一条规则，而它没有数字可供标记限定时，自己
-                   的标记是 `null`。 -->
+                   的标记是 `null`。分钟与首行同色同字重，只把字号从 24 降到 16（两档）：这几班同样
+                   是要等的车，只是不如最快那班要紧 —— 用大小分层，而不是用颜色分层。16 是量出来的
+                   边界：再大一档（18）在 375 上每行就少站一辆车。 -->
               <template v-if="statedArrivalMinutes(a) !== null">
-                <span class="font-mono font-bold text-slate-300">{{ statedArrivalMinutes(a) }}分</span>
-                <span class="font-mono text-slate-400">{{ a.time }}</span>
+                <span class="font-mono text-base font-black tracking-tight" :class="accent.etaText">{{ statedArrivalMinutes(a) }}分</span>
+                <span class="font-mono text-xs text-slate-300">{{ a.time }}</span>
               </template>
               <span v-else class="text-slate-400">{{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}</span>
               <span v-if="subsequentMarkOf(i)" class="text-slate-400">{{ subsequentMarkOf(i) }}</span>

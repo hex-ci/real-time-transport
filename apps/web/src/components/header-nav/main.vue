@@ -83,8 +83,8 @@ function onCityChange(): void {
 
         <!-- 移动端汉堡按钮：精确 40×40（h-10 w-10），与 CitySwitcher 的 40px 高度对齐 -->
         <button
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:hidden"
-          :class="mobileMenuOpen ? 'border-cyan-500/50 text-cyan-400 bg-slate-800' : ''"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95 md:hidden"
+          :class="mobileMenuOpen ? 'border-cyan-500/50 text-cyan-400 bg-slate-800' : 'border-slate-700 bg-slate-800/80 text-slate-300'"
           :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
           @click="mobileMenuOpen = !mobileMenuOpen"
         >

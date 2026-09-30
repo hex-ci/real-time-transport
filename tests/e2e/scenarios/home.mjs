@@ -163,6 +163,154 @@ export async function run({ check, equal, note, fixtures }) {
     await cli(['unroute', `**${cPath}**`])
   }
 
+  // ---- 置顶：卡片真的「走过去」，且动画结束后不留下残留的位移 -------------------
+  // 这一条只有浏览器做得了。要钉住的是「重排时卡片没有瞬移」——它靠 FLIP 实现：先在旧坐标上画
+  // 一帧，再平滑走到新坐标。若哪天 `onBeforeUpdate` 里的量坐标被挪到更新之后，位移会恒为零、
+  // 动画静默失效，而**卡片顺序仍然是对的** —— 只看「它到首位了吗」永远发现不了。
+  //
+  // 必须在**单列**下量。夹具只有三条关注，宽屏一屏一行摆完，三张卡的纵坐标相同，卡片纵向上根本
+  // 没动过 —— 那样的断言抓不到任何东西（没有位移的动画也「没有瞬移」）。
+  const cardIds = `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+    .map(c => c.getAttribute('data-favorite-id')))`
+  const idsBefore = await pageEval(cardIds)
+  const pinnedId = idsBefore[idsBefore.length - 1]
+  const viewportBefore = await pageEval('JSON.stringify([window.innerWidth, window.innerHeight])')
+
+  await cli(['resize', '375', '800'])
+  await waitForValue('JSON.stringify(window.innerWidth)', w => w === 375, { what: '切到单列视口' })
+  const idsInColumn = await pageEval(cardIds)
+  check(
+    '单列下三条关注都在（否则下面几条没得量）',
+    idsInColumn.length === idsBefore.length && idsInColumn[idsInColumn.length - 1] === pinnedId,
+    `单列 ${JSON.stringify(idsInColumn)}，宽屏 ${JSON.stringify(idsBefore)}`,
+  )
+
+  await pageEval(`(() => {
+    const cards = () => [...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+    const el = cards().find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
+    const startTop = Math.round(el.getBoundingClientRect().top)
+    const samples = []
+    const began = performance.now()
+    ;[...el.querySelectorAll('button')]
+      .find(b => (b.getAttribute('aria-label') || '').includes('置顶')).click()
+    const step = () => {
+      const now = cards().find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
+      if (now) samples.push(Math.round(now.getBoundingClientRect().top))
+      if (performance.now() - began < 900) requestAnimationFrame(step)
+      else {
+        const settled = cards().find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
+        window.__pinProbe = {
+          startTop,
+          samples,
+          settledTop: Math.round(settled.getBoundingClientRect().top),
+          settledTransform: getComputedStyle(settled).transform,
+          firstId: cards()[0].getAttribute('data-favorite-id'),
+        }
+      }
+    }
+    requestAnimationFrame(step)
+    return JSON.stringify(true)
+  })()`)
+
+  const probe = await waitForValue(
+    'JSON.stringify(window.__pinProbe ?? null)',
+    v => v && Array.isArray(v.samples) && v.samples.length > 5,
+    { what: '置顶动画采样完成', timeout: 15_000 },
+  )
+  check(
+    '置顶确实把它挪到了另一行（故下面几条不是空转）',
+    Math.abs(probe.startTop - probe.settledTop) > 40,
+    `起点 top ${probe.startTop}，终点 top ${probe.settledTop}`,
+  )
+  const drift = Math.min(...probe.samples.map(top => Math.abs(top - probe.startTop)))
+  check(
+    '置顶时卡片在旧坐标上被画过一帧（没有瞬移）',
+    drift <= 24,
+    `离起点最近的一帧差 ${drift}px，起点 ${probe.startTop}，采样 ${probe.samples.slice(0, 6).join(',')}`,
+  )
+  check(
+    '置顶后它落到首位',
+    probe.firstId === pinnedId,
+    `首位是 ${probe.firstId}`,
+  )
+  check(
+    '动画结束后不留下残留的 transform',
+    probe.settledTransform === 'none',
+    `实际 ${probe.settledTransform}`,
+  )
+  const idsAfter = await pageEval(cardIds)
+  check(
+    '顺序确实变了（故上面几条不是空转）',
+    String(idsAfter[0]) === String(pinnedId) && idsAfter[idsAfter.length - 1] !== pinnedId,
+    `置顶前 ${JSON.stringify(idsBefore)}，置顶后 ${JSON.stringify(idsAfter)}`,
+  )
+
+  // 收尾：取消置顶，把这个库恢复成测试进来时的样子，视口也还原。
+  await pageEval(`(() => {
+    const el = [...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+      .find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
+    ;[...el.querySelectorAll('button')]
+      .find(b => (b.getAttribute('aria-label') || '').includes('取消置顶')).click()
+    return JSON.stringify(true)
+  })()`)
+  await waitForValue(cardIds, ids => ids[0] !== pinnedId, { what: '取消置顶生效', timeout: 15_000 })
+  await cli(['resize', String(viewportBefore[0]), String(viewportBefore[1])])
+  await waitForValue('JSON.stringify(window.innerWidth)', w => w === viewportBefore[0], { what: '还原视口' })
+
+  // ---- 深色面板必须吃掉余下高度 -------------------------------------------------
+  // 同一行卡片被网格拉成等高，富余高度若落在面板外面就露出浅色底 —— 卡片深浅两块的比例随邻居而变。
+  //
+  // 「各卡的缝是否齐平」这一条本身就抓得住回归：拿掉内容面板的 `grow` 后实测各卡的缝变成
+  // [30, 116, 65]（夹具里的卡内容量本来就不同）。下面那对探针再把这条路走死 —— 它自己造出
+  // 「同排有更高的卡」这个条件，故不依赖夹具恰好排成什么样。
+  async function stretchProbe(index, extra) {
+    return pageEval(`(() => {
+      const card = [...document.querySelectorAll('main div.grid.grid-cols-1 > div')][${index}]
+      const link = card.querySelector(':scope > a')
+      const panel = [...link.children].find(c => (c.className || '').includes('bg-slate-950'))
+      const bar = card.querySelector(':scope > div.border-t')
+      const read = () => ({
+        h: Math.round(card.getBoundingClientRect().height),
+        panelH: Math.round(panel.getBoundingClientRect().height),
+        gap: Math.round(bar.getBoundingClientRect().top - panel.getBoundingClientRect().bottom),
+      })
+      const before = read()
+      card.style.minHeight = (before.h + ${extra}) + 'px'
+      const after = read()
+      card.style.minHeight = ''
+      return JSON.stringify({ before, after })
+    })()`)
+  }
+
+  const cardsSeen = await pageEval(`JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')].map(card => {
+    const link = card.querySelector(':scope > a')
+    const panel = link ? [...link.children].find(c => (c.className || '').includes('bg-slate-950')) : null
+    const bar = card.querySelector(':scope > div.border-t')
+    return {
+      panelH: panel ? Math.round(panel.getBoundingClientRect().height) : null,
+      gap: panel && bar ? Math.round(bar.getBoundingClientRect().top - panel.getBoundingClientRect().bottom) : null,
+    }
+  }))`)
+  check('每张卡都有深色面板', cardsSeen.every(c => c.panelH !== null), JSON.stringify(cardsSeen))
+  check(
+    '各卡的深色面板都撑到操作栏前同一个位置',
+    Math.max(...cardsSeen.map(c => c.gap)) - Math.min(...cardsSeen.map(c => c.gap)) <= 1,
+    `各卡的缝：${JSON.stringify(cardsSeen.map(c => c.gap))}`,
+  )
+
+  const STRETCH = 90
+  const stretched = await stretchProbe(0, STRETCH)
+  check(
+    '卡片被拉高时，多出来的高度落进深色面板里',
+    stretched.after.panelH - stretched.before.panelH === STRETCH,
+    `面板 ${stretched.before.panelH} → ${stretched.after.panelH}，卡高 ${stretched.before.h} → ${stretched.after.h}`,
+  )
+  check(
+    '拉高之后面板与操作栏之间没有多出浅色缝',
+    stretched.after.gap === stretched.before.gap,
+    `缝 ${stretched.before.gap} → ${stretched.after.gap}`,
+  )
+
   // ---- 能点进详情 -------------------------------------------------------------
   const detail = await lineDetail(a.line.upLineId, 0)
   const index = await pageEval(CARD_INDEX(a.line.lineName))

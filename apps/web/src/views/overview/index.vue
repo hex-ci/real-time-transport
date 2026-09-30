@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { House, LocateFixed, Building2, Wand2, TriangleAlert } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
@@ -185,6 +185,14 @@ const pinError = shallowRef<string | null>(null)
 const pinningFavoriteId = shallowRef<string | null>(null)
 
 /**
+ * 一次置顶/取消置顶里正在动的那一条关注，供卡片网格的位移动画点名。
+ *
+ * 它比在途标记多活一拍：写入失败时 store 会把列表回滚回去，那次回滚的重排也要被画成动画，
+ * 而回滚发生在请求落地之后 —— 立刻清掉的话，卡片会「自己跳回去」，正是要避免的那件事。
+ */
+const pinMotionTargetId = shallowRef<string | null>(null)
+
+/**
  * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
  * 都在首页卡片上。
  *
@@ -195,6 +203,9 @@ async function onTogglePin(card: MiniCardConfig): Promise<void> {
   if (!favoriteId || pinningFavoriteId.value === favoriteId) return
   pinError.value = null
   pinningFavoriteId.value = favoriteId
+  // 与 store 的乐观写入落在同一个 tick，于是列表的重排与这个点名同批渲染 —— 动画因此拿得到
+  // 「重排前」的坐标。
+  pinMotionTargetId.value = favoriteId
   try {
     await runWithFeedback(
       // 卡片上此刻是不是钉住的，决定这次按下是钉还是解 —— 与那枚按钮自己的措辞同源。
@@ -208,6 +219,9 @@ async function onTogglePin(card: MiniCardConfig): Promise<void> {
   }
   finally {
     pinningFavoriteId.value = null
+    // 多留一拍：回滚引起的那次重排也在这一拍里画完，再撤掉点名。
+    await nextTick()
+    pinMotionTargetId.value = null
   }
 }
 
@@ -833,6 +847,7 @@ onMounted(() => {
       :mode="currentMode"
       :arrivals="arrivalsMap"
       :nearby-location="nearbyLocation"
+      :motion-target-id="pinMotionTargetId"
       @switch-direction="onSwitchDirection"
       @toggle-pin="onTogglePin"
     />

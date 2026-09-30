@@ -214,8 +214,8 @@ function onKeydown(event: KeyboardEvent): void {
             v-for="(option, index) in filtered"
             :key="option.key"
             :value="option.key"
-            class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
-            :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : ''"
+            class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
+            :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-200'"
             @select="choose(option)"
             @pointermove="activeIndex = index"
           >

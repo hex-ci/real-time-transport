@@ -210,6 +210,30 @@ describe('卡片主体里除了它自己那枚链接，没有别的可点控件'
 
     host.unmount()
   })
+
+  it('反方向那一行不带任何字形 —— ⇄ 在本应用里专指「点它会切换」', async () => {
+    const host = await mountCard()
+    // 定位到那一行本身：带分隔线、且文本里有反方向的终点名。
+    const row = host.node(
+      (n: any) => n.tag === 'div'
+        && String(n.props.class ?? '').includes('border-t')
+        && host.textOf(n).includes('开往 通州北苑路口南'),
+      'the secondary direction row',
+    )
+    // 这一行只报告。原先它是按钮、旁边挂着 ⇄；动作收进操作栏后，同一个字形只剩「操作栏那一格」
+    // 与「线路详情的切换按钮」两处用处 —— 两处都挂 @click。留在不可点的文字旁边，它承诺的就是
+    // 一个按不动的动作（何况它还把方向名从站名那一列推开 16px）。
+    const svgs: any[] = []
+    const walk = (el: any) => {
+      if (el.tag === 'svg') svgs.push(el)
+      for (const child of el.children ?? []) walk(child)
+    }
+    walk(row)
+    expect(host.textOf(row)).toContain('开往 通州北苑路口南')
+    expect(svgs.map((s: any) => s.tag)).toEqual([])
+
+    host.unmount()
+  })
 })
 
 describe('操作栏始终贴着卡片底边', () => {
@@ -224,25 +248,57 @@ describe('操作栏始终贴着卡片底边', () => {
     expect(source).toMatch(/class="flex flex-1 flex-col p-4/)
   })
 
-  it('空状态与加载态的深色面板吃掉余下高度、文字垂直居中', () => {
+  it('每一种深色面板都吃掉余下高度；空状态与加载态的文字还要垂直居中', () => {
     const source = readFileSync(
       fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),
       'utf-8',
     )
-    // 面板不 `grow` 时，富余空间落在面板外面 —— 卡片深浅两块的比例与内容满的卡片对不上
-    // （实测深色占比会掉到 40% 上下，而满卡片是 63%）。
+    // 面板不 `grow` 时，富余空间落在面板外面 —— 同一行里内容少的卡片会被邻居拉高，于是露出浅色底，
+    // 深浅两块的比例随行内邻居而变。四种面板（加载 / 附近空 / 通勤段空 / 有内容）一个都不能漏：
+    // 上一版这条断言只覆盖了前三种，第四种就是这么漏过去的（实测把卡高拉长 90px，它纹丝不动）。
     const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
+    expect(panels).toHaveLength(4)
+    for (const cls of panels) expect(cls).toContain('grow')
+
     const emptyPanels = panels.filter((c: string) => !c.includes('space-y-2.5'))
-    expect(emptyPanels.length).toBe(3)
+    expect(emptyPanels).toHaveLength(3)
     for (const cls of emptyPanels) {
-      expect(cls).toContain('grow')
       expect(cls).toContain('items-center')
       expect(cls).toContain('justify-center')
     }
   })
+
+  it('四块面板同一圆角 —— 同一个盒子不因「这次有没有数据」换形状', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),
+      'utf-8',
+    )
+    // 12px 是这一类内嵌面板在仓库里的既有约定（同卡的线路徽标、线路详情那几块都是它），
+    // 而徽标恰好也是 36px 高 —— 与 375 下的通知面板同尺寸，故不存在「太圆了像胶囊」。
+    const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
+    expect(panels).toHaveLength(4)
+    const radii = new Set(panels.map((c: string) => c.match(/rounded-[a-z0-9]+/)?.[0]))
+    expect([...radii]).toEqual(['rounded-xl'])
+  })
 })
 
 describe('置顶横幅不再占卡片顶边', () => {
+  it('卡片根的过渡不包含 transform —— 位移动画要自己控制它', async () => {
+    const host = await mountCard()
+
+    const root = host.node(
+      (n: any) => n.tag === 'div' && String(n.props.class ?? '').includes('group relative flex flex-col'),
+      'the card root',
+    )
+    const tokens = String(root.props.class).split(/\s+/)
+    // `transition` 工具类的属性表里有 transform，位移动画（FLIP）写上去的 transform 会被它
+    // 按 150ms 自己过渡一遍，与动画的时长和曲线打架。故只能用只含颜色的 `transition-colors`。
+    expect(tokens).toContain('transition-colors')
+    expect(tokens).not.toContain('transition')
+
+    host.unmount()
+  })
+
   it('源码里没有那条横幅 —— 那个位置留给「前方 N 辆」', () => {
     const source = readFileSync(
       fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),

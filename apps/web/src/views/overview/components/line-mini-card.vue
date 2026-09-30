@@ -333,7 +333,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
        纵向 flex：网格把同一行的卡片拉成等高，主体吃掉富余高度，操作栏因此始终贴着卡片底边 ——
        内容不足的卡片不会把操作栏留在半空。 -->
   <div
-    class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition hover:bg-slate-900"
+    class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition-colors hover:bg-slate-900"
     :class="accent.hoverBorder"
   >
     <!-- 主体是真正的链接：可聚焦、键盘可开、辅助技术读得出「这里通往线路详情」。原先它是一个
@@ -383,21 +383,23 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
       <!-- 加载态：详情还没从接口解析出来。与下面两条空状态一样吃掉主体余下的高度、文字居中 ——
            富余空间落在深色面板内部，故卡片深浅两块的比例与内容满的卡片一致。 -->
-      <div v-if="!detailLoaded" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
+      <div v-if="!detailLoaded" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-1.5 text-xs text-slate-400 lg:px-3.5 lg:py-2 lg:text-base">
         <span class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-600" :class="accent.spinner"></span>
         正在加载线路数据...
       </div>
 
       <template v-else>
         <!-- 诚实的空状态，一种成因一条 -->
-        <div v-if="nearbyNotice" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-if="nearbyNotice" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ nearbyNotice }}
         </div>
-        <div v-else-if="legNotice" class="my-3.5 flex grow items-center justify-center rounded-lg bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+        <div v-else-if="legNotice" class="my-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
 
-        <div v-else-if="stopName" class="my-3.5 space-y-2.5 rounded-xl bg-slate-950/80 p-3">
+        <!-- 这一块也必须吃掉余下高度：同一行里内容少的卡片会被拉高，富余空间若落在面板外
+             就露出浅色底 —— 卡片深浅两块的比例随行内邻居而变，那是同一屏里同一张卡两种样子。 -->
+        <div v-else-if="stopName" class="my-3.5 grow space-y-2.5 rounded-xl bg-slate-950/80 p-3">
           <!-- 这张卡片报告的那个站 -->
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">
@@ -439,15 +441,15 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
           <!-- 同一个站台上的反方向。它只报告那个方向的到站情况，不再自己承担动作 —— 切换方向
                在下面的操作栏里。原先它是一个按钮，于是与卡片主体成了嵌套的两个可点区域：
-               手指差几像素就是另一个动作。标签说出它开往哪里，所以两行从不含糊。 -->
+               手指差几像素就是另一个动作。标签说出它开往哪里，所以两行从不含糊。
+               这一行**不带任何字形**：⇄ 在本应用里专指「点它会切换方向」（操作栏那一格、线路
+               详情的切换按钮都是它），放在不可点的文字旁边就是承诺了一个按不动的动作；它还让
+               方向名比上一行的站名右移 16px，面板里的左列于是对不齐。 -->
           <div
             v-if="secondaryRow"
             class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs lg:gap-2.5 lg:pt-2.5 lg:text-base"
           >
-            <span class="flex min-w-0 items-center gap-1 text-slate-400">
-              <ArrowLeftRight class="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span class="truncate">{{ secondaryRow.directionName }}</span>
-            </span>
+            <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}</span>
             <span class="flex shrink-0 items-baseline gap-1.5">
               <template v-if="secondaryHasArrivals">
                 <template v-if="minutesOf(secondaryArrivals) !== null">
@@ -505,10 +507,12 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
     <!-- 操作栏：这张卡片的动作归属地。每格等宽、各自 ≥44px，故三个动作互不误触，也不与「点
          主体看详情」抢同一个手势。置顶按下的状态由那一格自己表示。 -->
     <div class="flex items-stretch border-t border-slate-800/80 bg-slate-950/45">
+      <!-- 置顶按下时这一格的字色也是青的；字色**两态都给**，静态类里不放 `text-<颜色>` ——
+           静态与动态同属性时两者特异性相同，谁赢只看编译后 CSS 里谁在后，读代码看不出来。 -->
       <button
         type="button"
-        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
-        :class="isPinned ? 'bg-cyan-500/8 text-cyan-400' : ''"
+        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        :class="isPinned ? 'bg-cyan-500/8 text-cyan-400' : 'text-slate-300'"
         :aria-label="isPinned ? '取消置顶' : '置顶此线路'"
         :aria-pressed="isPinned"
         @click="$emit('toggle-pin')"

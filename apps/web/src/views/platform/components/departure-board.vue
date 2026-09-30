@@ -74,8 +74,8 @@ function distanceText(meters: number | null): string | null {
          不替换它（时刻仍描述可见的行），刷新失败也在此陈述。 -->
     <div
       v-if="freshnessText"
-      class="border-b border-slate-800/60 px-3 py-2 text-xs text-slate-400 lg:px-4 lg:text-base"
-      :class="readFailed ? 'text-rose-400' : ''"
+      class="border-b border-slate-800/60 px-3 py-2 text-xs lg:px-4 lg:text-base"
+      :class="readFailed ? 'text-rose-400' : 'text-slate-400'"
     >
       {{ freshnessText }}
     </div>

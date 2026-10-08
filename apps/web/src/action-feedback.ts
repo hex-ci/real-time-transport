@@ -85,14 +85,6 @@ export const ACTION_FEEDBACK = {
     ok: context => `已取消关注${named(context)}`,
     fail: context => `取消关注失败${named(context)}${why(context)}`,
   },
-  'favorite-pin': {
-    ok: context => `已置顶${named(context)}`,
-    fail: context => `置顶失败${named(context)}${why(context)}`,
-  },
-  'favorite-unpin': {
-    ok: context => `已取消置顶${named(context)}`,
-    fail: context => `取消置顶失败${named(context)}${why(context)}`,
-  },
   'favorite-reorder': {
     ok: () => '顺序已更新',
     fail: context => `顺序保存失败${why(context)}`,

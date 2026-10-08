@@ -835,9 +835,11 @@ export const useTransitStore = defineStore('transit', () => {
 
     const pinned = !target.isPinned
     const previous = favorites.value
+    // 只给「标记真的变了」的行换新对象：展开每一行会让列表里每张卡都跟着重渲染，那一次停顿正好
+    // 压在重排动画的起跑上。
     favorites.value = orderFavorites(previous.map(f => (f.id === favoriteId
       ? { ...f, isPinned: pinned }
-      : (pinned ? { ...f, isPinned: false } : f))))
+      : (pinned && f.isPinned ? { ...f, isPinned: false } : f))))
 
     try {
       const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
@@ -853,7 +855,7 @@ export const useTransitStore = defineStore('transit', () => {
       // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
       favorites.value = orderFavorites(favorites.value.map(f => (f.id === saved.id
         ? saved
-        : (pinned ? { ...f, isPinned: false } : f))))
+        : (pinned && f.isPinned ? { ...f, isPinned: false } : f))))
     }
     catch (err) {
       favorites.value = previous

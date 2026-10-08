@@ -65,9 +65,6 @@ describe('每一个动作两种结局各有一句话', () => {
     expect(feedbackTextOf('favorite-remove', 'ok', { name: '52' })).toBe('已取消关注 52')
     expect(feedbackTextOf('favorite-remove', 'ok')).toBe('已取消关注')
     expect(feedbackTextOf('chain-remove', 'ok', { name: '早上上班' })).toBe('已删除链路 早上上班')
-    // 置顶与取消置顶是两句话，绝不是一句话带着一个布尔。
-    expect(feedbackTextOf('favorite-pin', 'ok', { name: '52' })).toBe('已置顶 52')
-    expect(feedbackTextOf('favorite-unpin', 'ok', { name: '52' })).toBe('已取消置顶 52')
   })
 
   it('定位的四种结局：取到、不支持、被拒、取不到或超时', () => {
@@ -219,8 +216,8 @@ describe('文案表是唯一来源', () => {
       // 位置锚点（保存）与通勤时段（保存）各一个写操作。
       'views/settings/anchor-detail.vue': 1,
       'views/settings/components/commute-hours-form.vue': 1,
-      // 首页只推置顶，线路页只推上车点。
-      'views/overview/index.vue': 1,
+      // 首页的置顶状态由操作栏与列表重排自己说，线路页只推上车点。
+      'views/overview/index.vue': 0,
       'views/line-detail/index.vue': 0,
       // 五个结局（取到、不支持、被拒、取不到、开发模拟下取到）都在 store 里说。
       'stores/location.store.ts': 5,

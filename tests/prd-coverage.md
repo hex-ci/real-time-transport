@@ -28,7 +28,7 @@
 | 多班次并列，不压缩成单一结论 | `api/f1-…` ·「没有上游到站时间的车仍然成行，但不给任何分钟」 | 同一列表里多行各自独立存在、各自分钟互不借用 | 2 |
 | 「读不到」≠「没有车」 | `api/x-read-state-not-empty.test.ts` ·「确实为空…200 与一个说出线路名的空列表」/「读失败：上游没答 —— 拒绝，绝不是 200 与一个空列表」 | 状态码与形状不同（200+空列表 vs 拒绝） | 1+2 |
 | 提示集中在信息卡内的提示位、工具行里没有提示；模式容器一个字都不被裁 | `web/__tests__/views/overview/top-area-toolbar.test.ts` ·「提示在场时工具行仍然装得下：那一句不在工具行里，故不动它的算术」「两档都只在没设过时出现，且它不在工具行里、是整行 44px 的入口」「375 上装得下这一行…」+ `tests/e2e/scenarios/mobile.mjs` ·「未设置通勤时段：四个档位一个都不被裁」「…那一句不在工具行里」「…提示是工具行之下的整行 44px 入口」「模式容器的宽度下限是真的（computed = max-content）」 | 容器自己的 `scrollWidth − clientWidth == 0`；computed `min-width == max-content`；提示在 `[data-prompt-area]` 内、宽度等于工具行宽、`top ≥ 工具行 bottom`；**变异验证**：把提示搬回工具行 → 两条位置断言红（`inToolbar=true`、提示宽 194 ≠ 329）；把 `min-w-max` 换回 `min-w-max-content` → computed 红（`auto`／`0px`） | 1+3 |
-| **操作反馈只由提示说一次，页上不留第二处**；非操作反馈（读取失败、字段旁的本地校验）才用固定提示条 | `web/__tests__/action-feedback.test.ts` ·「被拒的原因跟在表里那句话后面，除非它只是同一件事换个说法」「每一页的推送点数目恰好是它自己的写操作数：切换与导航一个都不推」+ `web/__tests__/views/overview/action-feedback-overview.test.ts` ·「被拒：说一句置顶失败，并带上服务端给的原因」+ `web/__tests__/views/settings/action-feedback-writes.test.ts` ·「被拒：说一句未能保存」「被拒：说一句通勤时段保存失败」+ `web/__tests__/views/settings/anchor-place-search.test.ts` ·「保存失败留在这一页」「写库被拒」「用当前位置失败」+ `web/__tests__/views/settings/commute-chain-editor.test.ts` ·「把 400 的消息原样说一句，表单不关、列表不变」 | 每一次失败只推一句（`messages()` 恰好一条）且 `host.text()` 里**不含**那句原因；每页的推送出口数等于它的写操作数；`rejectionOf` 只丢「以失败收尾」的缺省句，服务端的成因整句要带上；**变异验证**：把内联加回去 → 对应断言红 | 1+2 |
+| **操作反馈默认只由提示说一次，屏幕已完整说明结果的动作不推提示**；非操作反馈（读取失败、字段旁的本地校验）才用固定提示条 | `web/__tests__/action-feedback.test.ts` ·「被拒的原因跟在表里那句话后面，除非它只是同一件事换个说法」「每一页的推送点数目恰好是它自己的写操作数：切换与导航一个都不推」+ `web/__tests__/views/overview/action-feedback-overview.test.ts` ·describe「置顶：成功由操作栏自己说」+ `web/__tests__/views/settings/action-feedback-writes.test.ts` ·「被拒：说一句未能保存」「被拒：说一句通勤时段保存失败」+ `web/__tests__/views/settings/anchor-place-search.test.ts` ·「保存失败留在这一页」「写库被拒」「用当前位置失败」+ `web/__tests__/views/settings/commute-chain-editor.test.ts` ·「把 400 的消息原样说一句，表单不关、列表不变」 | 首页置顶/取消置顶成功、失败与回滚均零 toast，由操作栏状态与重排说明；其余写入失败推一句且页上不含重复原因；各页的推送出口数按实际需要固定；`rejectionOf` 只丢「以失败收尾」的缺省句，服务端的成因整句要带上；**变异验证**：把内联加回去 → 对应断言红 | 1+2 |
 | 首页卡片读失败不写成「暂无来车」 | `web/__tests__/views/overview/arrivals-read-wording.test.ts` ·「到站读取没答上来：说未读到，不说「前方暂无来车」」 | 文案分支按读取状态选 | 1 |
 | 关注列表读失败 ≠ 一条都没关注 | `web/__tests__/views/overview/favourites-read-state.test.ts` ·「读失败时说「未读到关注线路」，不给「还没有关注线路」」 | 两种结局给出不同文案 | 1 |
 | 参考行口径 `eta₁−walk ≤ T → 现在走`，否则给出门分钟 | `web/__tests__/reference-line.test.ts` ·「gives a departure time when there is slack to spare」「says leaving now still works, without instructing the user」「says the bus is gone when the walk outlasts it」 | 三种结论互不相同（`reads every verdict differently`） | 1 |
@@ -145,8 +145,8 @@
 | 每用户各有各的置顶 | `api/f8-…` ·「每个用户各有各的置顶…」 | 两个用户各 1 行置顶 | 2 |
 | 部分唯一索引兜底（绕过应用层也被拒） | `api/f8-…` ·describe「部分唯一索引拒绝第二个置顶」三例 | `23505` | 2 |
 | 只在首页存在，设置页不感知 | `web/__tests__/favorite-pin.test.ts` ·「never exposes pin state to the settings screen」 | 设置页无置顶状态 | 1 |
-| 标记与入口都在卡片操作栏里，顶边不再有置顶横幅 | `web/__tests__/views/overview/card-action-bar.test.ts` ·describe「置顶横幅不再占卡片顶边」 | 源码不含顶边横幅的 `<div v-if="isPinned" … px-4 py-1.5`；状态由操作栏那格的「已置顶」表示 | 1 |
-| 置顶那一格自带按下的状态（`aria-pressed`） | 同上 ·「置顶按下的状态由那一格自己表示」 | 已置顶时名字是「取消置顶」且 `aria-pressed=true` | 1 |
+| 标记与入口都在卡片操作栏里，顶边不再有置顶横幅或 toast | `web/__tests__/views/overview/card-action-bar.test.ts` ·describe「置顶横幅不再占卡片顶边」+ `action-feedback-overview.test.ts` ·describe「置顶：成功由操作栏自己说」 | 源码不含顶边横幅；成功、取消与写入拒绝均不推 toast，状态由操作栏那格与回滚表示 | 1 |
+| 置顶那一格自带按下的状态（`aria-pressed`） | 同上 ·「置顶按下的状态由那一格自己表示」 | 已置顶时名字是「取消置顶」且 `aria-pressed=true`；成功与失败都不另推 toast | 1 |
 | 置顶那一格的两态字色都由状态类给出，静态类里没有颜色令牌 | `web/__tests__/state-color-override.test.ts` ·describe「颜色令牌：静态与动态不同时给同一个属性」 | 静态类与 `:class` 不得对同一属性都给颜色令牌；**变异验证**：卡片改回「静态写灰 + 动态给青」→ 红 | 1 |
 | 全站同一类写法一处都没有（含顶栏汉堡按钮、下拉选项、起降牌读失败行） | 同上 ·「非测试源码里一处这样的写法都没有」 | 该闸门跑出来时顺带修掉了另外 3 处 —— 修前实测四处颜色**全部**失效 | 1 |
 | 卡片主体每一块都吃掉余下高度（四种面板不能漏） | `web/__tests__/views/overview/card-action-bar.test.ts` ·「每一种深色面板都吃掉余下高度」 | 四处 `bg-slate-950/80` 面板都带 `grow`；**变异验证**：去掉内容面板的 `grow` → 红 | 1 |
@@ -158,17 +158,12 @@
 | 主体里除它自己那枚链接外没有别的可点控件 | 同上 ·「反方向那一行、置顶、切换方向都不在主体里面」 | **变异验证**：反方向那行改回 `button` → 红 | 1 |
 | 操作栏每格 ≥44px、等宽 | 同上 ·「每格至少 44px 高」 | 三格都存在且都带 `min-h-11` + `flex-1`；**变异验证**：去掉任一格的 `min-h-11` → 红 | 1 |
 | 单向线路不摆「切换方向」那一格 | 同上 ·「单向线路（只有一行）不摆切换方向那一格」 | **变异验证**：去掉 `v-if="canSwitch"` → 红 | 1 |
-| 置顶 / 取消置顶都有位移动画，方向由实测位移读出 | `web/__tests__/views/overview/pin-motion.test.ts` ·describe「方向由实测的位移读出，不由动作名读出」 | 位移为正读作「往上走」；**变异验证**：`travelOf` 方向反过来 → 红 | 1 |
-| 两向幅度不对称（抬起放大 / 下沉微缩） | 同上 ·describe「抬起与下沉在两端幅度不同」 | 窄屏缩放恒为 1；宽屏 up>1、down<1；**变异验证**：`scaleFor` 两端同值 → 红 | 1 |
-| 取消置顶的行程更长，故时长也更长 | 同上 ·describe「取消置顶的行程更长，故时间也更长」 | `durationFor('down') = PIN_DURATION_MS + UNPIN_EXTRA_MS` 且严格大于 `('up')`；**变异验证**：去掉额外那 80ms → 红 | 1 |
-| 置顶一律把列表顶带进顶栏下方 | 同上 ·「置顶：它还没到首位 → 把列表顶带进顶栏下方」 | 落点 == `scrollY + gridTop − 顶栏底 − 间隙` | 1 |
-| 置顶时「已是首位」不足以判定不必滚 | 同上 ·「它已是首位、但列表顶被滚上去了 → 仍要滚回来」 | 卡片视口 top 为负仍算出正落点；**变异验证**：简化成 `if (isFirst) return null` → 红（单列上真会出现） | 1 |
-| 取消置顶只在它看不见时才滚，且只滚到刚够看见 | 同上 ·「它整张都看得见 → 不滚」+「掉到折线以下 → 只滚到刚够看见」 | 可见时落点为 null；不可见时取「露头」与「露尾」里更近的那个 | 1 |
-| 动画的坐标在 DOM 更新**之前**量 | 同上 ·describe「接线：动画拿得到「重排前」的坐标」 | 断言 `captureCards()` 的调用夹在 `onBeforeUpdate` 与 `onUpdated` 之间；**变异验证**：把量坐标挪进 `onUpdated` → 红 | 1 |
-| 点名只在一次置顶动作期间设下 | 同上 ·「点名只在一次置顶动作期间设下」 | `motionTargetId` 与乐观写入同一 tick 设下、`await nextTick()` 后才撤 | 1 |
-| **重排时卡片不瞬移**（只有浏览器做得了） | `e2e` ·场景「首页卡片」 ·「置顶时卡片在旧坐标上被画过一帧」 | 逐帧采样，离起点最近的一帧差 ≤ 24px —— 只看「它到首位了吗」发现不了动画静默失效 | 3 |
-| 动画结束后不留下残留的 transform | `e2e` ·同上 ·「动画结束后不留下残留的 transform」 | `getComputedStyle` 的 `transform === 'none'` | 3 |
-| 同步滚动的曲线本身单调且前段快于线性 | `web/__tests__/…/pin-motion.test.ts` ·describe「同步滚动的曲线」 | 100 个采样点单调不减、两端严格 0/1、线性曲线求值等于恒等 | 1 |
+| 置顶 / 取消置顶一律由 Vue `<TransitionGroup>` 的 CSS move transition 画 | `web/__tests__/views/overview/transition-group-motion.test.ts` ·describe「Vue TransitionGroup 接线」 | 直接子项是只以关注 id 为 key 的 `div[data-favorite-id]`（不混展示模式）；真浏览器实测：375 下不同 top 28 个、move class 13–539ms，768 下 23 个、22–572ms，结束均无残留 class | 1 |
+| 不再保留手动 FLIP / WAAPI / 点名状态 | 同上 ·「不再保留手动 FLIP」 | `card-grid.vue` 不含 `onBeforeUpdate/onUpdated/captureCards/playReorder/motionTargetId`；首页不含 `pinMotionTargetId`；旧 `pin-motion.ts` 与旧测试均已删除 | 1 |
+| move 只过渡 transform，且尊重减少动画 | 同上 ·「move 样式只过渡 transform」 | `favorite-reorder-move` 是 400ms transform transition；`prefers-reduced-motion` 下为 none | 1 |
+| 列表更新不换未改变项的对象身份 | `web/__tests__/favorite-pin.test.ts` ·「不把没变过的关注行换成新对象」 | 置顶 `fa` 后 `fb`/`fc` 仍为原对象（`toBe`）；**变异验证**：去掉 `&& f.isPinned` → 红 | 1 |
+| 置顶与取消置顶都不动视口；move 的 400ms 内锁住下一次操作 | `web/__tests__/views/overview/action-feedback-overview.test.ts` ·「置顶与取消置顶都不动视口：卡片走到新槽位就是全部」「写入结束后 CSS move 的 400ms 内仍锁住操作」 | 置顶与取消置顶各走完一次 move 都不调用 `scrollTo`；立刻再按不产生第二个写入 | 1 |
+| **重排时卡片不瞬移**（只有浏览器做得了） | `e2e` ·场景「首页卡片」 ·「置顶时 Vue move transition 给出中间位置」 | 逐帧采样至少 4 个不同 top；顺序正确且结束无残留 transform | 3 |
 
 ## F9 · 关注线路拖动排序
 

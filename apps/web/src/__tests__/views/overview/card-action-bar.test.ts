@@ -244,7 +244,9 @@ describe('操作栏始终贴着卡片底边', () => {
     )
     // 网格默认 `align-items: stretch` 把同一行卡片拉成等高；没有这一对 flex 时，富余高度全落在
     // 操作栏下面（实测过 86~125px 的空当）。
-    expect(source).toContain('flex flex-col')
+    // TransitionGroup 外层是网格项，卡片根必须吃满它，否则只有外层被 grid stretch 拉高、主体
+    // 与操作栏仍停在自然高度，富余空间又会落回卡片下面。
+    expect(source).toContain('flex h-full flex-col')
     expect(source).toMatch(/class="flex flex-1 flex-col p-4/)
   })
 
@@ -299,16 +301,16 @@ describe('操作栏始终贴着卡片底边', () => {
 })
 
 describe('置顶横幅不再占卡片顶边', () => {
-  it('卡片根的过渡不包含 transform —— 位移动画要自己控制它', async () => {
+  it('卡片根让父级 TransitionGroup 直接接管位移 —— 根本身不带 transform transition，也不再由脚本写 transform', async () => {
     const host = await mountCard()
 
     const root = host.node(
-      (n: any) => n.tag === 'div' && String(n.props.class ?? '').includes('group relative flex flex-col'),
+      (n: any) => n.tag === 'div' && String(n.props.class ?? '').includes('group relative flex h-full flex-col'),
       'the card root',
     )
     const tokens = String(root.props.class).split(/\s+/)
-    // `transition` 工具类的属性表里有 transform，位移动画（FLIP）写上去的 transform 会被它
-    // 按 150ms 自己过渡一遍，与动画的时长和曲线打架。故只能用只含颜色的 `transition-colors`。
+    // `transition` 工具类的属性表里有 transform，会抢 Vue TransitionGroup 给直接子项写入的 move
+    // transform；卡片自身只过渡颜色，列表位移唯一交给父级的 CSS move transition。
     expect(tokens).toContain('transition-colors')
     expect(tokens).not.toContain('transition')
 

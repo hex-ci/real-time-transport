@@ -131,26 +131,69 @@ function modeButton(host: MountedHost, label: string): HostElement {
   )
 }
 
-describe('置顶：这一个写操作成与败各说一句', () => {
-  it('钉住一条线路：说一句已置顶，带上这条线路的名字', async () => {
+describe('置顶：成功由操作栏自己说，失败才说一句原因', () => {
+  it('钉住一条线路：操作栏立刻变成「已置顶」，不再额外推 toast', async () => {
     const host = await mountOverview()
 
     await press(host, pinButton(host, false))
 
-    expect(pushed).toEqual([`已置顶 ${LINE_NAME}`])
+    expect(pushed).toEqual([])
+    expect(pinButton(host, true).props['aria-pressed']).toBe(true)
     host.unmount()
   })
 
-  it('取消钉住：说一句已取消置顶 —— 与上一句不是同一句话', async () => {
+  it('取消钉住：操作栏立刻回到「置顶」，不再额外推 toast', async () => {
     const host = await mountOverview(true)
 
     await press(host, pinButton(host, true))
 
-    expect(pushed).toEqual([`已取消置顶 ${LINE_NAME}`])
+    expect(pushed).toEqual([])
+    expect(pinButton(host, false).props['aria-pressed']).toBe(false)
     host.unmount()
   })
 
-  it('被拒：说一句置顶失败，并带上服务端给的原因', async () => {
+  it('置顶与取消置顶都不动视口：卡片走到新槽位就是全部', async () => {
+    vi.useFakeTimers()
+    const host = await mountOverview(false)
+    const scrollTo = vi.fn()
+    ;(window as any).scrollTo = scrollTo
+    ;(window as any).scrollY = 500
+
+    const pinned = press(host, pinButton(host, false))
+    await vi.advanceTimersByTimeAsync(400)
+    await pinned
+
+    const unpinned = press(host, pinButton(host, true))
+    await vi.advanceTimersByTimeAsync(400)
+    await unpinned
+
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+    host.unmount()
+  })
+
+  it('写入结束后 CSS move 的 400ms 内仍锁住操作', async () => {
+    vi.useFakeTimers()
+    const host = await mountOverview(false)
+    const control = pinButton(host, false)
+
+    const first = press(host, control)
+    await vi.advanceTimersByTimeAsync(0)
+    await host.flush()
+    const writesAfterFirst = pushed.length
+
+    await press(host, control)
+    expect(pushed).toHaveLength(writesAfterFirst)
+    expect(host.server.seen(/\/api\/transit\/favorites\/fav-1$/)).toHaveLength(1)
+
+    await vi.runAllTimersAsync()
+    await first
+    vi.useRealTimers()
+    host.unmount()
+  })
+
+  it('被拒：卡片回到原来的「置顶」状态，仍不额外推 toast', async () => {
     const host = await mountOverview(false, [
       /\/api\/transit\/favorites\/fav-1$/,
       () => ({ success: false, error: '该线路不在关注列表中' }),
@@ -158,9 +201,8 @@ describe('置顶：这一个写操作成与败各说一句', () => {
 
     await press(host, pinButton(host, false))
 
-    expect(pushed).toEqual([`置顶失败 ${LINE_NAME} · 该线路不在关注列表中`])
-    // 页上不留第二处：这句话只在 toast 里说一次，卡片自己的回滚就是记录。
-    expect(host.text()).not.toContain('该线路不在关注列表中')
+    expect(pushed).toEqual([])
+    expect(pinButton(host, false).props['aria-pressed']).toBe(false)
     host.unmount()
   })
 })

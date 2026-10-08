@@ -112,6 +112,31 @@ export class HostElement {
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }
   }
 
+  cloneNode(): HostElement {
+    const clone = new HostElement(this.tag, this.text)
+    clone.props = { ...this.props }
+    clone.style = { ...this.style }
+    return clone
+  }
+
+  classList = {
+    add: (..._tokens: string[]): void => {},
+    remove: (..._tokens: string[]): void => {},
+  }
+
+  appendChild(child: HostElement): HostElement {
+    child.parent = this
+    this.children.push(child)
+    return child
+  }
+
+  removeChild(child: HostElement): HostElement {
+    const index = this.children.indexOf(child)
+    if (index >= 0) this.children.splice(index, 1)
+    child.parent = null
+    return child
+  }
+
   scrollIntoView(): void {}
 
   /** 本页渲染的任何内容都不在 form 内，故没有祖先可走。 */
@@ -338,6 +363,8 @@ function createWindowStub(body: HostElement): Record<string, unknown> {
     MutationObserver: observer,
     requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(Date.now()), 0),
     cancelAnimationFrame: (handle: any) => clearTimeout(handle),
+    setTimeout,
+    clearTimeout,
     visualViewport: undefined,
     devicePixelRatio: 1,
     innerWidth: 390,
@@ -541,8 +568,20 @@ export async function mountComponent(component: Component, options: MountOptions
   vi.stubGlobal('ShadowRoot', class ShadowRootStub {})
   // 由 floating-ui 裸调用，它问某个祖先是否滚动。
   // 由 @vueuse 的 interval/media helper 裸调用，页面自己的布局观察器用它们。
-  vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => setTimeout(() => callback(Date.now()), 0))
-  vi.stubGlobal('cancelAnimationFrame', (handle: any) => clearTimeout(handle))
+  const animationFrames = new Set<ReturnType<typeof setTimeout>>()
+  vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => {
+    const captured = callback
+    const handle = setTimeout(() => {
+      animationFrames.delete(handle)
+      captured(Date.now())
+    }, 0)
+    animationFrames.add(handle)
+    return handle
+  })
+  vi.stubGlobal('cancelAnimationFrame', (handle: any) => {
+    animationFrames.delete(handle)
+    clearTimeout(handle)
+  })
   vi.stubGlobal('NodeFilter', {
     SHOW_ALL: 0xFFFFFFFF,
     SHOW_ELEMENT: 1,
@@ -612,7 +651,11 @@ export async function mountComponent(component: Component, options: MountOptions
       Object.assign(initialProps, next)
       await nextTick()
     },
-    unmount: () => app.unmount(),
+    unmount: () => {
+      app.unmount()
+      for (const handle of animationFrames) clearTimeout(handle)
+      animationFrames.clear()
+    },
   }
 
   await mounted.flush()

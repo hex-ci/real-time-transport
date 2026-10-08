@@ -129,6 +129,25 @@ describe('F8 pin is a state overlaid on the order', () => {
     expect(store.favorites.some(f => f.isPinned)).toBe(false)
   })
 
+  it('不把没变过的关注行换成新对象 —— 否则整列卡片都会跟着重渲染', async () => {
+    // 列表按对象身份决定要不要重渲染；置顶一条时把其余行也展开成新对象，会让每一次置顶都重画
+    // 整列卡片 —— 那一次停顿正好压在重排动画的起跑上（真机上看得出来）。
+    const store = useTransitStore()
+    const untouched = favorite('fb', 1)
+    const alsoUntouched = favorite('fc', 2)
+    store.favorites = [untouched, alsoUntouched, favorite('fa', 3)]
+
+    vi.stubGlobal('fetch', vi.fn(async () => accepted(favorite('fa', 3, true))))
+
+    await store.togglePin('fa')
+
+    const after = store.favorites
+    expect(after.find(f => f.id === 'fb')).toBe(untouched)
+    expect(after.find(f => f.id === 'fc')).toBe(alsoUntouched)
+    // 被按下的那一条是新的（它的 isPinned 真的变了）。
+    expect(after.find(f => f.id === 'fa')).not.toBe(untouched)
+  })
+
   it('ignores an id that is not a favourite instead of sending a request', async () => {
     const store = useTransitStore()
     store.favorites = [favorite('fa', 1)]

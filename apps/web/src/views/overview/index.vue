@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, shallowRef, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { House, LocateFixed, Building2, Wand2, TriangleAlert, ChevronRight } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
@@ -25,7 +25,6 @@ import {
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
 import type { ReadState } from '@/read-state'
-import { runWithFeedback } from '@/action-feedback'
 
 const transitStore = useTransitStore()
 const locationStore = useLocationStore()
@@ -182,43 +181,26 @@ function onSwitchDirection(card: MiniCardConfig, direction: 0 | 1): void {
 const pinningFavoriteId = shallowRef<string | null>(null)
 
 /**
- * 一次置顶/取消置顶里正在动的那一条关注，供卡片网格的位移动画点名。
- *
- * 它比在途标记多活一拍：写入失败时 store 会把列表回滚回去，那次回滚的重排也要被画成动画，
- * 而回滚发生在请求落地之后 —— 立刻清掉的话，卡片会「自己跳回去」，正是要避免的那件事。
- */
-const pinMotionTargetId = shallowRef<string | null>(null)
-
-/**
  * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
  * 都在首页卡片上。
  *
- * 成与败各说一句（`runWithFeedback` 推到 toast 上），页上不再留第二处：卡片本身会被 store 回滚，
- * 那一下的样式变化就是记录。
+ * 不推 toast：操作栏那一格已经立刻从「置顶」变成「已置顶」或反过来，重排本身也看得见；
+ * 写入失败会原样回滚，亦由这同一处状态表明。这个动作不再额外占一条系统提示。
  */
 async function onTogglePin(card: MiniCardConfig): Promise<void> {
   const favoriteId = card.favoriteId
-  if (!favoriteId || pinningFavoriteId.value === favoriteId) return
+  if (!favoriteId || pinningFavoriteId.value !== null) return
   pinningFavoriteId.value = favoriteId
-  // 与 store 的乐观写入落在同一个 tick，于是列表的重排与这个点名同批渲染 —— 动画因此拿得到
-  // 「重排前」的坐标。
-  pinMotionTargetId.value = favoriteId
   try {
-    await runWithFeedback(
-      // 卡片上此刻是不是钉住的，决定这次按下是钉还是解 —— 与那枚按钮自己的措辞同源。
-      card.isPinned ? 'favorite-unpin' : 'favorite-pin',
-      () => transitStore.togglePin(favoriteId),
-      { name: card.lineName },
-    )
+    await transitStore.togglePin(favoriteId)
   }
   catch {
-    // 失败的原因已经由 toast 说过一次；这里只是接住那个重抛，别让它变成未处理的拒绝。
+    // store 已将乐观变更回滚；置顶状态本身是此处唯一的反馈。
   }
   finally {
+    // CSS move 仍可能在跑：等它走完再开下一次写入，绝不在中间态再次改变顺序。
+    await new Promise<void>(resolve => window.setTimeout(resolve, 400))
     pinningFavoriteId.value = null
-    // 多留一拍：回滚引起的那次重排也在这一拍里画完，再撤掉点名。
-    await nextTick()
-    pinMotionTargetId.value = null
   }
 }
 
@@ -848,7 +830,6 @@ onMounted(() => {
       :mode="currentMode"
       :arrivals="arrivalsMap"
       :nearby-location="nearbyLocation"
-      :motion-target-id="pinMotionTargetId"
       @switch-direction="onSwitchDirection"
       @toggle-pin="onTogglePin"
     />

@@ -19,10 +19,10 @@ import { lineDetail } from '../fixtures.mjs'
 export const name = '首页卡片'
 
 /** 卡片网格的直接子元素就是一张卡片；按线路名定位，不按下标。 */
-const CARD_INDEX = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+const CARD_INDEX = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')]
   .findIndex(card => card.querySelector('span')?.textContent.trim() === ${JSON.stringify(name)}))`
 
-const CARD_TEXT = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+const CARD_TEXT = name => `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')]
   .find(card => card.querySelector('span')?.textContent.trim() === ${JSON.stringify(name)})?.innerText ?? null)`
 
 /** 页面为「某线路 + 某站序」收到过的全部到站应答。 */
@@ -51,7 +51,7 @@ export async function run({ check, equal, note, fixtures }) {
   await installFetchRecorder()
   await goto(`${WEB_ORIGIN}/`)
   await waitForValue(
-    `JSON.stringify(document.querySelectorAll('main div.grid.grid-cols-1 > div').length)`,
+    `JSON.stringify(document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]').length)`,
     length => length === 3,
     { what: '三张关注线路卡片', timeout: 25_000 },
   )
@@ -163,14 +163,13 @@ export async function run({ check, equal, note, fixtures }) {
     await cli(['unroute', `**${cPath}**`])
   }
 
-  // ---- 置顶：卡片真的「走过去」，且动画结束后不留下残留的位移 -------------------
-  // 这一条只有浏览器做得了。要钉住的是「重排时卡片没有瞬移」——它靠 FLIP 实现：先在旧坐标上画
-  // 一帧，再平滑走到新坐标。若哪天 `onBeforeUpdate` 里的量坐标被挪到更新之后，位移会恒为零、
-  // 动画静默失效，而**卡片顺序仍然是对的** —— 只看「它到首位了吗」永远发现不了。
+  // ---- 置顶：Vue TransitionGroup 的 move 真的「走过去」，且结束后清掉 move class --------
+  // 这一条只有浏览器做得了。顺序对不等于动画存在：这里必须读到多个中间位置，且确认它是 Vue
+  // 的 move class 在过渡；手动 FLIP 已删除，不能再把坐标测量钩子当验收前提。
   //
   // 必须在**单列**下量。夹具只有三条关注，宽屏一屏一行摆完，三张卡的纵坐标相同，卡片纵向上根本
   // 没动过 —— 那样的断言抓不到任何东西（没有位移的动画也「没有瞬移」）。
-  const cardIds = `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+  const cardIds = `JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')]
     .map(c => c.getAttribute('data-favorite-id')))`
   const idsBefore = await pageEval(cardIds)
   const pinnedId = idsBefore[idsBefore.length - 1]
@@ -186,7 +185,7 @@ export async function run({ check, equal, note, fixtures }) {
   )
 
   await pageEval(`(() => {
-    const cards = () => [...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+    const cards = () => [...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')]
     const el = cards().find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
     const startTop = Math.round(el.getBoundingClientRect().top)
     const samples = []
@@ -204,6 +203,7 @@ export async function run({ check, equal, note, fixtures }) {
           samples,
           settledTop: Math.round(settled.getBoundingClientRect().top),
           settledTransform: getComputedStyle(settled).transform,
+          settledClass: settled.className,
           firstId: cards()[0].getAttribute('data-favorite-id'),
         }
       }
@@ -222,11 +222,11 @@ export async function run({ check, equal, note, fixtures }) {
     Math.abs(probe.startTop - probe.settledTop) > 40,
     `起点 top ${probe.startTop}，终点 top ${probe.settledTop}`,
   )
-  const drift = Math.min(...probe.samples.map(top => Math.abs(top - probe.startTop)))
+  const distinctPositions = new Set(probe.samples).size
   check(
-    '置顶时卡片在旧坐标上被画过一帧（没有瞬移）',
-    drift <= 24,
-    `离起点最近的一帧差 ${drift}px，起点 ${probe.startTop}，采样 ${probe.samples.slice(0, 6).join(',')}`,
+    '置顶时 Vue move transition 给出中间位置（没有瞬移）',
+    distinctPositions >= 4,
+    `不同 top ${distinctPositions} 个，采样 ${probe.samples.slice(0, 10).join(',')}`,
   )
   check(
     '置顶后它落到首位',
@@ -234,9 +234,9 @@ export async function run({ check, equal, note, fixtures }) {
     `首位是 ${probe.firstId}`,
   )
   check(
-    '动画结束后不留下残留的 transform',
-    probe.settledTransform === 'none',
-    `实际 ${probe.settledTransform}`,
+    '动画结束后不留下残留的 transform 或 move class',
+    probe.settledTransform === 'none' && !String(probe.settledClass).includes('favorite-reorder-move'),
+    `transform=${probe.settledTransform}，class=${probe.settledClass}`,
   )
   const idsAfter = await pageEval(cardIds)
   check(
@@ -247,7 +247,7 @@ export async function run({ check, equal, note, fixtures }) {
 
   // 收尾：取消置顶，把这个库恢复成测试进来时的样子，视口也还原。
   await pageEval(`(() => {
-    const el = [...document.querySelectorAll('main div.grid.grid-cols-1 > div')]
+    const el = [...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')]
       .find(c => c.getAttribute('data-favorite-id') === ${JSON.stringify(pinnedId)})
     ;[...el.querySelectorAll('button')]
       .find(b => (b.getAttribute('aria-label') || '').includes('取消置顶')).click()
@@ -265,10 +265,11 @@ export async function run({ check, equal, note, fixtures }) {
   // 「同排有更高的卡」这个条件，故不依赖夹具恰好排成什么样。
   async function stretchProbe(index, extra) {
     return pageEval(`(() => {
-      const card = [...document.querySelectorAll('main div.grid.grid-cols-1 > div')][${index}]
-      const link = card.querySelector(':scope > a')
+      const card = [...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')][${index}]
+      const root = card.querySelector(':scope > [data-favorite-card]')
+      const link = root.querySelector(':scope > a')
       const panel = [...link.children].find(c => (c.className || '').includes('bg-slate-950'))
-      const bar = card.querySelector(':scope > div.border-t')
+      const bar = root.querySelector(':scope > div.border-t')
       const read = () => ({
         h: Math.round(card.getBoundingClientRect().height),
         panelH: Math.round(panel.getBoundingClientRect().height),
@@ -282,10 +283,11 @@ export async function run({ check, equal, note, fixtures }) {
     })()`)
   }
 
-  const cardsSeen = await pageEval(`JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div')].map(card => {
-    const link = card.querySelector(':scope > a')
+  const cardsSeen = await pageEval(`JSON.stringify([...document.querySelectorAll('main div.grid.grid-cols-1 > div[data-favorite-id]')].map(card => {
+    const root = card.querySelector(':scope > [data-favorite-card]')
+    const link = root ? root.querySelector(':scope > a') : null
     const panel = link ? [...link.children].find(c => (c.className || '').includes('bg-slate-950')) : null
-    const bar = card.querySelector(':scope > div.border-t')
+    const bar = root ? root.querySelector(':scope > div.border-t') : null
     return {
       panelH: panel ? Math.round(panel.getBoundingClientRect().height) : null,
       gap: panel && bar ? Math.round(bar.getBoundingClientRect().top - panel.getBoundingClientRect().bottom) : null,
@@ -315,7 +317,7 @@ export async function run({ check, equal, note, fixtures }) {
   const detail = await lineDetail(a.line.upLineId, 0)
   const index = await pageEval(CARD_INDEX(a.line.lineName))
   check('卡片 A 在网格里有位置', index >= 0, `下标 ${index}`)
-  await cli(['click', `main div.grid.grid-cols-1 > div:nth-child(${index + 1})`])
+  await cli(['click', `main div.grid.grid-cols-1 > div[data-favorite-id]:nth-child(${index + 1})`])
   await waitForValue(
     'JSON.stringify(location.pathname + location.search)',
     url => typeof url === 'string' && url.startsWith(`/line/${a.line.upLineId}`),

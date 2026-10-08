@@ -333,7 +333,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
        纵向 flex：网格把同一行的卡片拉成等高，主体吃掉富余高度，操作栏因此始终贴着卡片底边 ——
        内容不足的卡片不会把操作栏留在半空。 -->
   <div
-    class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition-colors hover:bg-slate-900"
+    data-favorite-card
+    class="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-lg backdrop-blur-md transition-colors hover:bg-slate-900"
     :class="accent.hoverBorder"
   >
     <!-- 主体是真正的链接：可聚焦、键盘可开、辅助技术读得出「这里通往线路详情」。原先它是一个
@@ -514,7 +515,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
       <button
         type="button"
         class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
-        :class="isPinned ? 'bg-cyan-500/8 text-cyan-400' : 'text-slate-300'"
+        :class="isPinned ? 'bg-cyan-500/8! text-cyan-400!' : 'text-slate-300'"
         :aria-label="isPinned ? '取消置顶' : '置顶此线路'"
         :aria-pressed="isPinned"
         @click="$emit('toggle-pin')"

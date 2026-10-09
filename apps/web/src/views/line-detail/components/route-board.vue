@@ -200,6 +200,8 @@ interface AnimatedVehicle {
   mode: 'cruise' | 'catchup' | 'hold'
   /** 'catchup' 模式收敛到的目标。 */
   convergeTo: number
+  /** 上游报的下一站站序（1-based）：巡航外推的上限钳在该站站台；缺失时退回定位点钳制。 */
+  nextOrder: number | undefined
   /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
   speedMs: number | undefined
   /** 停靠站台（引擎报约 0 速度）：不做航位推算。 */
@@ -295,6 +297,27 @@ function nearestPlatformDist(dist: number): number | null {
     }
   }
   return best
+}
+
+/**
+ * 巡航外推的上限距离（防超站核心）。
+ *
+ * 没新数据时车允许继续往前开，但上限是**下一站站台**：开到站就停在站上等，
+ * 永不冲过站台。图标还没到下一站时钳在站台上；图标已在站台上或已过站
+ * （数据确认）时，退回上一定位点钳制，避免无依据前冲；下一站未知时同样
+ * 退回定位点。返回 null 表示无从钳制（此时仅靠 [0, L] 兜底）。
+ */
+function cruiseCapDist(v: AnimatedVehicle): number | null {
+  const sd = effectiveStationDistances.value
+  const order = v.nextOrder
+  if (
+    typeof order === 'number' && Number.isFinite(order) && order >= 1
+    && sd.length >= 2 && order - 1 < sd.length
+  ) {
+    const stationDist = sd[order - 1]!
+    if (v.displayedDist <= stationDist) return stationDist
+  }
+  return v.fixDist
 }
 
 function initStage(): void {
@@ -614,16 +637,28 @@ function initAnimation(): void {
       const prevDist = v.displayedDist
       let nextDist = prevDist + effectiveSpeed * dt
 
+      // 巡航钳制：外推可以超过上一定位点，但永不超过下一站站台。
+      // 没新数据时车会一直开到下一站然后停在站上等；新数据若显示还没到站，
+      // 车就停在站上不动——永远不倒退，也永远不冲过站台。
+      if (v.mode === 'cruise') {
+        const cap = cruiseCapDist(v)
+        if (cap !== null && nextDist > cap) nextDist = cap
+      }
+
       if (v.dwell) {
         const plat = nearestPlatformDist(nextDist)
-        // 只向前停靠：只有从后方接近站台时才滑入，绝不往回拉。
-        if (plat !== null && plat > nextDist && (plat - nextDist) < DWELL_SNAP_M) {
+        // 停靠吸附（双向）：车在站上时把图标轻轻拉向站台圆心。
+        // 从后方接近时与原来一样指数滑入；若历史原因已超调一点，也允许拉回——
+        // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
+        if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
 
-      // 铁律：严格单调不减（永不向后运动）。
-      v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
+      // 单调性：行驶中严格不后退；停靠时允许向站台做小幅位置修正（见上）。
+      v.displayedDist = v.dwell
+        ? Math.max(0, Math.min(L, nextDist))
+        : Math.max(prevDist, Math.min(L, nextDist))
 
       const pos = layoutPosition(v.displayedDist)
       v.container.position({ x: pos.x, y: pos.y })
@@ -1064,6 +1099,7 @@ function syncVehicles(): void {
         lastFixUpdatedAt: fixUpdatedAt,
         mode: 'cruise',
         convergeTo: initialDist,
+        nextOrder: bus.nextOrder,
         speedMs,
         dwell,
         removing: false,
@@ -1083,6 +1119,7 @@ function syncVehicles(): void {
       v.fixDist = fixDist
       v.fixPending = true
       v.fixUpdatedAt = fixUpdatedAt
+      v.nextOrder = bus.nextOrder
       v.speedMs = speedMs
       v.dwell = dwell
     }

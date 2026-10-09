@@ -42,12 +42,19 @@ const {
   shownDirection = null,
   morningStopDirection = null,
   eveningStopDirection = null,
+  commuteFocusStationId = null,
 } = defineProps<{
   lineDetail: LineDetail
   buses: LiveBus[]
   nearestStation?: Station | null
   /** 当前选中的站，用高亮环画出。 */
   selectedStation?: Station | null
+  /**
+   * 通勤聚焦站 id：上班时段的上班上车站 / 下班时段的下班上车站。
+   * 初始镜头优先对准它（低于手动选中的站，高于最近站）；用户一旦拖动/缩放过画布，
+   * 就不再自动抢镜头。null 表示当前没有可聚焦的通勤站，走原来的逻辑。
+   */
+  commuteFocusStationId?: string | null
   /** 可选的初始排布模式（'folded' 或 'linear'）。默认取持久化的偏好，否则 'folded'。 */
   initialLayoutMode?: RouteLayoutMode
   /** 通勤上车点的站名，出现在这个方向上时在图上标出。 */
@@ -181,8 +188,6 @@ let lastPinchCenter: { x: number, y: number } | null = null
 let currentLayout: RouteLayoutResult | null = null
 let selectionRing: Konva.Circle | null = null
 let nearestAuraCircle: Konva.Circle | null = null
-let rippleCircle1: Konva.Circle | null = null
-let rippleCircle2: Konva.Circle | null = null
 
 interface AnimatedVehicle {
   id: string
@@ -385,7 +390,7 @@ function initStage(): void {
     focusKeyStation(false)
   }
   else if (currentLayout && currentLayout.points.length > 0) {
-    fitWidth()
+    focusCommuteStationFolded()
   }
 
   // 舞台初始化完成时可能已经有站被选中（定位与线路详情一到就会选出最近站）。选中的 watcher
@@ -517,17 +522,11 @@ function initAnimation(): void {
     const dt = (frame.timeDiff || 16.6) / 1000
     const time = frame.time || 0
 
-    if (nearestAuraCircle && rippleCircle1 && rippleCircle2) {
-      const scale = 1 + 0.12 * Math.sin(time / 350)
+    // 最近站只留一圈静态弱光晕：之前两圈扩散涟漪的动画太抢眼，
+    // 会把视线从通勤上车站（真正重要的）上吸走。
+    if (nearestAuraCircle) {
+      const scale = 1 + 0.06 * Math.sin(time / 600)
       nearestAuraCircle.scale({ x: scale, y: scale })
-
-      const phase1 = (time % 1800) / 1800
-      rippleCircle1.radius(6 + 18 * phase1)
-      rippleCircle1.opacity(Math.max(0, 0.6 * (1 - phase1)))
-
-      const phase2 = ((time + 900) % 1800) / 1800
-      rippleCircle2.radius(6 + 18 * phase2)
-      rippleCircle2.opacity(Math.max(0, 0.6 * (1 - phase2)))
     }
 
     const L = routeLength()
@@ -748,6 +747,13 @@ function renderStaticBoard(): void {
   })
   currentLayout = layout
 
+  // 始发站 / 终点站：环线（首末同名）不标，方向用上行/下行表达。
+  const isLoopLine = stops.length > 1 && stops[0]!.name === stops[stops.length - 1]!.name
+  const firstStationId = !isLoopLine && layout.points.length > 0 ? layout.points[0]!.station.id : null
+  const lastStationId = !isLoopLine && layout.points.length > 0
+    ? layout.points[layout.points.length - 1]!.station.id
+    : null
+
   for (let r = 0; r < layout.totalRows; r++) {
     const rowPoints = layout.points.filter(p => p.row === r)
     if (rowPoints.length < 2) continue
@@ -769,6 +775,34 @@ function renderStaticBoard(): void {
       opacity: 0.7,
       lineCap: 'round',
     }))
+
+    // 行驶方向箭头：沿行进方向（相邻两站的顺序即行驶顺序）每段放 1~2 个 chevron，
+    // 一眼看出这条线往哪开 —— 不用再靠分析车头判断。圆弧段不放，直段已足够表达。
+    for (let i = 0; i < rowPoints.length - 1; i++) {
+      const a = rowPoints[i]!
+      const b = rowPoints[i + 1]!
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len = Math.hypot(dx, dy)
+      if (len < 90) continue
+      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI
+      const count = len >= 260 ? 2 : 1
+      for (let k = 0; k < count; k++) {
+        const t = (k + 1) / (count + 1)
+        trackLayer.add(new Konva.Line({
+          x: a.x + dx * t,
+          y: a.y + dy * t,
+          points: [-4.5, -6.5, 4.5, 0, -4.5, 6.5],
+          stroke: '#e0f2fe',
+          strokeWidth: 2.2,
+          lineCap: 'round',
+          lineJoin: 'round',
+          opacity: 0.85,
+          rotation: angleDeg,
+          listening: false,
+        }))
+      }
+    }
   }
 
   for (const arc of layout.arcs) {
@@ -806,6 +840,38 @@ function renderStaticBoard(): void {
         radius: m.stationRadius + 3,
         stroke: 'rgba(56, 189, 248, 0.55)',
         strokeWidth: 2,
+        listening: false,
+      }))
+    }
+
+    // 始发 / 终点标识：左上小角标，与右上的通勤角标对称。环线不标。
+    const terminalMark = pt.station.id === firstStationId
+      ? '始'
+      : pt.station.id === lastStationId ? '终' : null
+    if (terminalMark) {
+      const tx = pt.x - m.stationRadius - 7
+      const ty = pt.y - m.stationRadius - 7
+      stationLayer.add(new Konva.Circle({
+        id: `terminal-badge-${pt.station.id}`,
+        x: tx,
+        y: ty,
+        radius: 7,
+        fill: '#475569',
+        stroke: '#020617',
+        strokeWidth: 1.5,
+        listening: false,
+      }))
+      stationLayer.add(new Konva.Text({
+        id: `terminal-badge-text-${pt.station.id}`,
+        x: tx - 7,
+        y: ty - 6,
+        text: terminalMark,
+        fontSize: 9,
+        fontFamily: 'system-ui, sans-serif',
+        fontStyle: 'bold',
+        fill: '#f1f5f9',
+        width: 14,
+        align: 'center',
         listening: false,
       }))
     }
@@ -895,7 +961,9 @@ function renderStaticBoard(): void {
       listening: false,
     }))
 
-    // 通勤上车点角标。单独一个节点，而不是给站名前缀：站名在最窄的移动端列里已经要折到四行，
+    // 通勤上车点：目的色外环 + 角标，双重强调。
+    // 外环让它在整条线路上一眼可辨（通勤工具里"我在哪上车"比"我离哪站近"重要得多）；
+    // 角标保留 上/下 语义。单独的节点而不给站名前缀：站名在最窄的移动端列里已经要折到四行，
     // 加宽标签会撑破行高预算。两个上车点各自只标在它自己那个方向上（`onShownDirection`），
     // 而按站序推断方向的那套推导 005 已删，不能再拿它当角标的依据。
     const boardStop = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
@@ -904,12 +972,23 @@ function renderStaticBoard(): void {
         ? { text: '下', fill: '#c084fc' }
         : null
     if (boardStop) {
-      const badgeR = m.stationRadius + 5
+      stationLayer.add(new Konva.Circle({
+        id: `board-stop-ring-${pt.station.id}`,
+        x: pt.x,
+        y: pt.y,
+        radius: m.stationRadius + 4.5,
+        stroke: boardStop.fill,
+        strokeWidth: 3,
+        opacity: 0.9,
+        listening: false,
+      }))
+      const badgeX = pt.x + m.stationRadius + 7
+      const badgeY = pt.y - m.stationRadius - 7
       stationLayer.add(new Konva.Circle({
         id: `board-stop-badge-${pt.station.id}`,
-        x: pt.x + badgeR + 1,
-        y: pt.y - badgeR + 1,
-        radius: 6,
+        x: badgeX,
+        y: badgeY,
+        radius: 8,
         fill: boardStop.fill,
         stroke: '#020617',
         strokeWidth: 1.5,
@@ -917,14 +996,14 @@ function renderStaticBoard(): void {
       }))
       stationLayer.add(new Konva.Text({
         id: `board-stop-badge-text-${pt.station.id}`,
-        x: pt.x + badgeR - 4,
-        y: pt.y - badgeR - 4,
+        x: badgeX - 8,
+        y: badgeY - 7,
         text: boardStop.text,
-        fontSize: 8,
+        fontSize: 10,
         fontFamily: 'system-ui, sans-serif',
         fontStyle: 'bold',
         fill: '#020617',
-        width: 10,
+        width: 16,
         align: 'center',
         listening: false,
       }))
@@ -958,8 +1037,6 @@ function renderDynamicElements(): void {
   vehicleMap.clear()
   rippleGroup = null
   nearestAuraCircle = null
-  rippleCircle1 = null
-  rippleCircle2 = null
 
   const stops = lineDetail?.stops || []
   if (stops.length === 0) return
@@ -977,39 +1054,20 @@ function renderRipple(): void {
   rippleGroup = new Konva.Group({ listening: false })
   dynamicLayer.add(rippleGroup)
   nearestAuraCircle = null
-  rippleCircle1 = null
-  rippleCircle2 = null
 
   if (nearestStation) {
     const pt = currentLayout.points.find(p => p.station.id === nearestStation?.id)
     if (pt) {
-      rippleCircle1 = new Konva.Circle({
-        x: pt.x,
-        y: pt.y,
-        radius: 6,
-        stroke: '#facc15',
-        strokeWidth: 1.5,
-        opacity: 0.6,
-      })
-      rippleCircle2 = new Konva.Circle({
-        x: pt.x,
-        y: pt.y,
-        radius: 6,
-        stroke: '#facc15',
-        strokeWidth: 1,
-        opacity: 0.4,
-      })
+      // 静态弱光晕：标出"你在这里"，但不抢戏。
       nearestAuraCircle = new Konva.Circle({
         x: pt.x,
         y: pt.y,
         radius: 12,
         fill: '#facc15',
-        opacity: 0.2,
+        opacity: 0.12,
       })
 
       rippleGroup.add(nearestAuraCircle)
-      rippleGroup.add(rippleCircle1)
-      rippleGroup.add(rippleCircle2)
     }
   }
 }
@@ -1143,11 +1201,11 @@ function syncVehicles(): void {
   dynamicLayer.batchDraw()
 }
 
-/** 把镜头对准关键站（选中 > 最近 > 第一辆车 > 首站）。 */
+/** 把镜头对准关键站（选中 > 通勤聚焦 > 最近 > 第一辆车 > 首站）。 */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
 
-  let targetId = selectedStation?.id ?? nearestStation?.id
+  let targetId = selectedStation?.id ?? commuteFocusStationId ?? nearestStation?.id
   if (!targetId && buses.length > 0) {
     const b = buses[0]!
     const targetOrder = b.nextOrder ?? b.order
@@ -1169,7 +1227,7 @@ function focusKeyStation(smooth = false): void {
   if (smooth) {
     stage.to({
       x: targetX,
-      y: targetY,
+      y: clampStageY(targetY, scale, viewH),
       scaleX: scale,
       scaleY: scale,
       duration: 0.28,
@@ -1181,6 +1239,35 @@ function focusKeyStation(smooth = false): void {
     stage.position({ x: targetX, y: targetY })
     stage.batchDraw()
   }
+}
+
+/**
+ * 把纵向位置钳在内容边界内：居中目标站时不让画布滑出内容之外。
+ */
+function clampStageY(y: number, scale: number, viewH: number): number {
+  const box = contentBounds()
+  if (!box) return y
+  const contentH = box.h * scale
+  if (contentH <= viewH) return (viewH - contentH) / 2 - box.minY * scale
+  const minY = viewH - contentH - box.minY * scale
+  const maxY = -box.minY * scale
+  return Math.min(maxY, Math.max(minY, y))
+}
+
+/**
+ * 折返模式的初始纵向聚焦：先按宽度撑开（fitWidth），再把通勤聚焦站纵向居中。
+ * 只用于初次排布 —— 用户拖动/缩放过（userHasTransformed）或手动选中了站之后不再抢镜头。
+ */
+function focusCommuteStationFolded(): void {
+  fitWidth()
+  if (!stage || !currentLayout || !commuteFocusStationId || selectedStation || userHasTransformed) return
+  const targetPt = currentLayout.points.find(p => p.station.id === commuteFocusStationId)
+  if (!targetPt) return
+  const scale = stage.scaleX()
+  const viewH = stage.height()
+  const targetY = (viewH / 2) - targetPt.y * scale
+  stage.position({ x: stage.x(), y: clampStageY(targetY, scale, viewH) })
+  stage.batchDraw()
 }
 
 /** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */
@@ -1331,7 +1418,7 @@ function setLayoutMode(mode: RouteLayoutMode): void {
     focusKeyStation(false)
   }
   else {
-    fitWidth()
+    focusCommuteStationFolded()
   }
 
   emit('layout-change', mode)
@@ -1444,10 +1531,26 @@ watch(
       focusKeyStation(false)
     }
     else {
-      fitWidth()
+      // 折返模式：先按宽度撑开，再把通勤聚焦站纵向居中（若有）。
+      focusCommuteStationFolded()
     }
     // 站可以在报站板排布之前就被选中。现在 currentLayout 存在了，再发一次；否则弹窗锚点永远是 null，弹窗不会打开。
     if (selectedStation) notifyAnchorChange()
+  },
+)
+
+// 通勤聚焦站可能晚于排布到达（设置是异步读的）：排布已在、用户还没动过镜头时，
+// 平滑地把镜头带过去；用户已拖动/缩放或手动选了站，就不再抢。
+watch(
+  () => commuteFocusStationId,
+  (id) => {
+    if (!id || !stage || !currentLayout || userHasTransformed || selectedStation) return
+    if (layoutMode.value === 'linear') {
+      focusKeyStation(true)
+    }
+    else {
+      focusCommuteStationFolded()
+    }
   },
 )
 
@@ -1535,6 +1638,18 @@ function handleResize(): void {
         <span class="flex items-center gap-1.5 text-slate-400">
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
           当前定位
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="text-sm font-bold leading-none text-sky-200">›</span>
+          行驶方向
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+          上班上车
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
+          下班上车
         </span>
         <div class="ml-2 flex items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5">
           <button

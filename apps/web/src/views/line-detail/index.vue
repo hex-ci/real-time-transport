@@ -30,6 +30,7 @@ import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { RefreshControl } from '@/components/refresh-control'
 import { useGis } from '@/composables/use-gis'
+import { useCommutePurpose } from '@/composables/use-commute-purpose'
 import {
   DesktopActionBar,
   LineHero,
@@ -442,6 +443,36 @@ const activePurpose = computed<'morning' | 'evening' | null>(() => {
   return null
 })
 
+const { currentPurpose } = useCommutePurpose()
+
+/**
+ * 通勤聚焦站：报站板初始镜头的目标。
+ *
+ * 上班时段看上班方向时聚焦到上班上车站，下班时段看下班方向时聚焦到下班上车站 ——
+ * 打开就是"我要等车的地方"，不用手动找。只在同时满足时生效：
+ * 1. 现在处于某个通勤时段（按设置页的四个时刻，否则按默认窗口启发式）；
+ * 2. 这条线路被关注过（上车点只对已关注的线路有意义）；
+ * 3. 这个目的的上车点属于屏幕上这个方向 —— 方向对不上说明要等的车不在本屏，
+ *    此时不聚焦，退回原来的逻辑（选中 > 最近 > 首辆车 > 首站）。
+ * 报站板里优先级：手动选中的站 > 通勤聚焦站 > 最近站 > ……
+ */
+const commuteFocusStationId = computed<string | null>(() => {
+  const purpose = currentPurpose.value
+  const fav = matchingFavorite.value
+  const detail = currentLineDetail.value
+  if (!purpose || !fav || !detail) return null
+
+  const dir = favoriteDirection.value
+  const stopDir = purpose === 'morning' ? morningStopDirection.value : eveningStopDirection.value
+  if (stopDir !== null && dir !== null && stopDir !== dir) return null
+
+  const name = purpose === 'morning' ? fav.morningStopName : fav.eveningStopName
+  const order = purpose === 'morning' ? fav.morningStopOrder : fav.eveningStopOrder
+  if (!name) return null
+  const stop = detail.stops.find(s => s.name === name && (order == null || s.order === order))
+  return stop?.id ?? null
+})
+
 async function computeWalkDecision(): Promise<void> {
   const coords = locationStore.userCoords
   if (!coords || !selectedStation.value) return
@@ -690,6 +721,7 @@ onUnmounted(() => {
         :evening-stop-name="matchingFavorite?.eveningStopName ?? null"
         :evening-stop-order="matchingFavorite?.eveningStopOrder ?? null"
         :evening-stop-direction="eveningStopDirection"
+        :commute-focus-station-id="commuteFocusStationId"
         @select-station="onSelectStation"
         @close-station="onCloseStationPopover"
         @station-anchor-change="onStationAnchorChange"

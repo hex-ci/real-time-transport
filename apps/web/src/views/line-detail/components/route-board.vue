@@ -879,7 +879,8 @@ function renderStaticBoard(): void {
       stationLayer.add(new Konva.Text({
         id: `terminal-badge-text-${pt.station.id}`,
         x: tx - 7,
-        y: ty - 6,
+        // 几何中心 ty-4.5，再下沉 0.5px 光学校正：汉字字形在 em 框内的视觉重心偏上。
+        y: ty - 4,
         text: terminalMark,
         fontSize: 9,
         fontFamily: 'system-ui, sans-serif',
@@ -1012,7 +1013,8 @@ function renderStaticBoard(): void {
       stationLayer.add(new Konva.Text({
         id: `board-stop-badge-text-${pt.station.id}`,
         x: badgeX - 8,
-        y: badgeY - 7,
+        // 几何中心 badgeY-5，再下沉 0.5px 光学校正：汉字字形在 em 框内的视觉重心偏上。
+        y: badgeY - 4.5,
         text: boardStop.text,
         fontSize: 10,
         fontFamily: 'system-ui, sans-serif',
@@ -1729,7 +1731,8 @@ function handleResize(): void {
     </div>
 
     <!-- 移动端浮动控件（md 以下） -->
-    <!-- 模式药丸：移动端点一下即切换排布 -->
+    <!-- 模式药丸：移动端点一下即切换排布；后半是图例，与桌面端 HUD 的图例一致
+         （拓扑线路是画布本身，无需解释，故移动端只收录需要解释的四项）。 -->
     <div
       ref="mobileModePillEl"
       class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md"
@@ -1743,9 +1746,21 @@ function handleResize(): void {
         <span class="font-medium text-slate-200">{{ layoutMode === 'folded' ? '折返' : '直线' }}</span>
       </button>
       <span class="text-slate-500">|</span>
-      <span class="flex items-center gap-1 text-slate-300">
+      <span class="flex items-center gap-1 text-slate-300" title="当前定位">
         <span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
         定位
+      </span>
+      <span class="flex items-center gap-1 text-slate-300" title="行驶方向">
+        <span class="text-sm font-bold leading-none text-sky-200">›</span>
+        方向
+      </span>
+      <span class="flex items-center gap-1 text-slate-300" title="上班上车站">
+        <span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
+        上班
+      </span>
+      <span class="flex items-center gap-1 text-slate-300" title="下班上车站">
+        <span class="inline-block h-2 w-2 rounded-full bg-violet-400"></span>
+        下班
       </span>
     </div>
 

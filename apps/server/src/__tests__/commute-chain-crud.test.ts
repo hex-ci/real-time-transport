@@ -35,7 +35,7 @@ const LEG = {
 function chainBody(over: Record<string, unknown> = {}) {
   return {
     name: '上班链路',
-    purpose: 'morning',
+    purpose: 'morning' as const,
     legs: [{ ...LEG }],
     ...over,
   }

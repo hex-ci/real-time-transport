@@ -400,7 +400,7 @@ describe('F7 · no service worker', () => {
   it('registers no worker from the app source either (structural: no call sites)', () => {
     const sourceDir = fileURLToPath(new URL('../..', import.meta.url))
     // 排除测试树：见 `install-promise.test.ts` 里同一个扫描的说明 —— 断言字面量不是调用点。
-    const files = readdirSync(sourceDir, { recursive: true })
+    const files = readdirSync(sourceDir, { recursive: true, encoding: 'utf8' })
       .filter(entry => /\.(?:ts|vue|js)$/.test(entry))
       .filter(entry => !entry.startsWith('__tests__/'))
     const registrations = files.filter((entry) => {

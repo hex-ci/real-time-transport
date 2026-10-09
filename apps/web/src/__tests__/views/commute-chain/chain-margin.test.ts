@@ -299,7 +299,7 @@ describe('a margin too small to resolve gets two readings, and invents neither',
     })
     const view = chainConclusionOf(chain)
     expect(view.branches?.[1]).toEqual({ outcomeText: '赶不上就是下一班', detailText: '后续班次未读到' })
-    expect(view.branches?.[1].detailText).not.toMatch(/\d/)
+    expect(view.branches?.[1]!.detailText).not.toMatch(/\d/)
   })
 
   it('states a missing minute as missing when the vehicle itself is known', () => {

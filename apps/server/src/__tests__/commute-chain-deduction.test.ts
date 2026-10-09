@@ -189,6 +189,10 @@ const SETTINGS: StoredUserSettings = {
   homeLng: 116.4,
   workLat: null,
   workLng: null,
+  homePlaceName: null,
+  workPlaceName: null,
+  homeAnchorSource: null,
+  workAnchorSource: null,
 }
 
 /** 同一行里两个锚点都有坐标：起点由目的决定，故两者必须能被区分开。 */
@@ -198,6 +202,10 @@ const BOTH_ANCHORS: StoredUserSettings = {
   homeLng: 116.4,
   workLat: 31.2304,
   workLng: 121.4737,
+  homePlaceName: null,
+  workPlaceName: null,
+  homeAnchorSource: null,
+  workAnchorSource: null,
 }
 
 /** 一次步行定价请求的起点，按上游收到的样子（`origin=lng,lat`）。 */
@@ -1036,6 +1044,7 @@ describe('F10 server: a chain of more than two ride legs', () => {
       alightStationName: '六站',
       alightStationOrder: 6,
       transferExtraMinutes: null,
+      connectionMode: null,
     }
     const { service, walking } = serviceFor({ chains: [storedChain([LEG_A, LEG_B, third])], settings: SETTINGS })
     const reads: string[] = []
@@ -1106,6 +1115,7 @@ describe('F10 server: a subway leg recorded the other way round', () => {
     alightStationName: '一号站',
     alightStationOrder: 1,
     transferExtraMinutes: null,
+    connectionMode: null,
   }
 
   it('reads direction 1 with both orders translated, and prices it with direction 1 geometry', async () => {

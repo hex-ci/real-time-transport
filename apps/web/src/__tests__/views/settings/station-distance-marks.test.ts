@@ -319,7 +319,7 @@ function draftOfThreeLegs(): ChainDraft {
   }
 }
 
-const ANCHORS_READ = { state: 'read' as const, value: { homeLat: HOME.lat, homeLng: HOME.lng, workLat: WORK.lat, workLng: WORK.lng } }
+const ANCHORS_READ = { state: 'read' as const, value: { homeLat: HOME.lat, homeLng: HOME.lng, workLat: WORK.lat, workLng: WORK.lng, homePlaceName: null, workPlaceName: null, homeAnchorSource: null, workAnchorSource: null } }
 
 describe('上车站与下车站各自的参考点：按链路的目的与段的位置定，而不是一个固定的点', () => {
   it('第 1 段的上车站量的是链路的起点锚点：上班按家，下班按公司（同一份站表，两个答案）', async () => {
@@ -566,7 +566,7 @@ describe('规则模块本身', () => {
       .toEqual({ state: 'unknown', sentence: '未读到家的位置，算不出直线距离' })
     expect(legReferencesOf(draft, lines, { state: 'reading' })[0]!.board)
       .toEqual({ state: 'unknown', sentence: '正在读取家的位置…' })
-    expect(legReferencesOf(draft, lines, { state: 'read', value: { homeLat: null, homeLng: null, workLat: WORK.lat, workLng: WORK.lng } })[0]!.board)
+    expect(legReferencesOf(draft, lines, { state: 'read', value: { homeLat: null, homeLng: null, workLat: WORK.lat, workLng: WORK.lng, homePlaceName: null, workPlaceName: null, homeAnchorSource: null, workAnchorSource: null } })[0]!.board)
       .toEqual({ state: 'unknown', sentence: '未设置家的位置，算不出直线距离' })
     // 下班链路从公司出发：同一份锚点读数，起点那一端读的是公司。
     expect(legReferencesOf(purposeOf('evening'), lines, ANCHORS_READ)[0]!.board)

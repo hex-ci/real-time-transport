@@ -3,7 +3,7 @@ import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
 import { haversineMeters } from '@real-time-transport/shared/geo'
 import { buildApp } from '../app.js'
 import { definedOnly, storedCoord } from '../db/client.js'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, InjectOptions } from 'fastify'
 
 /**
  * `/api/transit/settings` 的锚点写入路径。
@@ -46,7 +46,7 @@ async function readSettings(app: FastifyInstance): Promise<{ settingsState: stri
   return JSON.parse(res.body) as { settingsState: string, data: unknown }
 }
 
-async function patchSettings(app: FastifyInstance, payload: unknown) {
+async function patchSettings(app: FastifyInstance, payload: InjectOptions['payload']) {
   return app.inject({ method: 'PATCH', url: '/api/transit/settings', payload })
 }
 

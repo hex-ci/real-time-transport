@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { LiveBusSchema } from '@real-time-transport/shared'
-import { departureRowOf } from '../../../views/platform/departure-row'
+import { departureRowOf, type LiveAnswer } from '../../../views/platform/departure-row'
 import type { PlatformLineRule } from '../../../views/platform/types'
 
 /**
@@ -31,7 +31,7 @@ function bus(fields: Record<string, unknown>) {
   return LiveBusSchema.parse({ id: 'v1', updatedAt: 0, ...fields })
 }
 
-const answer = (buses: Array<Record<string, unknown>>, dataSource = 'chelaile') => ({
+const answer = (buses: Array<Record<string, unknown>>, dataSource: LiveAnswer['dataSource'] = 'chelaile') => ({
   dataSource,
   buses: buses.map(bus),
 })

@@ -466,6 +466,8 @@ export interface MountedHost {
   node(where: (node: HostElement) => boolean, description: string): HostElement
   /** 让所有挂起的 promise 与重渲染落定。 */
   flush(): Promise<void>
+  /** 原地改根 props（同一条路由记录复用实例时，参数就是这么变的），再让渲染落定。 */
+  setProps(next: Record<string, unknown>): Promise<void>
   unmount(): void
 }
 

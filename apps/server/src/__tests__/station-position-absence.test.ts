@@ -32,6 +32,10 @@ const SETTINGS: StoredUserSettings = {
   homeLng: 116.4,
   workLat: null,
   workLng: null,
+  homePlaceName: null,
+  workPlaceName: null,
+  homeAnchorSource: null,
+  workAnchorSource: null,
 }
 
 const LEG_A: StoredCommuteChainLeg = {

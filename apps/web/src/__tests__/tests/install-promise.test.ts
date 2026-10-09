@@ -56,7 +56,7 @@ function pngSize(file: string): { width: number, height: number } {
  * 永远红着 —— 它要问的是应用源码里有没有调用点。
  */
 function sourceFilesMatching(pattern: RegExp): string[] {
-  return readdirSync(sourceDir, { recursive: true })
+  return readdirSync(sourceDir, { recursive: true, encoding: 'utf8' })
     .filter(entry => /\.(?:ts|vue|js)$/.test(entry))
     .filter(entry => !entry.startsWith('__tests__/'))
     .filter(entry => pattern.test(readFileSync(`${sourceDir}/${entry}`, 'utf8')))

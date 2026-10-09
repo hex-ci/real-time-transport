@@ -69,7 +69,7 @@ function writes(fetchMock: any): Array<{ id: string, displayOrder: number, body:
 
 /** 回显被写行的 PATCH 应答，像端点返回存储行那样。 */
 function echoStored(known: CommuteChain[] = []) {
-  return vi.fn(async (url: string, init: { body: string }) => {
+  return vi.fn(async (url: string, init: { method: string, body: string }) => {
     const id = String(url).split('/').pop()!
     const { displayOrder } = JSON.parse(init.body) as { displayOrder: number }
     const row = known.find(item => item.id === id) ?? chain(id, displayOrder)

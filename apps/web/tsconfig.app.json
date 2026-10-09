@@ -1,9 +1,8 @@
 {
-  // This package's test files (`src/**/__tests__/*`) are excluded on purpose, and the
-  // exclusion is a standing one rather than a state to be undone: a test is transformed
-  // and run by Vitest, against the types the runner gives it, and is never type-checked
-  // by `vue-tsc --build`, which reads this file. Re-including them would redden a build
-  // nobody changed — so the reason lives here, where the exclusion is.
+  // The exclusion of `src/**/__tests__/*` from this project is deliberate and standing: this is the
+  // app's own project, and it never type-checks test files. Tests are checked by `tsconfig.test.json`,
+  // which re-includes them with the node types they need — one project per concern, so the app build
+  // never reports on test fixtures.
   "extends": ["@vue/tsconfig/tsconfig.dom.json", "../../tsconfig.base.json"],
   "include": ["env.d.ts", "src/**/*", "src/**/*.vue"],
   "exclude": ["src/**/__tests__/*"],

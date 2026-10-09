@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createApiHarness, describeEachStore, type ApiHarness } from './support/api-harness.js'
+import type { LightMyRequestResponse } from 'fastify'
 
 /**
  * HTTP 边界：每个以前踩过的洞都拿真响应钉住。
@@ -71,7 +72,7 @@ describeEachStore('HTTP 边界：400 / 404 / 409 都拿真响应钉住', (store)
   const arrivalsUrl = (query: string) =>
     `/api/transit/lines/${LINE}/stations/${encodeURIComponent(STATION)}/arrivals?cityCode=027${query}`
 
-  const arrivalsRows = (res: { body: string }) => res.json().data?.arrivals as unknown[]
+  const arrivalsRows = (res: LightMyRequestResponse) => res.json().data?.arrivals as unknown[]
 
   it('畸形的 count 一律 400，并点名所在的域与上界', async () => {
     for (const raw of ['abc', '0', '-1', '3.7', '21', '1e2', '6.0', ' ']) {

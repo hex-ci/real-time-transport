@@ -28,7 +28,7 @@ function declaredReasons(): string[] {
   )
   const block = /export type ChainNoConclusionReason\s*=([\s\S]*?)\n\n/.exec(source)
   expect(block, 'the contract no longer declares ChainNoConclusionReason').not.toBeNull()
-  return [...block![1].matchAll(/'([a-z-]+)'/g)].map(match => match[1]!)
+  return [...block![1]!.matchAll(/'([a-z-]+)'/g)].map(match => match[1]!)
 }
 
 /** 每个代码一句话，锚点是其中唯一需要参数的。 */

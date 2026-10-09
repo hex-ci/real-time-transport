@@ -48,7 +48,7 @@ function stubUpstream(): void {
             name: '地铁7号线',
             type: '地铁线路',
             start_stop: stops[0][0],
-            end_stop: stops[stops.length - 1][0],
+            end_stop: stops[stops.length - 1]![0],
             start_time: '0516',
             end_time: '2306',
             busstops: stops.map(([name, location], idx) => ({

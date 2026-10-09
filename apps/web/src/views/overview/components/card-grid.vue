@@ -12,6 +12,11 @@ defineProps<{
    * 转发给每张卡片，因为附近卡片的空状态是按它「为什么」没有站台来措辞的。
    */
   nearbyLocation: NearbyLocationState
+  /**
+   * 置顶 PATCH 请求在途的那个关注的 id（没有时为 null）。请求优先：卡片在 PATCH 落定、
+   * store 做唯一一次写入之前不动，在途的那一张在操作栏那一格显示 loading。
+   */
+  pinningId: string | null
 }>()
 
 defineEmits<{
@@ -58,6 +63,7 @@ defineEmits<{
         :detail-loaded="line.detailLoaded"
         :is-subway="line.isSubway"
         :is-pinned="line.isPinned"
+        :is-pinning="pinningId === line.favoriteId"
         @switch-direction="$emit('switch-direction', line, $event)"
         @toggle-pin="$emit('toggle-pin', line)"
       />

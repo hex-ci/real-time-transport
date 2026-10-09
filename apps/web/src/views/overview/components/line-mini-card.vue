@@ -56,6 +56,11 @@ const props = defineProps<{
    */
   isPinned: boolean
   /**
+   * 置顶请求在途。请求优先：PATCH 落定、store 做唯一一次写入之前卡片不动，这一段时间
+   * 那一格显示 loading 并禁用；动画在请求回来后才启动，故不可能被第二次写入掐断。
+   */
+  isPinning: boolean
+  /**
    * 一张卡片同时携带两个方向时，哪一个领起。领起的那一行由调用方决定（当季的通勤段、或一次
    * 手动选择），而不是由到站时间决定：在同一个站台上，两个方向服务对侧的路缘，所以马路对面
    * 更快的那班车不能挤掉正在等的那一班。
@@ -514,15 +519,22 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
            静态与动态同属性时两者特异性相同，谁赢只看编译后 CSS 里谁在后，读代码看不出来。 -->
       <button
         type="button"
+        :disabled="isPinning"
         class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
         :class="isPinned ? 'bg-cyan-500/8! text-cyan-400!' : 'text-slate-300'"
-        :aria-label="isPinned ? '取消置顶' : '置顶此线路'"
+        :aria-label="isPinning ? '置顶请求中' : (isPinned ? '取消置顶' : '置顶此线路')"
         :aria-pressed="isPinned"
         @click="$emit('toggle-pin')"
       >
-        <PinOff v-if="isPinned" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span
+          v-if="isPinning"
+          class="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-600"
+          :class="accent.spinner"
+          aria-hidden="true"
+        ></span>
+        <PinOff v-else-if="isPinned" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <Pin v-else class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>{{ isPinned ? '已置顶' : '置顶' }}</span>
+        <span>{{ isPinning ? '请求中' : (isPinned ? '已置顶' : '置顶') }}</span>
       </button>
 
       <!-- 切换方向只在真的有另一个方向时成立；单向线路上这一格说不出它要切到哪儿，故不摆。 -->

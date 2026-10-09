@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RouterLinkStub,
+  click,
   mountComponent,
   press,
   type HostElement,
@@ -132,7 +133,7 @@ function modeButton(host: MountedHost, label: string): HostElement {
 }
 
 describe('置顶：成功由操作栏自己说，失败才说一句原因', () => {
-  it('钉住一条线路：操作栏立刻变成「已置顶」，不再额外推 toast', async () => {
+  it('钉住一条线路：请求落定后操作栏变成「已置顶」，不再额外推 toast', async () => {
     const host = await mountOverview()
 
     await press(host, pinButton(host, false))
@@ -142,7 +143,7 @@ describe('置顶：成功由操作栏自己说，失败才说一句原因', () =
     host.unmount()
   })
 
-  it('取消钉住：操作栏立刻回到「置顶」，不再额外推 toast', async () => {
+  it('取消钉住：请求落定后操作栏回到「置顶」，不再额外推 toast', async () => {
     const host = await mountOverview(true)
 
     await press(host, pinButton(host, true))
@@ -152,7 +153,7 @@ describe('置顶：成功由操作栏自己说，失败才说一句原因', () =
     host.unmount()
   })
 
-  it('置顶与取消置顶都不动视口：卡片走到新槽位就是全部', async () => {
+  it('宽屏置顶与取消置顶都不动视口：卡片走到新槽位就是全部', async () => {
     vi.useFakeTimers()
     const host = await mountOverview(false)
     const scrollTo = vi.fn()
@@ -170,6 +171,30 @@ describe('置顶：成功由操作栏自己说，失败才说一句原因', () =
     expect(scrollTo).not.toHaveBeenCalled()
 
     vi.useRealTimers()
+    host.unmount()
+  })
+
+  it('窄屏置顶：成功后平滑滚动到顶部', async () => {
+    const host = await mountOverview(false)
+    const scrollTo = vi.fn()
+    ;(window as any).scrollTo = scrollTo
+    ;(window as any).matchMedia = (query: string) => ({ matches: query === '(max-width: 767px)' })
+
+    await press(host, pinButton(host, false))
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+    host.unmount()
+  })
+
+  it('窄屏取消置顶：不动视口', async () => {
+    const host = await mountOverview(true)
+    const scrollTo = vi.fn()
+    ;(window as any).scrollTo = scrollTo
+    ;(window as any).matchMedia = (query: string) => ({ matches: query === '(max-width: 767px)' })
+
+    await press(host, pinButton(host, true))
+
+    expect(scrollTo).not.toHaveBeenCalled()
     host.unmount()
   })
 
@@ -193,7 +218,68 @@ describe('置顶：成功由操作栏自己说，失败才说一句原因', () =
     host.unmount()
   })
 
-  it('被拒：卡片回到原来的「置顶」状态，仍不额外推 toast', async () => {
+  it('请求在途时那一格显示 loading 并禁用：动画在请求回来后才启动', async () => {
+    let settlePatch!: (value: unknown) => void
+    const patchInFlight = new Promise((resolve) => {
+      settlePatch = resolve
+    })
+    const host = await mountOverview(false,
+      [/\/api\/transit\/favorites\/fav-1$/, () => patchInFlight],
+    )
+
+    click(pinButton(host, false))
+    await host.flush()
+
+    // PATCH 尚未回来：那一格说「请求中」而不是提前翻成「已置顶」。
+    const loading = host.node(
+      node => node.tag === 'button' && node.props['aria-label'] === '置顶请求中',
+      'the pin control while requesting',
+    )
+    expect(loading.props.disabled).toBe(true)
+    expect(host.textOf(loading)).toContain('请求中')
+
+    settlePatch({ success: true, data: { ...favourite(false), isPinned: true } })
+    await host.flush()
+
+    // 落定后唯一一次写入：操作栏翻成「已置顶」，仍不推 toast。
+    expect(pushed).toEqual([])
+    expect(pinButton(host, true).props['aria-pressed']).toBe(true)
+    host.unmount()
+  })
+
+  it('置顶不触发到站重查：重排不改变关注成员', async () => {
+    // 两张卡片：置顶第二张会把它翻到顶部，是一次真正的重排 —— 单张卡片测不出这个 watch。
+    const second = {
+      ...favourite(false),
+      id: 'fav-2',
+      lineId: 'bus_027_20',
+      lineName: '20路',
+      displayOrder: 1,
+    }
+    const host = await mountOverview(false,
+      [/\/api\/transit\/favorites$/, () => ({ success: true, data: [favourite(false), second] })],
+      [/\/api\/transit\/favorites\/fav-2$/, request => ({
+        success: true,
+        data: { ...second, ...(request.body as Record<string, unknown> ?? {}) },
+      })],
+    )
+    const arrivalsBefore = host.server.seen(/\/arrivals\?/).length
+    expect(arrivalsBefore).toBeGreaterThan(0)
+
+    const pinButtons = host.nodes(
+      node => node.tag === 'button' && node.props['aria-label'] === '置顶此线路',
+    )
+    expect(pinButtons).toHaveLength(2)
+    await press(host, pinButtons[1]!)
+    // 给误触发的 watch 一个机会：如果 key 对顺序敏感，它会在这里打出一整轮到站请求，
+    // 它们的落定又会把正在跑的 move 动画掐掉 —— 真机上「点置顶一闪」的主要原因。
+    await host.flush()
+
+    expect(host.server.seen(/\/arrivals\?/)).toHaveLength(arrivalsBefore)
+    host.unmount()
+  })
+
+  it('被拒：卡片保持「置顶」不变（请求前从未动过），仍不额外推 toast', async () => {
     const host = await mountOverview(false, [
       /\/api\/transit\/favorites\/fav-1$/,
       () => ({ success: false, error: '该线路不在关注列表中' }),

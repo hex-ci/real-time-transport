@@ -173,12 +173,17 @@ function onSwitchDirection(card: MiniCardConfig, direction: 0 | 1): void {
 }
 
 /**
- * 置顶写入仍在途的那个关注。
- *
- * 点按瞬间卡片已经动过了（store 乐观写入），所以没有这个的话，第二次点按会读到已经翻转的状态
- * 并发出反向请求。
+ * 置顶动作在途的那个关注：PATCH 请求，加上之后 400ms 的 CSS move 窗口。
+ * 这段时间忽略重复点按 —— 不能在中间态再次改变顺序（见 PRD F8）。
  */
 const pinningFavoriteId = shallowRef<string | null>(null)
+
+/**
+ * 置顶 PATCH 请求在途的那个关注：只覆盖请求本身，驱动卡片上那一格的 loading。
+ * 请求落定、store 做唯一一次写入后即清除 —— 之后的 400ms 是动画的时间，
+ * 按钮显示的是新状态，不再是 loading。
+ */
+const pinRequestId = shallowRef<string | null>(null)
 
 /**
  * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
@@ -190,14 +195,26 @@ const pinningFavoriteId = shallowRef<string | null>(null)
 async function onTogglePin(card: MiniCardConfig): Promise<void> {
   const favoriteId = card.favoriteId
   if (!favoriteId || pinningFavoriteId.value !== null) return
+  // 先记下这次是置顶还是取消置顶：await 之后 card 会跟着 store 一起变。
+  const pinning = !card.isPinned
   pinningFavoriteId.value = favoriteId
+  pinRequestId.value = favoriteId
   try {
+    // 请求优先：store 在 PATCH 落定后只做唯一一次写入，动画不会被第二次写入掐断。
     await transitStore.togglePin(favoriteId)
+    // 窄屏（手机，Tailwind md 断点之下、单列布局）置顶成功后把视口平滑送回顶部：
+    // 被置顶的卡片是从屏幕下方飞走的，不跟过去就看不到它落在哪里。
+    // 取消置顶与宽屏不动视口（见 PRD F8）—— 与 400ms 的 move 动画同时进行。
+    if (pinning && window.matchMedia('(max-width: 767px)').matches) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   }
   catch {
-    // store 已将乐观变更回滚；置顶状态本身是此处唯一的反馈。
+    // 没有乐观写入，无需回滚；按项目约定（action-feedback.ts）置顶失败不推 toast，
+    // 按钮结束 loading 即是全部反馈。
   }
   finally {
+    pinRequestId.value = null
     // CSS move 仍可能在跑：等它走完再开下一次写入，绝不在中间态再次改变顺序。
     await new Promise<void>(resolve => window.setTimeout(resolve, 400))
     pinningFavoriteId.value = null
@@ -508,6 +525,9 @@ async function refreshAllArrivals(): Promise<void> {
   })
 
   await Promise.allSettled(tasks)
+  // 置顶动画在途时不写：这次写入会触发 TransitionGroup 的 onUpdated，
+  // 把正在跑的 move 掐掉。丢的这一轮不补 —— 10 秒后下一次轮询会带上最新值。
+  if (pinningFavoriteId.value !== null) return
   arrivalsMap.value = nextMap
 }
 
@@ -633,9 +653,12 @@ watch(
   },
 )
 
-// 关注变了（在设置里增删）-> 为新线路预取详情
+// 关注的「成员」变了（在设置里增删）-> 为新线路预取详情并刷新到站。
+// key 先排序：置顶只是重排，成员不变，不能触发 —— 否则每次置顶都会打一轮
+// 到站请求（每行一个并发），它们的落定又会触发 TransitionGroup 的 onUpdated，
+// 把正在跑的 move 动画掐掉（真机上「点置顶一闪」的主要原因）。
 watch(
-  () => cityFavorites.value.map(f => `${f.lineId}_${f.cityCode}`).join('|'),
+  () => cityFavorites.value.map(f => `${f.lineId}_${f.cityCode}`).sort().join('|'),
   async () => {
     await ensureDetails()
     await refreshAllArrivals()
@@ -830,6 +853,7 @@ onMounted(() => {
       :mode="currentMode"
       :arrivals="arrivalsMap"
       :nearby-location="nearbyLocation"
+      :pinning-id="pinRequestId"
       @switch-direction="onSwitchDirection"
       @toggle-pin="onTogglePin"
     />

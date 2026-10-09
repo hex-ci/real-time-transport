@@ -46,7 +46,7 @@ describe('F8 pin is a state overlaid on the order', () => {
     vi.unstubAllGlobals()
   })
 
-  it('pins a line to the top before the write settles, then keeps the server row', async () => {
+  it('writes the pin only after the PATCH settles, then moves the line to the top', async () => {
     const store = useTransitStore()
     store.favorites = [favorite('fb', 1), favorite('fc', 2), favorite('fa', 3)]
 
@@ -59,9 +59,10 @@ describe('F8 pin is a state overlaid on the order', () => {
 
     const pending = store.togglePin('fa')
 
-    // 乐观更新：PATCH 尚未结束时卡片已在顶部。
-    expect(ids(store)).toEqual(['fa', 'fb', 'fc'])
-    expect(store.favorites[0]!.isPinned).toBe(true)
+    // 请求优先：PATCH 尚未结束时列表纹丝不动 —— 动画只在落定后的唯一一次写入里启动，
+    // 不会被第二次写入掐断（真机上「点置顶一闪」就是两次写入叠出来的）。
+    expect(ids(store)).toEqual(['fb', 'fc', 'fa'])
+    expect(store.favorites.some(f => f.isPinned)).toBe(false)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/transit/favorites/fa',
       expect.objectContaining({
@@ -117,7 +118,9 @@ describe('F8 pin is a state overlaid on the order', () => {
     expect(store.favorites.filter(f => f.isPinned).map(f => f.id)).toEqual(['fb'])
   })
 
-  it('rolls the pin back and reports the reason when the write fails', async () => {
+  it('leaves the list untouched and reports the reason when the write fails', async () => {
+    // 请求优先：失败之前列表从未动过，无需回滚 —— 顺序与标记都保持请求之前的样子，
+    // 按钮结束 loading 即是全部反馈（见 action-feedback.ts，置顶失败不推 toast）。
     const store = useTransitStore()
     store.favorites = [favorite('fb', 1), favorite('fc', 2), favorite('fa', 3)]
 

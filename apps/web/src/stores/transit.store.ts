@@ -822,8 +822,12 @@ export const useTransitStore = defineStore('transit', () => {
   /**
  * 把一条线路钉到首页列表顶部，或取消钉住 —— 首页的入口、标记与取消控件都搭在这一个动作上。
  *
- * 乐观：写入落定之前卡片已在点按所说的位置，写入失败时原样恢复先前的列表，并原样重抛服务端
- * 自己的消息，让界面能说明原因。
+ * 先请求、回来再写：PATCH 落定之前列表不动，落定之后只做**唯一一次**写入。
+ * 乐观更新的写法会在 PATCH 往返结束时做第二次写入，而那一次写入触发的 TransitionGroup
+ * `onUpdated` 会把正在跑的 move 动画掐断（`callPendingCbs` 摘掉上一轮的 move class）——
+ * 真机上看到的「点置顶一闪」正是这么来的，且掐断点只取决于网速、与动画时长无关。
+ * 代价是动画比点按晚一个 PATCH 往返（通常几十毫秒）；请求在途时按钮显示 loading，
+ * 写入失败时原样重抛服务端自己的消息，让界面能说明原因（没有乐观写入，无需回滚）。
  *
  * 只允许一条线路被钉住（该列上的部分唯一索引），所以一次钉住在同一趟里清掉上一条 —— 与服务端
  * 跑的是同一个单钉事务。取消钉住只动那个标志，这也正是让该行落回它自己 `displayOrder` 的原因。
@@ -834,33 +838,23 @@ export const useTransitStore = defineStore('transit', () => {
     if (!target) return
 
     const pinned = !target.isPinned
-    const previous = favorites.value
+
+    const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isPinned: pinned }),
+    })
+    const json = await res.json()
+    if (!json.success || !json.data) {
+      throw new Error(json.error || '置顶设置失败')
+    }
+    const saved: UserFavoriteLine = json.data
     // 只给「标记真的变了」的行换新对象：展开每一行会让列表里每张卡都跟着重渲染，那一次停顿正好
     // 压在重排动画的起跑上。
-    favorites.value = orderFavorites(previous.map(f => (f.id === favoriteId
-      ? { ...f, isPinned: pinned }
+    // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
+    favorites.value = orderFavorites(favorites.value.map(f => (f.id === saved.id
+      ? saved
       : (pinned && f.isPinned ? { ...f, isPinned: false } : f))))
-
-    try {
-      const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isPinned: pinned }),
-      })
-      const json = await res.json()
-      if (!json.success || !json.data) {
-        throw new Error(json.error || '置顶设置失败')
-      }
-      const saved: UserFavoriteLine = json.data
-      // 重新赋值而不是就地修改：`favorites` 是 shallowRef。
-      favorites.value = orderFavorites(favorites.value.map(f => (f.id === saved.id
-        ? saved
-        : (pinned && f.isPinned ? { ...f, isPinned: false } : f))))
-    }
-    catch (err) {
-      favorites.value = previous
-      throw err instanceof Error ? err : new Error('置顶设置失败')
-    }
   }
 
   /**

@@ -51,6 +51,7 @@ async function mountCard(options: {
   rows?: CardRowWithArrivals[]
   isPinned?: boolean
   isSubway?: boolean
+  isPinning?: boolean
 } = {}): Promise<MountedHost> {
   const routes: Route[] = []
   return mountComponent(LineMiniCard, {
@@ -69,6 +70,7 @@ async function mountCard(options: {
       detailLoaded: true,
       isSubway: options.isSubway ?? false,
       isPinned: options.isPinned ?? false,
+      isPinning: options.isPinning ?? false,
       primaryDirection: null,
     },
   })
@@ -142,6 +144,23 @@ describe('操作栏是卡片的动作归属地', () => {
       'the unpin control',
     )
     expect(pin.props['aria-pressed']).toBe(true)
+
+    host.unmount()
+  })
+
+  it('置顶请求在途时那一格显示 loading 并禁用 —— 动画在请求回来后才启动', async () => {
+    const host = await mountCard({ isPinning: true })
+
+    const pin = host.node(
+      (n: any) => n.tag === 'button' && n.props['aria-label'] === '置顶请求中',
+      'the pin control while requesting',
+    )
+    expect(pin.props.disabled).toBe(true)
+    expect(host.textOf(pin)).toContain('请求中')
+    // 转圈的是新加的那个 span，不是 Pin / PinOff 字形。
+    const spinner = (pin.children ?? []).find((c: any) =>
+      c.tag === 'span' && String(c.props.class ?? '').includes('animate-spin'))
+    expect(spinner, 'loading spinner inside the pin control').toBeTruthy()
 
     host.unmount()
   })

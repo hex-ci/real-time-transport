@@ -24,6 +24,7 @@ import { useEventListener, useIntervalFn } from '@vueuse/core'
 import {
   refreshFreshnessOf,
   useTransitStore,
+  type RefreshReading,
 } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
@@ -171,8 +172,24 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => [{
    */
 const refreshing = computed(() => refreshInFlight.value || isRefreshingLive.value)
 
-/** 本页唯一留在屏幕上的刷新字句：上一次按下取到的读数。 */
-const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
+/**
+ * 右上角新鲜度字句：取所有来源中最新的读数。
+ *
+ * 原来只认手动按下的读数（refreshReading），于是初次加载与 WS 每 18 秒推来的
+ * 新数据在这里是隐形的——角落永远显示"尚未获取到数据"，直到用户亲手按一次刷新。
+ * 数据就是数据，不分手动自动：取最新的那个，界面才诚实。
+ * （store 里的 refreshReading 本身不动：冷却倒计时仍只认手动按下。）
+ */
+const freshestReading = computed<RefreshReading | null>(() => {
+  const manual = refreshReading.value
+  const live = currentLiveStatus.value
+  const auto: RefreshReading | null = live?.updatedAt
+    ? { at: live.updatedAt, dataSource: live.dataSource, isDegraded: live.isDegraded }
+    : null
+  if (manual && auto) return manual.at >= auto.at ? manual : auto
+  return manual ?? auto
+})
+const refreshFreshness = computed(() => refreshFreshnessOf(freshestReading.value))
 
 /**
  * F11 在本页的两处入口共用这一份参数：桌面动作行与移动端抽屉各挂一个实例，词都由本页算好，

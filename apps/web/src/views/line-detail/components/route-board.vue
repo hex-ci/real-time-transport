@@ -189,12 +189,6 @@ let currentLayout: RouteLayoutResult | null = null
 let selectionRing: Konva.Circle | null = null
 let nearestAuraCircle: Konva.Circle | null = null
 
-/** 行驶方向箭头节点：大小按舞台缩放反向补偿，保持恒定屏幕尺寸。 */
-let directionNodes: Konva.Line[] = []
-let lastDirectionScale = 1
-/** 方向箭头的排布间距（布局坐标 px）。 */
-const CHEVRON_GAP = 220
-
 interface AnimatedVehicle {
   id: string
   /** 当前渲染的、平滑后的起点距离（米）。 */
@@ -535,16 +529,6 @@ function initAnimation(): void {
       nearestAuraCircle.scale({ x: scale, y: scale })
     }
 
-    // 方向箭头恒定屏幕尺寸：舞台缩放变化时反向补偿，缩再小也看得见。
-    if (stage && directionNodes.length > 0) {
-      const stageScale = stage.scaleX()
-      if (stageScale > 0 && stageScale !== lastDirectionScale) {
-        lastDirectionScale = stageScale
-        const k = 1 / stageScale
-        for (const n of directionNodes) n.scale({ x: k, y: k })
-      }
-    }
-
     const L = routeLength()
     for (const [id, v] of vehicleMap.entries()) {
       if (!currentLayout) continue
@@ -746,8 +730,6 @@ function renderStaticBoard(): void {
 
   trackLayer.destroyChildren()
   stationLayer.destroyChildren()
-  directionNodes = []
-  lastDirectionScale = 1
 
   const width = stage.width()
   const stops = lineDetail?.stops || []
@@ -794,41 +776,29 @@ function renderStaticBoard(): void {
       lineCap: 'round',
     }))
 
-    // 每行独立起排：首个箭头落在行内约 132px 处，避开 始 标。
-    let chevronCarry = CHEVRON_GAP * 0.4
-
-    // 行驶方向箭头：沿行进方向（相邻两站的顺序即行驶顺序）每 ~220px 放一个填色小三角，
-    // 一眼看出这条线往哪开 —— 不用再靠分析车头判断。圆弧段不放，直段已足够表达。
-    // 大小按当前缩放反向补偿（恒定屏幕尺寸）：在 initAnimation 的帧循环里按 1/scale 缩放，
-    // 缩再小也看得见、放再大也不吓人。深色描边保证压在蓝色轨道上仍有对比度。
+    // 行驶方向箭头：每段站间中点放一个细线条 chevron，一眼看出这条线往哪开。
+    // 细、不填色、比站点图标小 —— 方向是辅助信息，不能抢站点的戏。
+    // 跟画布一起缩放（不做反向补偿），行为和站点一致。
     for (let i = 0; i < rowPoints.length - 1; i++) {
       const a = rowPoints[i]!
       const b = rowPoints[i + 1]!
       const dx = b.x - a.x
       const dy = b.y - a.y
       const len = Math.hypot(dx, dy)
-      if (len < 1) continue
-      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI
-      let d = CHEVRON_GAP - chevronCarry
-      while (d < len) {
-        const t = d / len
-        const node = new Konva.Line({
-          x: a.x + dx * t,
-          y: a.y + dy * t,
-          points: [-5, -6.5, 5.5, 0, -5, 6.5],
-          closed: true,
-          fill: '#f0f9ff',
-          stroke: '#0c4a6e',
-          strokeWidth: 1.2,
-          opacity: 0.92,
-          rotation: angleDeg,
-          listening: false,
-        })
-        trackLayer.add(node)
-        directionNodes.push(node)
-        d += CHEVRON_GAP
-      }
-      chevronCarry = CHEVRON_GAP - (d - len)
+      // 太短的段不放：箭头会糊住两端的站点圆点。
+      if (len < 56) continue
+      trackLayer.add(new Konva.Line({
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
+        points: [-3.5, -5, 4, 0, -3.5, 5],
+        stroke: '#e0f2fe',
+        strokeWidth: 1.6,
+        lineCap: 'round',
+        lineJoin: 'round',
+        opacity: 0.55,
+        rotation: Math.atan2(dy, dx) * 180 / Math.PI,
+        listening: false,
+      }))
     }
   }
 
@@ -852,6 +822,24 @@ function renderStaticBoard(): void {
       rotation: arc.isRightSide ? -90 : 90,
       fill: '#0ea5e9',
       opacity: 0.7,
+    }))
+  }
+
+  // 折返圆弧上的方向箭头：圆弧中点（最外侧那点），切线方向恒为向下（往下一行走），
+  // 与圆弧的几何一致（两侧皆然）。没有它，换行处方向会断。
+  // 在圆弧轨道之后画，否则会被轨道盖住。
+  for (const arc of layout.arcs) {
+    trackLayer.add(new Konva.Line({
+      x: arc.centerX + (arc.isRightSide ? arc.radius : -arc.radius),
+      y: arc.centerY,
+      points: [-3.5, -5, 4, 0, -3.5, 5],
+      stroke: '#e0f2fe',
+      strokeWidth: 1.6,
+      lineCap: 'round',
+      lineJoin: 'round',
+      opacity: 0.55,
+      rotation: 90,
+      listening: false,
     }))
   }
 

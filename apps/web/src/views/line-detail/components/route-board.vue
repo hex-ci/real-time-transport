@@ -189,6 +189,12 @@ let currentLayout: RouteLayoutResult | null = null
 let selectionRing: Konva.Circle | null = null
 let nearestAuraCircle: Konva.Circle | null = null
 
+/** 行驶方向箭头节点：大小按舞台缩放反向补偿，保持恒定屏幕尺寸。 */
+let directionNodes: Konva.Line[] = []
+let lastDirectionScale = 1
+/** 方向箭头的排布间距（布局坐标 px）。 */
+const CHEVRON_GAP = 220
+
 interface AnimatedVehicle {
   id: string
   /** 当前渲染的、平滑后的起点距离（米）。 */
@@ -529,6 +535,16 @@ function initAnimation(): void {
       nearestAuraCircle.scale({ x: scale, y: scale })
     }
 
+    // 方向箭头恒定屏幕尺寸：舞台缩放变化时反向补偿，缩再小也看得见。
+    if (stage && directionNodes.length > 0) {
+      const stageScale = stage.scaleX()
+      if (stageScale > 0 && stageScale !== lastDirectionScale) {
+        lastDirectionScale = stageScale
+        const k = 1 / stageScale
+        for (const n of directionNodes) n.scale({ x: k, y: k })
+      }
+    }
+
     const L = routeLength()
     for (const [id, v] of vehicleMap.entries()) {
       if (!currentLayout) continue
@@ -730,6 +746,8 @@ function renderStaticBoard(): void {
 
   trackLayer.destroyChildren()
   stationLayer.destroyChildren()
+  directionNodes = []
+  lastDirectionScale = 1
 
   const width = stage.width()
   const stops = lineDetail?.stops || []
@@ -776,32 +794,41 @@ function renderStaticBoard(): void {
       lineCap: 'round',
     }))
 
-    // 行驶方向箭头：沿行进方向（相邻两站的顺序即行驶顺序）每段放 1~2 个 chevron，
+    // 每行独立起排：首个箭头落在行内约 132px 处，避开 始 标。
+    let chevronCarry = CHEVRON_GAP * 0.4
+
+    // 行驶方向箭头：沿行进方向（相邻两站的顺序即行驶顺序）每 ~220px 放一个填色小三角，
     // 一眼看出这条线往哪开 —— 不用再靠分析车头判断。圆弧段不放，直段已足够表达。
+    // 大小按当前缩放反向补偿（恒定屏幕尺寸）：在 initAnimation 的帧循环里按 1/scale 缩放，
+    // 缩再小也看得见、放再大也不吓人。深色描边保证压在蓝色轨道上仍有对比度。
     for (let i = 0; i < rowPoints.length - 1; i++) {
       const a = rowPoints[i]!
       const b = rowPoints[i + 1]!
       const dx = b.x - a.x
       const dy = b.y - a.y
       const len = Math.hypot(dx, dy)
-      if (len < 90) continue
+      if (len < 1) continue
       const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI
-      const count = len >= 260 ? 2 : 1
-      for (let k = 0; k < count; k++) {
-        const t = (k + 1) / (count + 1)
-        trackLayer.add(new Konva.Line({
+      let d = CHEVRON_GAP - chevronCarry
+      while (d < len) {
+        const t = d / len
+        const node = new Konva.Line({
           x: a.x + dx * t,
           y: a.y + dy * t,
-          points: [-4.5, -6.5, 4.5, 0, -4.5, 6.5],
-          stroke: '#e0f2fe',
-          strokeWidth: 2.2,
-          lineCap: 'round',
-          lineJoin: 'round',
-          opacity: 0.85,
+          points: [-5, -6.5, 5.5, 0, -5, 6.5],
+          closed: true,
+          fill: '#f0f9ff',
+          stroke: '#0c4a6e',
+          strokeWidth: 1.2,
+          opacity: 0.92,
           rotation: angleDeg,
           listening: false,
-        }))
+        })
+        trackLayer.add(node)
+        directionNodes.push(node)
+        d += CHEVRON_GAP
       }
+      chevronCarry = CHEVRON_GAP - (d - len)
     }
   }
 

@@ -53,6 +53,8 @@ const router = createRouter({
         },
         // 早晚高峰起止时刻，存 user_settings。
         { path: 'schedule', name: 'settings-schedule', component: () => import('@/views/settings/schedule.vue') },
+        // 实时数据刷新间隔（秒）：驱动服务端轮询节拍，存 user_settings，保存即时生效。
+        { path: 'refresh-interval', name: 'settings-refresh-interval', component: () => import('@/views/settings/refresh-interval.vue') },
         // 家 / 公司：步行时间从它们出发测量。索引页两行整行可点，各自进自己那一页。
         { path: 'anchors', name: 'settings-anchors', component: () => import('@/views/settings/anchors.vue') },
         // 两个锚点**同构**，故共用一个页面，文案与图标查 `anchor-catalog.ts` 的表。

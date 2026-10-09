@@ -101,6 +101,10 @@ export const ACTION_FEEDBACK = {
     ok: () => '已保存通勤时段',
     fail: context => `通勤时段保存失败${why(context)}`,
   },
+  'refresh-interval-save': {
+    ok: () => '已保存刷新间隔，实时数据将按新节拍更新',
+    fail: context => `刷新间隔保存失败${why(context)}`,
+  },
   'anchor-save': {
     ok: context => `已保存${quoted(context)}的位置`,
     // 服务端的拒绝（例如坐标不在服务范围内）与设备定位失败是两件事，故原文跟上来。

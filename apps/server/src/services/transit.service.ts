@@ -7,7 +7,6 @@ import {
   TransitAggregator,
   AmapGisService,
   StationTimetableService,
-  LIVE_CACHE_TTL_MS,
 } from '@real-time-transport/transit-adapter'
 import type { ConnectionMode } from '@real-time-transport/transit-adapter'
 import type {
@@ -84,6 +83,7 @@ const UNCONFIGURED_COMMUTE_WINDOW = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 } satisfies StoredUserSettings
 
 /**
@@ -100,9 +100,20 @@ function commuteWindowFor(stored: StoredUserSettings | null): CommuteHours {
 }
 
 /**
- * F11 的冷却，按 (user, 数据类)：故意取实时缓存自己的 TTL，令两者不可能各自漂移。
+ * 实时刷新间隔的合法范围（秒）：下限保护上游 —— 车来了 H5 是非公开接口，
+ * 刷太快有被限流封 IP 的风险；上限避免数据 stale 到失去意义。
+ * 与 shared 的 refreshIntervalSec schema（10~120）保持一致。
  */
-const REFRESH_COOLDOWN_MS = LIVE_CACHE_TTL_MS
+export const POLL_INTERVAL_SEC_MIN = 10
+export const POLL_INTERVAL_SEC_MAX = 120
+export const POLL_INTERVAL_SEC_DEFAULT = 18
+
+/** 把任意输入钳制为合法的刷新间隔（秒），非法回退默认 18s。 */
+export function normalizePollIntervalSec(value: unknown): number {
+  const n = typeof value === 'string' ? Number(value) : value
+  if (typeof n !== 'number' || !Number.isFinite(n)) return POLL_INTERVAL_SEC_DEFAULT
+  return Math.min(POLL_INTERVAL_SEC_MAX, Math.max(POLL_INTERVAL_SEC_MIN, Math.round(n)))
+}
 
 /**
  * 距下次允许刷新还有多少秒：每个分支都从 `nextAllowedAt` 推出来，它是唯一真源。
@@ -161,7 +172,12 @@ export class TransitService {
   }>()
 
   private pollingTimer: NodeJS.Timeout | null = null
-  private readonly pollIntervalMs: number
+  private pollIntervalMs: number
+  /**
+   * F11 手动刷新的冷却：故意取实时节拍自己的时长，令两者不可能各自漂移。
+   * 与 pollIntervalMs 同源，随 setPollIntervalSec 一起变。
+   */
+  private refreshCooldownMs: number
   private cityListCache: { data: TransitCity[], fetchedAt: number } | null = null
 
   /**
@@ -200,8 +216,36 @@ export class TransitService {
       new ApizeroProvider(options?.apizeroKey),
     ]
     this.aggregator = new TransitAggregator(providers)
-    this.pollIntervalMs = (options?.pollIntervalSec ?? 18) * 1000
+    const intervalSec = normalizePollIntervalSec(options?.pollIntervalSec)
+    this.pollIntervalMs = intervalSec * 1000
+    this.refreshCooldownMs = this.pollIntervalMs
+    this.aggregator.setLiveCacheTtlMs(this.pollIntervalMs)
     this.startPollingLoop()
+  }
+
+  /**
+   * 热切换实时刷新间隔（秒）：设置页保存后即时生效，不用重启服务。
+   * 三处同源一起变 —— 轮询节拍、聚合器缓存 TTL、手动刷新冷却。
+   * 非法输入回退默认 18s（normalizePollIntervalSec）。
+   */
+  setPollIntervalSec(sec: unknown): number {
+    const intervalSec = normalizePollIntervalSec(sec)
+    const ms = intervalSec * 1000
+    if (ms === this.pollIntervalMs) return intervalSec
+    this.pollIntervalMs = ms
+    this.refreshCooldownMs = ms
+    this.aggregator.setLiveCacheTtlMs(ms)
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer)
+      this.pollingTimer = null
+      this.startPollingLoop()
+    }
+    return intervalSec
+  }
+
+  /** 当前生效的刷新间隔（秒），供设置页回显与 API 查询。 */
+  getPollIntervalSec(): number {
+    return Math.round(this.pollIntervalMs / 1000)
   }
 
   /**
@@ -332,7 +376,7 @@ export class TransitService {
 
     // 窗口在尝试时开，而不是在结果时开：失败的刷新已经花掉了
     // 上游调用，不能变成重试循环。
-    const nextAllowedAt = attemptedAt + REFRESH_COOLDOWN_MS
+    const nextAllowedAt = attemptedAt + this.refreshCooldownMs
 
     const lines: RefreshLiveLineResult[] = []
     let newestObtainedAt: number | null = null

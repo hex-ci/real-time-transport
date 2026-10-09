@@ -255,10 +255,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const db = new Database(dbUrl)
   await db.init()
 
+  // 实时刷新间隔的优先级：用户在设置页的选择 > 环境变量 > 默认 18s。
+  // DB 里 null 即"没选过"，走后面的回退；normalize 在 TransitService 构造里统一做。
+  const storedSettings = await db.getUserSettings().catch(() => null)
+  const configuredIntervalSec = storedSettings?.refreshIntervalSec
+    ?? (process.env.TRANSIT_POLL_INTERVAL_SEC ? Number(process.env.TRANSIT_POLL_INTERVAL_SEC) : undefined)
+
   const transitService = new TransitService(db, {
     apizeroKey: options.apizeroKey || process.env.APIZERO_KEY,
     amapKey: options.amapKey,
-    pollIntervalSec: options.pollIntervalSec ? Number(options.pollIntervalSec) : 18,
+    pollIntervalSec: options.pollIntervalSec ?? configuredIntervalSec,
   })
 
   app.addHook('onClose', async () => {
@@ -673,6 +679,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     // 请求没带的字段保持存储的样子，用户从未选择过的字段保持 NULL。
 
     const saved = await db.saveUserSettings(resolveUserId(req), { ...body.data, ...anchors.patch })
+    // 刷新间隔改了就即时生效：不断服务，不断 WS —— 只重启轮询节拍。
+    // schema 已把取值钳在 10~120（UpdateSettingsSchema），这里只处理"带了该字段"的情况；
+    // 传 null 表示清掉选择，回退默认 18s。
+    if (body.data.refreshIntervalSec !== undefined) {
+      transitService.setPollIntervalSec(body.data.refreshIntervalSec ?? undefined)
+    }
     return { success: true, settingsState: 'stored', data: saved }
   })
 

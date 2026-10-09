@@ -190,6 +190,13 @@ export const UserSettingsSchema = z.object({
   workPlaceName: z.string().min(1).nullable().optional(),
   homeAnchorSource: AnchorSourceSchema.nullable().optional(),
   workAnchorSource: AnchorSourceSchema.nullable().optional(),
+  /**
+   * 实时数据刷新间隔（秒）：驱动整条实时节拍链 —— 服务端轮询间隔、WS 推送节拍、
+   * 聚合器实时缓存 TTL、手动刷新冷却窗口，四者同源。
+   * null 即"没选过"，读侧回退 18s。下限 10s 是保护上游：车来了 H5 是非公开接口，
+   * 刷太快有被限流封 IP 的风险。
+   */
+  refreshIntervalSec: z.number().int().min(10).max(120).nullable().optional(),
 })
 export type UserSettings = z.infer<typeof UserSettingsSchema>
 

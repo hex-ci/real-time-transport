@@ -46,6 +46,30 @@ export function unreadableText(): string {
   return '未读到'
 }
 
+/**
+ * 实时刷新间隔的读取与措辞。
+ *
+ * 值语义：number 即用户选过的秒数；null 即从未选过，读侧回退默认 18s ——
+ * 「未设置」在这里不是缺数据，而是"用默认值跑着"，故措辞把默认值说出来，
+ * 而不是留一个似有似无的空。
+ */
+export function refreshIntervalReadOf(body: unknown): SummaryValue<number | null> {
+  const answer = body as { success?: unknown, settingsState?: unknown, data?: unknown } | null | undefined
+  if (!answer || answer.success !== true) return { state: 'unreadable' }
+  if (answer.settingsState === 'unset') return { state: 'read', value: null }
+  if (answer.settingsState === 'stored') {
+    const v = (answer.data as Record<string, unknown> | null | undefined)?.refreshIntervalSec
+    return { state: 'read', value: typeof v === 'number' && Number.isFinite(v) ? v : null }
+  }
+  return { state: 'unreadable' }
+}
+
+export function refreshIntervalText(value: SummaryValue<number | null>): string {
+  if (value.state === 'reading') return reading()
+  if (value.state === 'unreadable') return unreadableText()
+  return value.value === null ? '未设置（默认 18 秒）' : `每 ${value.value} 秒`
+}
+
 /** 当前城市关注了多少条线路。 */
 export function followedLinesText(value: SummaryValue<number>): string {
   if (value.state === 'reading') return reading()

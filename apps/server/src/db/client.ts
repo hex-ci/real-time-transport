@@ -36,6 +36,8 @@ export interface StoredUserSettings {
   workPlaceName: string | null
   homeAnchorSource: AnchorSource | null
   workAnchorSource: AnchorSource | null
+  /** 实时数据刷新间隔（秒），null 即没选过，读侧回退 18s。 */
+  refreshIntervalSec: number | null
 }
 
 /**
@@ -57,6 +59,7 @@ const EMPTY_USER_SETTINGS: StoredUserSettings = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 }
 
 /**
@@ -687,7 +690,8 @@ export class Database {
         const res = await this.pool.query(
           `SELECT morning_start, morning_end, evening_start, evening_end,
                   home_lat, home_lng, work_lat, work_lng,
-                  home_place_name, work_place_name, home_anchor_source, work_anchor_source
+                  home_place_name, work_place_name, home_anchor_source, work_anchor_source,
+                  refresh_interval_sec
              FROM user_settings WHERE user_id = $1`,
           [userId],
         )
@@ -710,6 +714,7 @@ export class Database {
           workPlaceName: storedPlaceName(row.work_place_name),
           homeAnchorSource: storedAnchorSource(row.home_anchor_source),
           workAnchorSource: storedAnchorSource(row.work_anchor_source),
+          refreshIntervalSec: typeof row.refresh_interval_sec === 'number' ? row.refresh_interval_sec : null,
         }
       }
       catch {
@@ -737,8 +742,9 @@ export class Database {
         `INSERT INTO user_settings
            (user_id, morning_start, morning_end, evening_start, evening_end,
             home_lat, home_lng, work_lat, work_lng,
-            home_place_name, work_place_name, home_anchor_source, work_anchor_source, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+            home_place_name, work_place_name, home_anchor_source, work_anchor_source,
+            refresh_interval_sec, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
          ON CONFLICT (user_id) DO UPDATE SET
            morning_start = EXCLUDED.morning_start,
            morning_end = EXCLUDED.morning_end,
@@ -752,6 +758,7 @@ export class Database {
            work_place_name = EXCLUDED.work_place_name,
            home_anchor_source = EXCLUDED.home_anchor_source,
            work_anchor_source = EXCLUDED.work_anchor_source,
+           refresh_interval_sec = EXCLUDED.refresh_interval_sec,
            updated_at = NOW()`,
         [
           userId,
@@ -767,6 +774,7 @@ export class Database {
           merged.workPlaceName,
           merged.homeAnchorSource,
           merged.workAnchorSource,
+          merged.refreshIntervalSec,
         ],
       )
     }

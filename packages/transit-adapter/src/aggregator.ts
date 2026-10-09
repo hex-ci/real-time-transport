@@ -15,6 +15,9 @@ interface CacheEntry<T> {
  *
  * 这是实时数据的权威节拍：所有屏幕都经由这个缓存读取；手动刷新
  * 也被限流到不短于这个时长。
+ *
+ * 默认 18s；实例可被构造参数覆盖 —— 它必须与服务端的轮询间隔同源，
+ * 否则调快的轮询会被缓存挡住（硬限制），调慢的轮询则白白浪费上游读取。
  */
 export const LIVE_CACHE_TTL_MS = 18 * 1000
 
@@ -22,9 +25,16 @@ export class TransitAggregator {
   private readonly providers: ITransitProvider[]
   private readonly liveCache = new Map<string, CacheEntry<LiveLineStatus>>()
   private readonly detailCache = new Map<string, CacheEntry<LineDetail>>()
+  private liveCacheTtlMs: number
 
-  constructor(providers: ITransitProvider[]) {
+  constructor(providers: ITransitProvider[], options?: { liveCacheTtlMs?: number }) {
     this.providers = providers
+    this.liveCacheTtlMs = options?.liveCacheTtlMs ?? LIVE_CACHE_TTL_MS
+  }
+
+  /** 与轮询间隔联动热切换：TTL 永远跟随当前节拍。 */
+  setLiveCacheTtlMs(ms: number): void {
+    this.liveCacheTtlMs = ms
   }
 
   /**
@@ -123,7 +133,7 @@ export class TransitAggregator {
           // DTO 把 `isDegraded` 定为必填布尔值，不给列表顺序留填空余地。
           this.liveCache.set(cacheKey, {
             data: status,
-            expiresAt: Date.now() + LIVE_CACHE_TTL_MS,
+            expiresAt: Date.now() + this.liveCacheTtlMs,
           })
           return status
         }

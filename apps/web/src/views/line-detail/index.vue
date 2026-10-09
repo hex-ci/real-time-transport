@@ -858,6 +858,18 @@ onUnmounted(() => {
               <span class="h-2.5 w-2.5 rounded-full border-2 border-cyan-400 inline-block"></span>
               选中站点
             </span>
+            <span class="flex items-center gap-1.5">
+              <span class="text-sm font-bold leading-none text-sky-200">›</span>
+              行驶方向
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 inline-block"></span>
+              上班上车站
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-violet-400 inline-block"></span>
+              下班上车站
+            </span>
           </div>
         </div>
       </DialogContent>

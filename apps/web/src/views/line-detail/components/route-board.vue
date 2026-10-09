@@ -390,7 +390,7 @@ function initStage(): void {
     focusKeyStation(false)
   }
   else if (currentLayout && currentLayout.points.length > 0) {
-    focusCommuteStationFolded()
+    focusInitialFolded()
   }
 
   // 舞台初始化完成时可能已经有站被选中（定位与线路详情一到就会选出最近站）。选中的 watcher
@@ -1165,11 +1165,24 @@ function syncVehicles(): void {
   dynamicLayer.batchDraw()
 }
 
-/** 把镜头对准关键站（选中 > 通勤聚焦 > 最近 > 第一辆车 > 首站）。 */
+/**
+ * 把镜头对准关键站（选中 > 通勤聚焦 > 最近 > 第一辆车 > 首站）。
+ * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到目标站前后各 3 站清晰可见，
+ * 点进来一眼看清站点附近有没有车；手动选中与 fallback（第一辆车/首站）保持原行为。
+ */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
 
-  let targetId = selectedStation?.id ?? commuteFocusStationId ?? nearestStation?.id
+  let targetId: string | null = selectedStation?.id ?? null
+  let zoomToNeighborhood = false
+  if (!targetId && commuteFocusStationId) {
+    targetId = commuteFocusStationId
+    zoomToNeighborhood = true
+  }
+  if (!targetId && nearestStation) {
+    targetId = nearestStation.id
+    zoomToNeighborhood = true
+  }
   if (!targetId && buses.length > 0) {
     const b = buses[0]!
     const targetOrder = b.nextOrder ?? b.order
@@ -1180,9 +1193,32 @@ function focusKeyStation(smooth = false): void {
     targetId = lineDetail.stops[0]!.id
   }
 
-  const targetPt = currentLayout.points.find(p => p.station.id === targetId) ?? currentLayout.points[0]!
   const viewW = stage.width()
   const viewH = stage.height()
+
+  if (zoomToNeighborhood && targetId) {
+    const view = neighborhoodView(targetId)
+    if (view) {
+      if (smooth) {
+        stage.to({
+          x: view.x,
+          y: clampStageY(view.y, view.scale, viewH),
+          scaleX: view.scale,
+          scaleY: view.scale,
+          duration: 0.28,
+          easing: Konva.Easings.EaseInOut,
+        })
+      }
+      else {
+        stage.scale({ x: view.scale, y: view.scale })
+        stage.position({ x: view.x, y: clampStageY(view.y, view.scale, viewH) })
+        stage.batchDraw()
+      }
+      return
+    }
+  }
+
+  const targetPt = currentLayout.points.find(p => p.station.id === targetId) ?? currentLayout.points[0]!
   const scale = clampScale(viewW < 640 ? 1.0 : 1.0)
 
   const targetX = (viewW / 2) - targetPt.x * scale
@@ -1219,19 +1255,74 @@ function clampStageY(y: number, scale: number, viewH: number): number {
 }
 
 /**
- * 折返模式的初始纵向聚焦：先按宽度撑开（fitWidth），再把通勤聚焦站纵向居中。
+ * 折返模式的初始聚焦：先按宽度撑开（总览），再把通勤聚焦站 / 最近站做邻里缩放。
  * 只用于初次排布 —— 用户拖动/缩放过（userHasTransformed）或手动选中了站之后不再抢镜头。
+ * 无通勤/最近目标时保持总览（fallback 的第一辆车/首站不触发缩放）。
  */
-function focusCommuteStationFolded(): void {
+function focusInitialFolded(): void {
   fitWidth()
-  if (!stage || !currentLayout || !commuteFocusStationId || selectedStation || userHasTransformed) return
-  const targetPt = currentLayout.points.find(p => p.station.id === commuteFocusStationId)
-  if (!targetPt) return
-  const scale = stage.scaleX()
+  if (!stage || !currentLayout || selectedStation || userHasTransformed) return
+  const targetId = commuteFocusStationId ?? nearestStation?.id
+  if (!targetId) return
+  const view = neighborhoodView(targetId)
+  if (!view) return
   const viewH = stage.height()
-  const targetY = (viewH / 2) - targetPt.y * scale
-  stage.position({ x: stage.x(), y: clampStageY(targetY, scale, viewH) })
+  stage.scale({ x: view.scale, y: view.scale })
+  stage.position({ x: view.x, y: clampStageY(view.y, view.scale, viewH) })
   stage.batchDraw()
+}
+
+/** 折返模式按宽度适应的比例（只计算，不移动镜头）。 */
+function fitWidthScale(): number {
+  if (!stage || !trackLayer || !stationLayer || !currentLayout) return 1
+  if (currentLayout.points.length === 0) return 1
+  const box = contentBounds()
+  if (!box) return 1
+  const viewW = Math.max(1, stage.width())
+  const m = boardMetrics()
+  return clampScale((viewW - m.fitPadding * 2) / box.w)
+}
+
+/** 邻里聚焦：目标站前后各取几站（不足取到头）。 */
+const FOCUS_NEIGHBORHOOD = 3
+/** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
+const MAX_FOCUS_SCALE = 2.5
+
+/**
+ * 邻里视图：把目标站前后各 FOCUS_NEIGHBORHOOD 站的包围盒 fit 进视口并居中。
+ * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），
+ * 短线路（窗口≈整条线）下自然退化为原来的总览。
+ */
+function neighborhoodView(targetStationId: string): { scale: number, x: number, y: number } | null {
+  if (!stage || !currentLayout || currentLayout.points.length === 0) return null
+  const pts = currentLayout.points
+  const idx = pts.findIndex(p => p.station.id === targetStationId)
+  if (idx < 0) return null
+  const lo = Math.max(0, idx - FOCUS_NEIGHBORHOOD)
+  const hi = Math.min(pts.length - 1, idx + FOCUS_NEIGHBORHOOD)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (let i = lo; i <= hi; i++) {
+    const p = pts[i]!
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  // 给站名标签和描边留空（内容单位），避免包围盒贴边裁掉标签。
+  minX -= 20; maxX += 20
+  minY -= 42; maxY += 42
+  const viewW = Math.max(1, stage.width())
+  const viewH = Math.max(1, stage.height())
+  const pad = 28 // 屏幕像素边距
+  const fit = Math.min(
+    (viewW - pad * 2) / Math.max(1, maxX - minX),
+    (viewH - pad * 2) / Math.max(1, maxY - minY),
+  )
+  const defaultScale = layoutMode.value === 'linear' ? 1.0 : fitWidthScale()
+  const scale = clampScale(Math.min(MAX_FOCUS_SCALE, Math.max(defaultScale, fit)))
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  return { scale, x: viewW / 2 - cx * scale, y: viewH / 2 - cy * scale }
 }
 
 /** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */
@@ -1249,7 +1340,8 @@ function fitWidth(): void {
 
   const viewW = Math.max(1, stage.width())
   const m = boardMetrics()
-  const scale = clampScale((viewW - m.fitPadding * 2) / box.w)
+  // 按宽度适应的比例见 fitWidthScale()；本函数只负责摆位置。
+  const scale = fitWidthScale()
 
   // 把第一行推到浮动工具栏之下。max() 使桌面端（控件隐藏、量为 0）不会缩小该内缩；本函数只用于折返模式。
   const topInset = Math.max(m.fitTopMargin, toolbarInsetTop())
@@ -1382,7 +1474,7 @@ function setLayoutMode(mode: RouteLayoutMode): void {
     focusKeyStation(false)
   }
   else {
-    focusCommuteStationFolded()
+    focusInitialFolded()
   }
 
   emit('layout-change', mode)
@@ -1495,8 +1587,8 @@ watch(
       focusKeyStation(false)
     }
     else {
-      // 折返模式：先按宽度撑开，再把通勤聚焦站纵向居中（若有）。
-      focusCommuteStationFolded()
+      // 折返模式：先按宽度撑开做总览，再把通勤/最近站做邻里缩放（若有）。
+      focusInitialFolded()
     }
     // 站可以在报站板排布之前就被选中。现在 currentLayout 存在了，再发一次；否则弹窗锚点永远是 null，弹窗不会打开。
     if (selectedStation) notifyAnchorChange()
@@ -1513,7 +1605,7 @@ watch(
       focusKeyStation(true)
     }
     else {
-      focusCommuteStationFolded()
+      focusInitialFolded()
     }
   },
 )

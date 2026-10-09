@@ -17,22 +17,22 @@
     "test:api": "vitest run --config vitest.api.config.ts"
   },
   "dependencies": {
-    "@fastify/cors": "^11.3.0",
-    "@fastify/websocket": "^11.3.1",
+    "@fastify/cors": "^11.3.1",
+    "@fastify/websocket": "^11.3.3",
     "@real-time-transport/shared": "workspace:*",
     "@real-time-transport/transit-adapter": "workspace:*",
     "fastify": "^5.12.5",
-    "pg": "^8.23.0",
-    "pino": "^10.3.1",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
     "ws": "^8.22.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^22.20.4",
+    "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   }
 }

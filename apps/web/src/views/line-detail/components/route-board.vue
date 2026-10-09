@@ -1167,8 +1167,9 @@ function syncVehicles(): void {
 
 /**
  * 把镜头对准关键站（选中 > 通勤聚焦 > 最近 > 第一辆车 > 首站）。
- * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到目标站前后各 3 站清晰可见，
- * 点进来一眼看清站点附近有没有车；手动选中与 fallback（第一辆车/首站）保持原行为。
+ * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约 4.5 个站间距、
+ * 目标站居中，点进来一眼看清站点附近有没有车；手动选中与 fallback（第一辆车/首站）
+ * 保持原行为。
  */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
@@ -1283,46 +1284,37 @@ function fitWidthScale(): number {
   return clampScale((viewW - m.fitPadding * 2) / box.w)
 }
 
-/** 邻里聚焦：目标站前后各取几站（不足取到头）。 */
-const FOCUS_NEIGHBORHOOD = 3
+/** 邻里聚焦：视口宽度内约放下几个站间距。 */
+const FOCUS_GAPS_ACROSS = 4.5
 /** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
 const MAX_FOCUS_SCALE = 2.5
 
 /**
- * 邻里视图：把目标站前后各 FOCUS_NEIGHBORHOOD 站的包围盒 fit 进视口并居中。
- * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），
- * 短线路（窗口≈整条线）下自然退化为原来的总览。
+ * 邻里视图：镜头缩放到"视口宽度内约 FOCUS_GAPS_ACROSS 个站间距"的级别，并把目标站居中。
+ * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），封顶 MAX_FOCUS_SCALE。
+ * 倍数按平均站间距定，而非包围盒 fit：折返模式下一行的宽度≈整条内容宽，
+ * 行内窗口的包围盒 fit 几乎无缩放，站间距倍数才能在任何布局下给出确定的放大。
  */
 function neighborhoodView(targetStationId: string): { scale: number, x: number, y: number } | null {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return null
   const pts = currentLayout.points
-  const idx = pts.findIndex(p => p.station.id === targetStationId)
-  if (idx < 0) return null
-  const lo = Math.max(0, idx - FOCUS_NEIGHBORHOOD)
-  const hi = Math.min(pts.length - 1, idx + FOCUS_NEIGHBORHOOD)
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (let i = lo; i <= hi; i++) {
-    const p = pts[i]!
-    if (p.x < minX) minX = p.x
-    if (p.y < minY) minY = p.y
-    if (p.x > maxX) maxX = p.x
-    if (p.y > maxY) maxY = p.y
+  const target = pts.find(p => p.station.id === targetStationId)
+  if (!target) return null
+
+  let gapSum = 0
+  for (let i = 1; i < pts.length; i++) {
+    gapSum += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y)
   }
-  // 给站名标签和描边留空（内容单位），避免包围盒贴边裁掉标签。
-  minX -= 20; maxX += 20
-  minY -= 42; maxY += 42
+  const avgGap = pts.length > 1 ? gapSum / (pts.length - 1) : 0
+  if (avgGap <= 0) return null
+
   const viewW = Math.max(1, stage.width())
   const viewH = Math.max(1, stage.height())
   const pad = 28 // 屏幕像素边距
-  const fit = Math.min(
-    (viewW - pad * 2) / Math.max(1, maxX - minX),
-    (viewH - pad * 2) / Math.max(1, maxY - minY),
-  )
+  const fit = (viewW - pad * 2) / (avgGap * FOCUS_GAPS_ACROSS)
   const defaultScale = layoutMode.value === 'linear' ? 1.0 : fitWidthScale()
   const scale = clampScale(Math.min(MAX_FOCUS_SCALE, Math.max(defaultScale, fit)))
-  const cx = (minX + maxX) / 2
-  const cy = (minY + maxY) / 2
-  return { scale, x: viewW / 2 - cx * scale, y: viewH / 2 - cy * scale }
+  return { scale, x: viewW / 2 - target.x * scale, y: viewH / 2 - target.y * scale }
 }
 
 /** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */
@@ -1601,6 +1593,21 @@ watch(
   () => commuteFocusStationId,
   (id) => {
     if (!id || !stage || !currentLayout || userHasTransformed || selectedStation) return
+    if (layoutMode.value === 'linear') {
+      focusKeyStation(true)
+    }
+    else {
+      focusInitialFolded()
+    }
+  },
+)
+
+// 最近站也可能晚于排布到达（定位是异步的）：同上，但通勤目标优先级更高，
+// 已有通勤目标时不抢。
+watch(
+  () => nearestStation?.id,
+  (id) => {
+    if (!id || !stage || !currentLayout || userHasTransformed || selectedStation || commuteFocusStationId) return
     if (layoutMode.value === 'linear') {
       focusKeyStation(true)
     }

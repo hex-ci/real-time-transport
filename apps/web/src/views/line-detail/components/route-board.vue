@@ -790,12 +790,12 @@ function renderStaticBoard(): void {
       trackLayer.add(new Konva.Line({
         x: (a.x + b.x) / 2,
         y: (a.y + b.y) / 2,
-        points: [-3.5, -5, 4, 0, -3.5, 5],
+        points: [-2, -3, 3.5, 0, -2, 3],
         stroke: '#e0f2fe',
         strokeWidth: 1.6,
         lineCap: 'round',
         lineJoin: 'round',
-        opacity: 0.55,
+        opacity: 0.4,
         rotation: Math.atan2(dy, dx) * 180 / Math.PI,
         listening: false,
       }))
@@ -832,12 +832,12 @@ function renderStaticBoard(): void {
     trackLayer.add(new Konva.Line({
       x: arc.centerX + (arc.isRightSide ? arc.radius : -arc.radius),
       y: arc.centerY,
-      points: [-3.5, -5, 4, 0, -3.5, 5],
+      points: [-2, -3, 3.5, 0, -2, 3],
       stroke: '#e0f2fe',
       strokeWidth: 1.6,
       lineCap: 'round',
       lineJoin: 'round',
-      opacity: 0.55,
+      opacity: 0.4,
       rotation: 90,
       listening: false,
     }))

@@ -614,16 +614,27 @@ function initAnimation(): void {
       const prevDist = v.displayedDist
       let nextDist = prevDist + effectiveSpeed * dt
 
+      // 外推钳制（防超站核心）：巡航外推永不超过上一定位点。两次定位之间（约 18s），
+      // 图标追上观测位置后就地等待新数据，绝不"开"进没有数据支撑的路段。
+      // 宁可静止，不可超前——标准 dead reckoning 做法。
+      if (v.mode === 'cruise' && v.fixDist !== null && nextDist > v.fixDist) {
+        nextDist = v.fixDist
+      }
+
       if (v.dwell) {
         const plat = nearestPlatformDist(nextDist)
-        // 只向前停靠：只有从后方接近站台时才滑入，绝不往回拉。
-        if (plat !== null && plat > nextDist && (plat - nextDist) < DWELL_SNAP_M) {
+        // 停靠吸附（双向）：车在站上时把图标轻轻拉向站台圆心。
+        // 从后方接近时与原来一样指数滑入；若历史原因已超调一点，也允许拉回——
+        // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
+        if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
 
-      // 铁律：严格单调不减（永不向后运动）。
-      v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
+      // 单调性：行驶中严格不后退；停靠时允许向站台做小幅位置修正（见上）。
+      v.displayedDist = v.dwell
+        ? Math.max(0, Math.min(L, nextDist))
+        : Math.max(prevDist, Math.min(L, nextDist))
 
       const pos = layoutPosition(v.displayedDist)
       v.container.position({ x: pos.x, y: pos.y })

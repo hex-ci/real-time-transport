@@ -859,46 +859,19 @@ function renderStaticBoard(): void {
       }))
     }
 
-    // 始发 / 终点标识：左上小角标，与右上的通勤角标对称。环线不标。
-    const terminalMark = pt.station.id === firstStationId
-      ? '始'
-      : pt.station.id === lastStationId ? '终' : null
-    if (terminalMark) {
-      const tx = pt.x - m.stationRadius - 7
-      const ty = pt.y - m.stationRadius - 7
-      stationLayer.add(new Konva.Circle({
-        id: `terminal-badge-${pt.station.id}`,
-        x: tx,
-        y: ty,
-        radius: 7,
-        fill: '#475569',
-        stroke: '#020617',
-        strokeWidth: 1.5,
-        listening: false,
-      }))
-      stationLayer.add(new Konva.Text({
-        id: `terminal-badge-text-${pt.station.id}`,
-        x: tx - 7,
-        // 几何中心 ty-4.5，再下沉 0.5px 光学校正：汉字字形在 em 框内的视觉重心偏上。
-        y: ty - 4,
-        text: terminalMark,
-        fontSize: 9,
-        fontFamily: 'system-ui, sans-serif',
-        fontStyle: 'bold',
-        fill: '#f1f5f9',
-        width: 14,
-        align: 'center',
-        listening: false,
-      }))
-    }
+    // 首末站：不再用文字角标，改用白色大圆点——任何设备渲染一致，无字体问题。
+    // 始/终的方向区分由行驶 chevron 与标题方向名承担。环线不标。
+    const isTerminal = firstStationId !== null &&
+      (pt.station.id === firstStationId || pt.station.id === lastStationId)
 
     // 纯视觉节点：listening: false 把所有命中交给 hit 圆。
+    // 优先级：最近站（琥珀）> 选中站（青）> 首末站（白大圆点）> 普通站。
     const circle = new Konva.Circle({
       id: `station-visual-${pt.station.id}`,
       x: pt.x,
       y: pt.y,
-      radius: m.stationRadius,
-      fill: isNearest ? '#facc15' : isSelected ? '#22d3ee' : '#cbd5e1',
+      radius: isTerminal && !isNearest && !isSelected ? m.stationRadius + 1.5 : m.stationRadius,
+      fill: isNearest ? '#facc15' : isSelected ? '#22d3ee' : isTerminal ? '#f8fafc' : '#cbd5e1',
       stroke: '#0f172a',
       strokeWidth: 2,
       listening: false,
@@ -977,51 +950,25 @@ function renderStaticBoard(): void {
       listening: false,
     }))
 
-    // 通勤上车点：目的色外环 + 角标，双重强调。
-    // 外环让它在整条线路上一眼可辨（通勤工具里"我在哪上车"比"我离哪站近"重要得多）；
-    // 角标保留 上/下 语义。单独的节点而不给站名前缀：站名在最窄的移动端列里已经要折到四行，
+    // 通勤上车点：只保留目的色外环。上/下文字徽章已删——小圆圈里的汉字在不同设备
+    // 字体下永远调不齐垂直居中，且 8px 圆塞 10px 字先天过满；外环本身就是完整编码，
+    // 图例解释颜色含义。单独的节点而不给站名前缀：站名在最窄的移动端列里已经要折到四行，
     // 加宽标签会撑破行高预算。两个上车点各自只标在它自己那个方向上（`onShownDirection`），
-    // 而按站序推断方向的那套推导 005 已删，不能再拿它当角标的依据。
-    const boardStop = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
-      ? { text: '上', fill: '#34d399' }
+    // 而按站序推断方向的那套推导 005 已删，不能再拿它当依据。
+    const boardStopColor = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
+      ? '#34d399'
       : onShownDirection(eveningStopDirection) && storedStopAt(pt.station, eveningStopName, eveningStopOrder)
-        ? { text: '下', fill: '#c084fc' }
+        ? '#c084fc'
         : null
-    if (boardStop) {
+    if (boardStopColor) {
       stationLayer.add(new Konva.Circle({
         id: `board-stop-ring-${pt.station.id}`,
         x: pt.x,
         y: pt.y,
         radius: m.stationRadius + 4.5,
-        stroke: boardStop.fill,
+        stroke: boardStopColor,
         strokeWidth: 3,
         opacity: 0.9,
-        listening: false,
-      }))
-      const badgeX = pt.x + m.stationRadius + 7
-      const badgeY = pt.y - m.stationRadius - 7
-      stationLayer.add(new Konva.Circle({
-        id: `board-stop-badge-${pt.station.id}`,
-        x: badgeX,
-        y: badgeY,
-        radius: 8,
-        fill: boardStop.fill,
-        stroke: '#020617',
-        strokeWidth: 1.5,
-        listening: false,
-      }))
-      stationLayer.add(new Konva.Text({
-        id: `board-stop-badge-text-${pt.station.id}`,
-        x: badgeX - 8,
-        // 几何中心 badgeY-5，再下沉 0.5px 光学校正：汉字字形在 em 框内的视觉重心偏上。
-        y: badgeY - 4.5,
-        text: boardStop.text,
-        fontSize: 10,
-        fontFamily: 'system-ui, sans-serif',
-        fontStyle: 'bold',
-        fill: '#020617',
-        width: 16,
-        align: 'center',
         listening: false,
       }))
     }
@@ -1667,6 +1614,10 @@ function handleResize(): void {
         <span class="flex items-center gap-1.5 text-slate-400">
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
           下班上车
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-100"></span>
+          首末站
         </span>
         <div class="ml-2 flex items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5">
           <button

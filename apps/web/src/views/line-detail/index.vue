@@ -870,6 +870,10 @@ onUnmounted(() => {
               <span class="h-2.5 w-2.5 rounded-full bg-violet-400 inline-block"></span>
               下班上车站
             </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-slate-100 inline-block"></span>
+              首末站
+            </span>
           </div>
         </div>
       </DialogContent>

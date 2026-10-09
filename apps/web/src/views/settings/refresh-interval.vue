@@ -100,24 +100,26 @@ async function save(): Promise<void> {
           :key="sec"
           type="button"
           :aria-pressed="selected === sec"
-          class="min-h-[44px] rounded-xl border px-4 py-2 text-sm transition active:scale-95 lg:text-base"
+          class="inline-flex min-h-11 items-center rounded-lg border px-3 text-xs font-medium transition active:scale-95"
           :class="selected === sec
-            ? 'border-cyan-500/60 bg-cyan-500/15 font-semibold text-cyan-300'
-            : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'"
+            ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
+            : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500/40'"
           @click="selected = sec"
         >
           {{ sec }} 秒
         </button>
       </div>
 
-      <button
-        type="button"
-        :disabled="selected === null || saving"
-        class="mt-4 min-h-[44px] w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 lg:text-base"
-        @click="save"
-      >
-        {{ saving ? '保存中…' : '保存' }}
-      </button>
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          class="min-h-[44px] rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95 lg:px-5 lg:text-base"
+          :disabled="saving"
+          @click="save"
+        >
+          {{ saving ? '保存中…' : '保存' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

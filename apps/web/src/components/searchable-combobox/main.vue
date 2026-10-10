@@ -31,7 +31,6 @@ import type { ComboboxOption, OptionsMatch, SelectedText } from './types'
  * 故上/下、回车、Escape 由本组件自己处理，不依赖焦点落进面板。
  */
 const {
-  modelValue = null,
   selected = null,
   placeholder = '未设置',
   searchPlaceholder = '搜索…',
@@ -51,8 +50,6 @@ const {
   label?: string
   /** 全部选项，按调用方自己的顺序——本组件不排序。 */
   options: ComboboxOption[]
-  /** 选中的那一个的 key；什么都没选为 null。 */
-  modelValue?: string | null
   /** 触发器显示的两段；null 时显示 `placeholder`。 */
   selected?: SelectedText | null
   placeholder?: string
@@ -80,9 +77,11 @@ const {
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', key: string): void
   (e: 'select', option: ComboboxOption): void
 }>()
+
+/** 选中的那一个的 key；什么都没选为 null。标准 v-model 双向绑定。 */
+const modelValue = defineModel<string | null>({ default: null })
 
 const open = shallowRef(false)
 
@@ -120,7 +119,7 @@ watch([query, () => options], () => {
 // 打开时高亮落到已选的那一项上。
 watch(open, (isOpen) => {
   if (isOpen) {
-    activeIndex.value = filtered.value.findIndex(option => option.key === modelValue)
+    activeIndex.value = filtered.value.findIndex(option => option.key === modelValue.value)
     return
   }
   query.value = ''
@@ -134,7 +133,7 @@ watch(open, (isOpen) => {
  * 这一个，而不是上一个。
  */
 function choose(option: ComboboxOption): void {
-  emit('update:modelValue', option.key)
+  modelValue.value = option.key
   emit('select', option)
   open.value = false
 }

@@ -278,9 +278,11 @@ const directionOptions = computed<DirectionOption[]>(() => {
     (direction === curDir ? d.lineId : opp)
 
   const labelFor = (direction: number): string => {
-    if (isLoop) return direction === 0 ? '上行' : '下行'
-    // 已加载的方向有权威标签；反向的那个由它的终点（本方向的首站）导出——反向的详情从不读取，因为页签只需要这一个字符串。
+    // 已加载的方向有权威标签，优先用 —— 首末站同名的环线启发式不可靠（站名重复不一定是真环线），
+    // 不能跳过上游给的 directionName。
     if (direction === curDir && d.directionName) return d.directionName
+    if (isLoop) return direction === 0 ? '上行' : '下行'
+    // 反向的那个由它的终点（本方向的首站）导出——反向的详情从不读取，因为页签只需要这一个字符串。
     const terminal = direction === curDir ? last : first
     return terminal ? `开往 ${terminal}` : (direction === 0 ? '上行' : '下行')
   }

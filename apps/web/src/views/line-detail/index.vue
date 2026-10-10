@@ -454,7 +454,7 @@ const { currentPurpose } = useCommutePurpose()
  * 2. 这条线路被关注过（上车点只对已关注的线路有意义）；
  * 3. 这个目的的上车点属于屏幕上这个方向 —— 方向对不上说明要等的车不在本屏，
  *    此时不聚焦，退回原来的逻辑（选中 > 最近；都不具备就不聚焦）。
- * 报站板里优先级：手动选中的站 > 通勤聚焦站 > 最近站 > ……
+ * 报站板里优先级：手动选中的站 > 通勤聚焦站 > 最近站；都不具备就不聚焦。
  */
 const commuteFocusStationId = computed<string | null>(() => {
   const purpose = currentPurpose.value

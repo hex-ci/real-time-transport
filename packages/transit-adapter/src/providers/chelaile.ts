@@ -408,8 +408,6 @@ export class ChelaileProvider implements ITransitProvider {
    * 回退保证上游接口变化时可用性不降级 —— 最坏情况就是回到改动前。
    */
   private async requestLiveDetail(
-    cityId: string,
-    lineId: string,
     extraParams: Record<string, string>,
   ): Promise<any> {
     try {
@@ -446,7 +444,7 @@ export class ChelaileProvider implements ITransitProvider {
       if (options?.targetOrder) {
         extraParams.targetOrder = String(options.targetOrder)
       }
-      const data = await this.requestLiveDetail(cityId, lineId, extraParams)
+      const data = await this.requestLiveDetail(extraParams)
 
       const rawBuses = data.buses || []
       const rawStations = data.stations || []

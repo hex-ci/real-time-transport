@@ -860,8 +860,8 @@ function renderStaticBoard(): void {
 
     // 首末站：不再用文字角标，改用白色大圆点——任何设备渲染一致，无字体问题。
     // 始/终的方向区分由行驶 chevron 与标题方向名承担。环线不标。
-    const isTerminal = firstStationId !== null &&
-      (pt.station.id === firstStationId || pt.station.id === lastStationId)
+    const isTerminal = firstStationId !== null
+      && (pt.station.id === firstStationId || pt.station.id === lastStationId)
 
     // 纯视觉节点：listening: false 把所有命中交给 hit 圆。
     // 优先级：最近站（琥珀）> 选中站（青）> 首末站（白大圆点）> 普通站。
@@ -1166,8 +1166,9 @@ function syncVehicles(): void {
 
 /**
  * 把镜头对准关键站（选中 > 通勤聚焦 > 最近）。
- * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约半行站间距的级别、
- * 目标站居中，点进来一眼看清站点附近有没有车；手动选中的站只居中不缩放。
+ * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约 focusGapsAcross()
+ * 个站间距的级别（折返约半行）、目标站居中，点进来一眼看清站点附近有没有车；
+ * 手动选中的站只居中不缩放。
  * 条件都不具备（无选中、无通勤目标、无最近站）时不聚焦、不替用户假设目标，
  * 镜头保持原位。
  */
@@ -1264,7 +1265,7 @@ function fitWidthScale(): number {
   return clampScale((viewW - m.fitPadding * 2) / box.w)
 }
 
-/** 邻里聚焦：视口宽度内约放下几个站间距（直线模式用，见 focusGapsAcross）。 */
+/** 邻里聚焦目标站间距数的兜底值（focusGapsAcross 拿不到 stage 时用，正常走不到）。 */
 const FOCUS_GAPS_ACROSS = 4.5
 /** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
 const MAX_FOCUS_SCALE = 2.5

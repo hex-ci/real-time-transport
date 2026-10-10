@@ -1196,7 +1196,7 @@ function focusKeyStation(smooth = false): void {
       if (smooth) {
         stage.to({
           x: view.x,
-          y: clampStageY(view.y, view.scale, viewH),
+          y: view.y,
           scaleX: view.scale,
           scaleY: view.scale,
           duration: 0.28,
@@ -1205,7 +1205,7 @@ function focusKeyStation(smooth = false): void {
       }
       else {
         stage.scale({ x: view.scale, y: view.scale })
-        stage.position({ x: view.x, y: clampStageY(view.y, view.scale, viewH) })
+        stage.position({ x: view.x, y: view.y })
         stage.batchDraw()
       }
       return
@@ -1222,7 +1222,7 @@ function focusKeyStation(smooth = false): void {
   if (smooth) {
     stage.to({
       x: targetX,
-      y: clampStageY(targetY, scale, viewH),
+      y: targetY,
       scaleX: scale,
       scaleY: scale,
       duration: 0.28,
@@ -1237,20 +1237,6 @@ function focusKeyStation(smooth = false): void {
 }
 
 /**
- * 纵向位置处理：内容矮于视口时整体垂直居中；内容高于视口时（聚焦场景）
- * 优先让目标站真正居中 —— 调用方传进来的就是居中坐标，这里不再把内容
- * 边缘钉在视口边缘，否则靠近内容顶部/底部的站会被顶到画布边缘，看着像
- * 被半裁。X 轴本就是直接居中的，纵向与之对齐。
- */
-function clampStageY(y: number, scale: number, viewH: number): number {
-  const box = contentBounds()
-  if (!box) return y
-  const contentH = box.h * scale
-  if (contentH <= viewH) return (viewH - contentH) / 2 - box.minY * scale
-  return y
-}
-
-/**
  * 折返模式的初始聚焦：先按宽度撑开（总览），再把通勤聚焦站 / 最近站做邻里缩放。
  * 只用于初次排布 —— 用户拖动/缩放过（userHasTransformed）或手动选中了站之后不再抢镜头。
  * 无通勤/最近目标时保持总览，不做任何聚焦。
@@ -1262,9 +1248,8 @@ function focusInitialFolded(): void {
   if (!targetId) return
   const view = neighborhoodView(targetId)
   if (!view) return
-  const viewH = stage.height()
   stage.scale({ x: view.scale, y: view.scale })
-  stage.position({ x: view.x, y: clampStageY(view.y, view.scale, viewH) })
+  stage.position({ x: view.x, y: view.y })
   stage.batchDraw()
 }
 

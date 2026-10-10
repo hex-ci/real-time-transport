@@ -278,10 +278,20 @@ const directionOptions = computed<DirectionOption[]>(() => {
     (direction === curDir ? d.lineId : opp)
 
   const labelFor = (direction: number): string => {
-    // 已加载的方向有权威标签，优先用 —— 首末站同名的环线启发式不可靠（站名重复不一定是真环线），
-    // 不能跳过上游给的 directionName。
+    // 环线没有"开往 X"的概念 —— 起点终点是同一个站。方向由线路名本身区分
+    // （300内/300外：内顺时针、外逆时针），页签直接显示线路名。
+    if (isLoop) {
+      if (direction === curDir) return d.lineName || (direction === 0 ? '上行' : '下行')
+      // 反向详情未加载：按内/外互换推测展示名，点过去后以真实数据为准。
+      const swapped = d.lineName.includes('内')
+        ? d.lineName.replace('内', '外')
+        : d.lineName.includes('外')
+          ? d.lineName.replace('外', '内')
+          : ''
+      return swapped || (direction === 0 ? '上行' : '下行')
+    }
+    // 已加载的方向有权威标签，优先用 —— 不能被环线启发式跳过。
     if (direction === curDir && d.directionName) return d.directionName
-    if (isLoop) return direction === 0 ? '上行' : '下行'
     // 反向的那个由它的终点（本方向的首站）导出——反向的详情从不读取，因为页签只需要这一个字符串。
     const terminal = direction === curDir ? last : first
     return terminal ? `开往 ${terminal}` : (direction === 0 ? '上行' : '下行')

@@ -1165,10 +1165,11 @@ function syncVehicles(): void {
 }
 
 /**
- * 把镜头对准关键站（选中 > 通勤聚焦 > 最近 > 第一辆车 > 首站）。
- * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约 4.5 个站间距、
- * 目标站居中，点进来一眼看清站点附近有没有车；手动选中与 fallback（第一辆车/首站）
- * 保持原行为。
+ * 把镜头对准关键站（选中 > 通勤聚焦 > 最近）。
+ * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约半行站间距的级别、
+ * 目标站居中，点进来一眼看清站点附近有没有车；手动选中的站只居中不缩放。
+ * 条件都不具备（无选中、无通勤目标、无最近站）时不聚焦、不替用户假设目标，
+ * 镜头保持原位。
  */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
@@ -1183,20 +1184,13 @@ function focusKeyStation(smooth = false): void {
     targetId = nearestStation.id
     zoomToNeighborhood = true
   }
-  if (!targetId && buses.length > 0) {
-    const b = buses[0]!
-    const targetOrder = b.nextOrder ?? b.order
-    const found = lineDetail?.stops.find(s => s.order === targetOrder)
-    if (found) targetId = found.id
-  }
-  if (!targetId && lineDetail?.stops.length) {
-    targetId = lineDetail.stops[0]!.id
-  }
+  // 不拿第一辆车/首站兜底：条件不具备就不聚焦。
+  if (!targetId) return
 
   const viewW = stage.width()
   const viewH = stage.height()
 
-  if (zoomToNeighborhood && targetId) {
+  if (zoomToNeighborhood) {
     const view = neighborhoodView(targetId)
     if (view) {
       if (smooth) {
@@ -1218,7 +1212,8 @@ function focusKeyStation(smooth = false): void {
     }
   }
 
-  const targetPt = currentLayout.points.find(p => p.station.id === targetId) ?? currentLayout.points[0]!
+  const targetPt = currentLayout.points.find(p => p.station.id === targetId)
+  if (!targetPt) return // 目标站不在当前排布里：不动镜头
   const scale = clampScale(viewW < 640 ? 1.0 : 1.0)
 
   const targetX = (viewW / 2) - targetPt.x * scale
@@ -1257,7 +1252,7 @@ function clampStageY(y: number, scale: number, viewH: number): number {
 /**
  * 折返模式的初始聚焦：先按宽度撑开（总览），再把通勤聚焦站 / 最近站做邻里缩放。
  * 只用于初次排布 —— 用户拖动/缩放过（userHasTransformed）或手动选中了站之后不再抢镜头。
- * 无通勤/最近目标时保持总览（fallback 的第一辆车/首站不触发缩放）。
+ * 无通勤/最近目标时保持总览，不做任何聚焦。
  */
 function focusInitialFolded(): void {
   fitWidth()

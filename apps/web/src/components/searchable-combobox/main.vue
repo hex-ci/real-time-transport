@@ -94,6 +94,13 @@ const isTouchDevice = typeof window !== 'undefined'
 const lastCompositionEnd = shallowRef(0)
 
 /**
+ * 上次 pointerdown 落在列表上的时刻。合法的点选（触屏 tap / 鼠标 click）必有一次
+ * pointerdown 先行；iOS 输入法候选栏上抬手落过来的幽灵点击没有 —— 直接忽略。
+ * 键盘回车走另一条路径（见 onKeydown），不受此限。
+ */
+const lastPointerdownOnList = shallowRef(0)
+
+/**
  * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
  * 不再靠手写正则判断。
  */
@@ -140,10 +147,12 @@ watch(open, (isOpen) => {
  * 先写值、再报选项：调用方自己的重读处理器读的是它持有的那个值，故那次重读必须问的是**刚选中**的
  * 这一个，而不是上一个。
  */
-function choose(option: ComboboxOption): void {
-  // iOS 输入法选字后的幽灵点击：组字结束 350ms 内，手指抬起可能落在刚过滤出的选项上。
-  // 此时不选 —— 用户真想选会再点一次。
-  if (Date.now() - lastCompositionEnd.value < 350) return
+function choose(option: ComboboxOption, fromKeyboard = false): void {
+  // 幽灵点击（仅触屏）：iOS 输入法候选栏上抬手，click 落在过滤重排后的选项上。
+  // 合法的点选必有一次落在列表上的 pointerdown 先行；键盘是显式动作，不受此限。
+  // （另有 compositionend 350ms 兜底，防 IME 事件时序异常。）
+  if (isTouchDevice && !fromKeyboard && Date.now() - lastPointerdownOnList.value > 500) return
+  if (isTouchDevice && !fromKeyboard && Date.now() - lastCompositionEnd.value < 350) return
   modelValue.value = option.key
   emit('select', option)
   open.value = false
@@ -191,7 +200,7 @@ function onKeydown(event: KeyboardEvent): void {
     // 这一次回车由本组件兑现，故不再让它冒泡：reka 自己还有一条「对高亮项按下点击」的路径。
     event.preventDefault()
     event.stopPropagation()
-    choose(option)
+    choose(option, true)
   }
 }
 </script>
@@ -250,6 +259,7 @@ function onKeydown(event: KeyboardEvent): void {
         <ComboboxViewport
           class="touch-pan-y overscroll-contain overflow-y-auto p-1"
           :class="searchable ? 'h-[240px]' : 'max-h-[240px]'"
+          @pointerdown="lastPointerdownOnList = Date.now()"
         >
           <!-- 「没匹配上」是过滤这件事的结论，故只跟着搜索框一起出现：无搜索时列表就是全部选项。 -->
           <ComboboxEmpty

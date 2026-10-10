@@ -97,6 +97,10 @@ export const ACTION_FEEDBACK = {
     ok: () => '已保存上车点',
     fail: context => `上车点保存失败${why(context)}`,
   },
+  'followed-station-save': {
+    ok: () => '已保存关注站',
+    fail: context => `关注站保存失败${why(context)}`,
+  },
   'commute-hours-save': {
     ok: () => '已保存通勤时段',
     fail: context => `通勤时段保存失败${why(context)}`,

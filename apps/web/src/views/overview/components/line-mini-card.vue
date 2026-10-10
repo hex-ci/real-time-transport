@@ -241,6 +241,17 @@ function noMinutesText(state: ReadState, operating: string): string {
 }
 
 /**
+   * 首行是占位行：该方向在线路组里存在（故可切换），但当前没有锚点
+   * （无 GPS、无关注站、无通勤站）。此时不显示到站，转而引导用户设关注站。
+   */
+const isPrimaryPlaceholder = computed(() =>
+  props.mode === 'nearby' && primaryRow.value !== null && primaryRow.value.stopOrder === null)
+
+/** 次行是占位行：不说「正在读取」（根本没在读），说暂无站点。 */
+const isSecondaryPlaceholder = computed(() =>
+  props.mode === 'nearby' && secondaryRow.value !== null && secondaryRow.value.stopOrder === null)
+
+/**
    * 另一个方向，紧凑显示。即使它没有到站数据也留着，使用户仍能看见（并切换到）对侧路缘。
    */
 const secondaryRow = computed<CardRowWithArrivals | null>(() =>
@@ -409,6 +420,17 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
+        <!-- 占位行：该方向可切换但无锚点。直接给设关注站的入口 —— 用户切过来多半就是为了设它。 -->
+        <div v-else-if="isPrimaryPlaceholder" class="mt-3.5 flex grow flex-col items-center justify-center gap-2 rounded-xl bg-slate-950/80 px-3 py-2.5 text-center lg:px-3.5 lg:py-3">
+          <span class="text-xs text-slate-400 lg:text-base">{{ primaryRow?.directionName }}暂无站点可显示</span>
+          <button
+            type="button"
+            class="rounded-lg border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25 lg:text-sm"
+            @click="$emit('edit-followed')"
+          >
+            设关注站
+          </button>
+        </div>
 
         <!-- 这一块也必须吃掉余下高度：同一行里内容少的卡片会被拉高，富余空间若落在面板外
              就露出浅色底 —— 卡片深浅两块的比例随行内邻居而变，那是同一屏里同一张卡两种样子。 -->
@@ -470,7 +492,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
           >
             <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}<template v-if="secondaryRow.rowStopName && secondaryRow.rowStopName !== stopName"> · {{ secondaryRow.rowStopName }}</template></span>
             <span class="flex shrink-0 items-baseline gap-1.5">
-              <template v-if="secondaryHasArrivals">
+              <span v-if="isSecondaryPlaceholder" class="text-slate-500">暂无站点</span>
+              <template v-else-if="secondaryHasArrivals">
                 <template v-if="minutesOf(secondaryArrivals) !== null">
                   <span class="font-mono font-bold" :class="accent.etaText">
                     {{ minutesOf(secondaryArrivals) }}分

@@ -9,6 +9,7 @@ import {
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { commutePurposeOf } from '@/commute-purpose'
+import { runWithFeedback } from '@/action-feedback'
 import { RefreshControl } from '@/components/refresh-control'
 import { CardGrid, EmptyState, FollowedStationSheet } from './components'
 import { commuteLegStateOf, commuteStopOf } from './commute-leg'
@@ -220,7 +221,7 @@ async function onSaveFollowedStation(
 ): Promise<void> {
   const fav = followedSheetFavorite.value
   if (!fav?.id) return
-  await transitStore.setFollowedStation(fav.id, direction, stop)
+  await runWithFeedback('followed-station-save', () => transitStore.setFollowedStation(fav.id!, direction, stop))
 }
 
 /**
@@ -433,6 +434,21 @@ const cardsData = computed<MiniCardConfig[]>(() => {
           directionName: detail.directionName,
           rowStopName: anchor.name,
         })
+      }
+      // 只有一个方向有锚点、但另一方向的线路详情存在时，给另一方向一个占位行：
+      // 切换方向按钮只看行数，没有这一行，用户就切不过去看/设另一方向的关注站。
+      // 占位行没有站序，不会触发到站请求（`refreshAllArrivals` 跳过它）。
+      if (rows.length === 1) {
+        const missing = (1 - rows[0]!.direction) as 0 | 1
+        const detail = both[missing]
+        if (detail) {
+          rows.push({
+            lineId: resolveFavoriteLineId(f, missing) ?? detail.lineId,
+            direction: missing,
+            stopOrder: null,
+            directionName: detail.directionName,
+          })
+        }
       }
       const primaryDirection = nearbyPrimaryDirection(f, both, rows)
       const primaryAnchor = primaryDirection !== null ? anchors[primaryDirection] : anchors[0] ?? anchors[1] ?? null

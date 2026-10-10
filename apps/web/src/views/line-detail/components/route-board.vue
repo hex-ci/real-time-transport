@@ -1724,7 +1724,7 @@ function handleResize(): void {
       </div>
 
       <div class="flex items-center gap-2">
-        <Tooltip :content="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'">
+        <Tooltip :content="layoutMode === 'linear' ? '回到关键站点' : '按画布宽度撑开，纵向拖动查看'">
           <button
             class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             @click="handleFitWidth"
@@ -1804,8 +1804,8 @@ function handleResize(): void {
           </button>
           <button
             class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-            :title="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
-            :aria-label="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
+            :title="layoutMode === 'linear' ? '回到关键站点' : '适应宽度'"
+            :aria-label="layoutMode === 'linear' ? '回到关键站点' : '适应宽度'"
             @click="handleFitWidth"
           >
             <MoveHorizontal class="h-4 w-4" />

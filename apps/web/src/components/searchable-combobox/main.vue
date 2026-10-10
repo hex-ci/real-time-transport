@@ -85,6 +85,10 @@ const modelValue = defineModel<string | null>({ default: null })
 
 const open = shallowRef(false)
 
+/** 触屏设备：回车在搜索框里是收键盘，不是选站（见 onKeydown）。 */
+const isTouchDevice = typeof window !== 'undefined'
+  && window.matchMedia('(pointer: coarse)').matches
+
 /**
  * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
  * 不再靠手写正则判断。
@@ -166,6 +170,13 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
   if (event.key === 'Enter') {
+    // 触屏上搜索框里的回车是「收键盘/结束输入」，不是选站 —— 否则输完拼音点一下回车，
+    // 高亮的那一项（常是过滤到只剩的一条）就被选中，看起来像自动选中。选站只点选项。
+    // 桌面端保留回车选高亮项的标准行为。
+    if (isTouchDevice && event.target instanceof HTMLInputElement) {
+      event.target.blur()
+      return
+    }
     const option = filtered.value[activeIndex.value]
     if (!option) return
     // 这一次回车由本组件兑现，故不再让它冒泡：reka 自己还有一条「对高亮项按下点击」的路径。

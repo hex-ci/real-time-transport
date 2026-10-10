@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue'
+import { twMerge } from 'tailwind-merge'
 import {
   ComboboxAnchor,
   ComboboxContent,
@@ -84,15 +85,13 @@ const emit = defineEmits<{
 const open = shallowRef(false)
 
 /**
- * 下拉面板的 class：contentClass 里若自带 z-*，用它的（避免 z-50 与 z-[110]
- * 并存时靠 Tailwind 生成顺序决定胜负）；没带就补缺省 z-50。
+ * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
+ * 不再靠手写正则判断。
  */
-const contentClassList = computed(() => {
-  const base = 'max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl'
-  const extra = props.contentClass ?? ''
-  const hasZ = /(?:^|\s)z-\S+/.test(extra)
-  return hasZ ? [base, extra] : ['z-50', base, extra]
-})
+const contentClassList = computed(() => twMerge(
+  'z-50 max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl',
+  props.contentClass,
+))
 /** 过滤文字；reka-ui 把输入框保持为非受控，故自行跟踪它以便过滤。 */
 const query = shallowRef('')
 /** 键盘高亮的那一项在 `filtered` 里的下标；-1 表示没有。 */

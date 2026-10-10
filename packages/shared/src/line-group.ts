@@ -1,6 +1,6 @@
 import type { LineDetail } from './schemas/transit.js'
 import type { LineSummary } from './schemas/api.js'
-import { haversineMeters } from './geo.js'
+import { haversineMeters, NEARBY_RADIUS_M } from './geo.js'
 
 /** 某条线路的一个方向，按搜索命中的解析结果。 */
 export interface RouteDirectionEntry {
@@ -410,6 +410,9 @@ export function resolveNearbyStop(
     coords,
   )
   if (!candidate) return null
+  // 「最近」先要「够近」：超限即无。定位城市与所选城市脱钩时（如北京定位看天津的线），
+  // 几十公里外的站不能叫「附近站」，否则首页卡片会打出「8万多米」这种无意义的距离。
+  if (candidate.distanceMeters > NEARBY_RADIUS_M) return null
 
   const orderIn = (
     stops: Array<{ name: string, order: number }> | undefined,

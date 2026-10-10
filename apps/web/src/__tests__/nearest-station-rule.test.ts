@@ -111,3 +111,23 @@ describe('the coordinate rule is READ here, not spelled again', () => {
       .toContain('statedCoordinate(')
   })
 })
+
+describe('nearness has a radius: beyond it there is NO nearest stop', () => {
+  it('reports null when the closest stop is beyond NEARBY_RADIUS_M', async () => {
+    const store = await storeAtFix()
+    // 约 3.4km 外（0.04 经度 ≈ 3.4km）：够不着的「最近」不是最近。
+    store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.44)])
+
+    expect(store.nearestStation).toBeNull()
+    expect(store.nearestDistanceM).toBeNull()
+  })
+
+  it('still reports the stop when it is inside the radius', async () => {
+    const store = await storeAtFix()
+    // 约 850m 外：在半径内，照常报出。
+    store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.41)])
+
+    expect(store.nearestStation?.id).toBe('s1')
+    expect(store.nearestDistanceM).not.toBeNull()
+  })
+})

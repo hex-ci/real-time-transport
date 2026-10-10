@@ -44,6 +44,7 @@ import type { DirectionOption } from './types'
 import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@real-time-transport/shared'
 import { effectiveCommuteDirection, favoriteDirectionOfLine } from '@real-time-transport/shared/line-group'
 import { statedArrivalMinutes, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { NEARBY_RADIUS_M, haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
@@ -475,7 +476,14 @@ const commuteFocusStationId = computed<string | null>(() => {
 
 async function computeWalkDecision(): Promise<void> {
   const coords = locationStore.userCoords
-  if (!coords || !selectedStation.value) return
+  const st = selectedStation.value
+  if (!coords || !st) return
+  // 定位与所选城市脱钩时（如北京定位看天津的线），算一条跨城步行路线是荒谬的：
+  // 只给 3km 内（NEARBY_RADIUS_M）的站算步行建议。
+  const lat = statedCoordinate(st.lat)
+  const lng = statedCoordinate(st.lng)
+  if (lat === undefined || lng === undefined) return
+  if (haversineMeters(coords.lat, coords.lng, lat, lng) > NEARBY_RADIUS_M) return
   await fetchWalkDecision({
     originLng: coords.lng,
     originLat: coords.lat,

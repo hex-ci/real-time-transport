@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef, watch } from 'vue'
 import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
-import { haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
+import { haversineMeters, statedCoordinate, NEARBY_RADIUS_M } from '@real-time-transport/shared/geo'
 import { announceActionFeedback } from '@/action-feedback'
 
 /**
@@ -287,6 +287,10 @@ export const useLocationStore = defineStore('location', () => {
    * 一种缺席，而不是 (0, 0) 这个点），一律经 `statedCoordinate` 读取 —— 那是这条规则唯一的
    * 所在，不在这里重述。正是这次读取，挡住了一个没有位置的站台被当成离用户最近的东西；也
    * 正因为它刻意是共享的助手，本 store 不会与服务端那几处同样的读取漂移。
+   *
+   * 「最近」先要「够近」：最近距离超出 NEARBY_RADIUS_M 时返回 null ——
+   * 定位城市与所选城市脱钩（如北京定位看天津的线）时，80km 外的站不能叫「最近站」，
+   * 否则线路详情会把它当目标聚焦、徽标会谎称附近有站。
    */
   const nearestStation = computed<Station | null>(() => {
     const coords = userCoords.value
@@ -306,6 +310,8 @@ export const useLocationStore = defineStore('location', () => {
       }
     }
     // 没有任何一站带位置：报「没有」，而不是退回到第一站 —— 那会把一个任意的站呈现成「最近」。
+    // 同理，够不着的「最近」也不是最近：超限即无。
+    if (!closest || minD > NEARBY_RADIUS_M) return null
     return closest
   })
 

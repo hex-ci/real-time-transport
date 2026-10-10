@@ -78,7 +78,7 @@ function optionOf(host: MountedHost, text: string): HostElement {
   )
 }
 
-/** 键盘高亮的那一项：自己那一档的 token，与静态类里 `data-[highlighted]:` 那一档分得开。 */
+/** 键盘高亮的那一项：`activeIndex` 是唯一高亮系统（reka 的 hover 高亮已关）。 */
 function activeTextsOf(host: MountedHost): string[] {
   return optionsOf(host)
     .filter(item => String(item.props.class ?? '').split(/\s+/).includes('bg-cyan-500/15'))

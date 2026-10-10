@@ -173,7 +173,9 @@ function onKeydown(event: KeyboardEvent): void {
     const step = event.key === 'ArrowDown' ? 1 : -1
     const last = Math.max(filtered.value.length - 1, 0)
     activeIndex.value = Math.min(Math.max(activeIndex.value + step, 0), last)
+    // 键盘导航只走这一套：阻止 reka 的箭头处理，避免两套高亮状态分歧。
     event.preventDefault()
+    event.stopPropagation()
     return
   }
   if (event.key === 'Enter') {
@@ -200,6 +202,7 @@ function onKeydown(event: KeyboardEvent): void {
     :model-value="modelValue ?? ''"
     :disabled="disabled"
     :ignore-filter="true"
+    :highlight-on-hover="false"
   >
     <ComboboxAnchor as-child>
       <ComboboxTrigger
@@ -259,7 +262,7 @@ function onKeydown(event: KeyboardEvent): void {
             v-for="(option, index) in filtered"
             :key="option.key"
             :value="option.key"
-            class="flex min-h-[38px] cursor-pointer touch-manipulation items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
+            class="flex min-h-[38px] cursor-pointer touch-manipulation items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
             :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-200'"
             @select="choose(option)"
             @pointermove="activeIndex = index"

@@ -490,7 +490,7 @@ async function computeWalkDecision(): Promise<void> {
     lineId: lineId.value,
     // 与到站同理：匹配屏幕上真正显示的方向。
     direction: activeDirection.value,
-    stationName: selectedStation.value.name,
+    stationName: st.name,
     cityCode: currentCityCode.value,
   })
 }

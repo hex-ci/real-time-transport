@@ -217,12 +217,16 @@ function onKeydown(event: KeyboardEvent): void {
             aria-autocomplete="list"
             :aria-expanded="open"
             :placeholder="searchPlaceholder"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
             @keydown="onKeydown"
           >
         </div>
         <ComboboxViewport
-          class="overflow-y-auto p-1"
+          class="touch-pan-y overscroll-contain overflow-y-auto p-1"
           :class="searchable ? 'h-[240px]' : 'max-h-[240px]'"
         >
           <!-- 「没匹配上」是过滤这件事的结论，故只跟着搜索框一起出现：无搜索时列表就是全部选项。 -->
@@ -236,7 +240,7 @@ function onKeydown(event: KeyboardEvent): void {
             v-for="(option, index) in filtered"
             :key="option.key"
             :value="option.key"
-            class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
+            class="flex min-h-[38px] cursor-pointer touch-manipulation items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
             :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-200'"
             @select="choose(option)"
             @pointermove="activeIndex = index"

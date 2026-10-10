@@ -89,6 +89,10 @@ const open = shallowRef(false)
 const isTouchDevice = typeof window !== 'undefined'
   && window.matchMedia('(pointer: coarse)').matches
 
+/** 上次输入法组字结束的时刻。iOS 上选字时手指未抬起、列表已过滤重排，抬手 click
+ *  会落在刚出现的选项上（幽灵点击）—— 350ms 内的选择一律忽略，真想选就再点一次。 */
+const lastCompositionEnd = shallowRef(0)
+
 /**
  * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
  * 不再靠手写正则判断。
@@ -137,6 +141,9 @@ watch(open, (isOpen) => {
  * 这一个，而不是上一个。
  */
 function choose(option: ComboboxOption): void {
+  // iOS 输入法选字后的幽灵点击：组字结束 350ms 内，手指抬起可能落在刚过滤出的选项上。
+  // 此时不选 —— 用户真想选会再点一次。
+  if (Date.now() - lastCompositionEnd.value < 350) return
   modelValue.value = option.key
   emit('select', option)
   open.value = false
@@ -234,6 +241,7 @@ function onKeydown(event: KeyboardEvent): void {
             spellcheck="false"
             class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
             @keydown="onKeydown"
+            @compositionend="lastCompositionEnd = Date.now()"
           >
         </div>
         <ComboboxViewport

@@ -146,7 +146,7 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
               role="radio"
               :aria-checked="isPicked(d.direction, s.order)"
               tabindex="0"
-              class="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-sm"
+              class="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-xs lg:text-base"
               :class="isPicked(d.direction, s.order)
                 ? 'bg-cyan-500/15 text-cyan-200'
                 : 'text-slate-300 hover:bg-slate-800'"
@@ -166,16 +166,16 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
         <!-- 底部按钮栏：iOS 底部 safe area 计入内边距，按钮不贴 Home 指示条 -->
         <div class="flex shrink-0 gap-2 border-t border-slate-800 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <DialogClose
-            class="flex-1 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-800"
+            class="flex-1 rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-slate-800 lg:text-base"
           >
             取消
           </DialogClose>
           <button
             type="button"
-            class="flex-1 rounded-xl border border-cyan-500/60 bg-cyan-500/15 px-4 py-2.5 text-sm font-medium text-cyan-200 hover:bg-cyan-500/25"
+            class="flex-1 rounded-xl border border-cyan-500/60 bg-cyan-500/15 px-4 py-2.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25 lg:text-base"
             @click="confirm"
           >
-            完成
+            保存
           </button>
         </div>
       </DialogContent>

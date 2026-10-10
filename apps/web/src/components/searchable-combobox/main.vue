@@ -60,10 +60,10 @@ const props = withDefaults(defineProps<{
    */
   searchable?: boolean
   /**
-   * 下拉面板的 z-index。缺省 z-50；在弹窗（z-[100]）里用时要调高，
-   * 否则 portal 到 body 的面板会被弹窗盖住。
+   * 下拉面板（ComboboxContent）的额外 class。缺省 z-50；在弹窗（z-[100]）里用时
+   * 传 z-[110] 之类调高，否则 portal 到 body 的面板会被弹窗盖住。
    */
-  dropdownZIndex?: string
+  contentClass?: string
 }>(), {
   modelValue: null,
   selected: null,
@@ -74,7 +74,6 @@ const props = withDefaults(defineProps<{
   disabled: false,
   matches: undefined,
   searchable: true,
-  dropdownZIndex: 'z-50',
 })
 
 const emit = defineEmits<{
@@ -83,6 +82,17 @@ const emit = defineEmits<{
 }>()
 
 const open = shallowRef(false)
+
+/**
+ * 下拉面板的 class：contentClass 里若自带 z-*，用它的（避免 z-50 与 z-[110]
+ * 并存时靠 Tailwind 生成顺序决定胜负）；没带就补缺省 z-50。
+ */
+const contentClassList = computed(() => {
+  const base = 'max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl'
+  const extra = props.contentClass ?? ''
+  const hasZ = /(?:^|\s)z-\S+/.test(extra)
+  return hasZ ? [base, extra] : ['z-50', base, extra]
+})
 /** 过滤文字；reka-ui 把输入框保持为非受控，故自行跟踪它以便过滤。 */
 const query = shallowRef('')
 /** 键盘高亮的那一项在 `filtered` 里的下标；-1 表示没有。 */
@@ -194,8 +204,7 @@ function onKeydown(event: KeyboardEvent): void {
       <ComboboxContent
         position="popper"
         :side-offset="6"
-        class="max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl"
-        :class="dropdownZIndex"
+        :class="contentClassList"
       >
         <div v-if="searchable" class="border-b border-slate-800 p-2">
           <input

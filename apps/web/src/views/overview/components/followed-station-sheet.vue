@@ -8,18 +8,25 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'reka-ui'
+import { X } from '@lucide/vue'
+import { SearchableCombobox } from '@/components/searchable-combobox'
+import type { ComboboxOption } from '@/components/searchable-combobox'
 import type { UserFavoriteLine } from '@real-time-transport/shared'
 
 /**
  * 设关注站的弹窗：按方向各选一个站（可只设一边）。
  *
- * 移动端是底部上滑的 sheet，PC 端是居中弹窗 —— 同一组件，定位按断点切换，
- * PC 上用移动端的 sheet 会很奇怪。两端都有搜索框：一条线 90 多站时纯滚动不可用。
+ * 用设置页同款的可搜索下拉（`SearchableCombobox`）：一条线 90 多站时，
+ * 先上行后下行的滚动长列表不够直观，下拉+搜索是全站统一的选站交互。
+ *
+ * 移动端是底部上滑的 sheet，PC 端是居中弹窗 —— 同一组件，定位按断点切换。
  *
  * 入口在关注卡片上（不是线路详情页 —— 那页交互已多，且是移动端优先）。
- * 站的身份是 (站名, 站序) 一对：同名站（环线首末站、长线路重名站）必须点到具体的一站，
- * 只给站名时保存会被拒绝（store 先拦，服务端 schema 也拦）。
+ * 站的身份是 (站名, 站序) 一对：同名站必须定位到具体的一站，
+ * 选项的 key 即站身份，`find(name)` 式的回退在这里不存在。
  */
+
+interface SheetStop { name: string, order: number }
 
 const props = defineProps<{
   open: boolean
@@ -28,71 +35,77 @@ const props = defineProps<{
   directions: Array<{
     direction: 0 | 1
     directionName: string
-    stops: Array<{ name: string, order: number }>
+    stops: Array<SheetStop>
   }>
 }>()
 
 const emit = defineEmits<{
   (e: 'update:open', open: boolean): void
-  (e: 'save', direction: 0 | 1, stop: { name: string, order: number } | null): void
+  (e: 'save', direction: 0 | 1, stop: SheetStop | null): void
 }>()
 
-/** 每方向当前选中的站序；null = 未选（回退链接管）。 */
-const picked = ref<{ 0: number | null, 1: number | null }>({ 0: null, 1: null })
-/** 站名搜索：按字面包含过滤，不排序（站序是行驶顺序，不动它）。 */
-const query = ref('')
+/** 站身份：站序_站名 —— 同一方向内唯一，两个同名站靠它区分。 */
+function identity(s: SheetStop): string {
+  return `${s.order}_${s.name}`
+}
 
-// 打开时把已存的关注站读成选中态、清空搜索；关掉重开不带上次的草稿。
+/** 每方向选中的站；null = 未选（回退链接管）。 */
+const picked = ref<{ 0: SheetStop | null, 1: SheetStop | null }>({ 0: null, 1: null })
+
+// 打开时把已存的关注站读成选中态；关掉重开不带上次的草稿。
 watch(() => props.open, (open) => {
   if (!open || !props.favorite) return
+  const f = props.favorite
   picked.value = {
-    0: props.favorite.followedStopOrder0 ?? null,
-    1: props.favorite.followedStopOrder1 ?? null,
+    0: f.followedStopName0 && f.followedStopOrder0 != null
+      ? { name: f.followedStopName0, order: f.followedStopOrder0 }
+      : null,
+    1: f.followedStopName1 && f.followedStopOrder1 != null
+      ? { name: f.followedStopName1, order: f.followedStopOrder1 }
+      : null,
   }
-  query.value = ''
-  // 存了站序但站名对不上（上游改了站表）时不预选 —— placeBoardStop 会判 stale，
-  // 这里不替用户指认，保持未选让回退链工作。
 })
 
-function currentName(direction: 0 | 1): string | null {
-  const f = props.favorite
-  if (!f) return null
-  return direction === 0 ? (f.followedStopName0 ?? null) : (f.followedStopName1 ?? null)
+function optionsFor(direction: 0 | 1): ComboboxOption[] {
+  const d = props.directions.find(x => x.direction === direction)
+  return (d?.stops ?? []).map(s => ({
+    key: identity(s),
+    primary: s.name,
+    secondary: `第 ${s.order} 站`,
+  }))
 }
 
-function isPicked(direction: 0 | 1, order: number): boolean {
-  return picked.value[direction] === order
+function selectedOf(direction: 0 | 1): { primary: string, secondary: string } | null {
+  const s = picked.value[direction]
+  return s ? { primary: s.name, secondary: `第 ${s.order} 站` } : null
 }
 
-function toggle(direction: 0 | 1, stop: { name: string, order: number }): void {
-  // 点已选中的站 = 取消该方向的关注（回退链接管）。
-  picked.value[direction] = isPicked(direction, stop.order) ? null : stop.order
+function onSelect(direction: 0 | 1, option: ComboboxOption): void {
+  const d = props.directions.find(x => x.direction === direction)
+  const hit = d?.stops.find(s => identity(s) === option.key)
+  if (hit) picked.value[direction] = { name: hit.name, order: hit.order }
 }
 
-/** 过滤后的站表：空查询返回全部；只按站名包含，不过滤掉站序。 */
-function filteredStops(stops: Array<{ name: string, order: number }>): Array<{ name: string, order: number }> {
-  const q = query.value.trim()
-  if (!q) return stops
-  return stops.filter(s => s.name.includes(q))
+function clear(direction: 0 | 1): void {
+  picked.value[direction] = null
 }
 
 function confirm(): void {
   const f = props.favorite
   if (!f) return
-  for (const d of props.directions) {
-    const order = picked.value[d.direction]
-    const prevOrder = d.direction === 0 ? f.followedStopOrder0 : f.followedStopOrder1
-    const prevName = currentName(d.direction)
-    if (order === (prevOrder ?? null)) continue // 没动过，不送
-    if (order === null) {
-      emit('save', d.direction, null)
-      continue
-    }
-    const stop = d.stops.find(s => s.order === order)
-    if (stop) emit('save', d.direction, { name: stop.name, order: stop.order })
-    else if (prevName !== null) emit('save', d.direction, null)
+  for (const direction of [0, 1] as const) {
+    const next = picked.value[direction]
+    const prevName = direction === 0 ? f.followedStopName0 : f.followedStopName1
+    const prevOrder = direction === 0 ? f.followedStopOrder0 : f.followedStopOrder1
+    const prev = prevName && prevOrder != null ? { name: prevName, order: prevOrder } : null
+    if (identityOrNull(next) === identityOrNull(prev)) continue // 没动过，不送
+    emit('save', direction, next)
   }
   emit('update:open', false)
+}
+
+function identityOrNull(s: SheetStop | null): string | null {
+  return s ? identity(s) : null
 }
 
 const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设关注站` : '设关注站')
@@ -103,9 +116,9 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
     <DialogPortal>
       <DialogOverlay class="followed-overlay fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm" />
       <DialogContent
-        class="followed-sheet fixed z-[100] flex h-[85dvh] flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
-          inset-x-0 bottom-0 rounded-t-3xl border-t
-          lg:inset-0 lg:m-auto lg:h-[70vh] lg:max-h-[36rem] lg:w-[36rem] lg:rounded-3xl lg:border"
+        class="followed-sheet fixed z-[100] flex flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
+          inset-x-0 bottom-0 max-h-[85dvh] rounded-t-3xl border-t
+          lg:inset-0 lg:m-auto lg:h-fit lg:max-h-[80vh] lg:w-[36rem] lg:rounded-3xl lg:border"
       >
         <!-- 拖拽指示条：只在移动端 sheet 形态下有意义 -->
         <div class="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-700 lg:hidden"></div>
@@ -118,47 +131,40 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
             ✕
           </DialogClose>
         </div>
-        <p class="shrink-0 px-4 pb-2 text-xs text-slate-400">
+        <p class="shrink-0 px-4 pb-3 text-xs text-slate-400">
           每个方向各选一个站（可只设一边）。设了的站，卡片不再依赖定位，随时显示它的到站。
         </p>
-        <!-- 搜索：站名包含匹配；90 多站的线路纯滚动不可用 -->
-        <div class="shrink-0 px-4 pb-2">
-          <input
-            v-model="query"
-            type="search"
-            placeholder="搜索站名…"
-            aria-label="搜索站名"
-            class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-base text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/60 focus:outline-none"
-          >
-        </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          <div v-for="d in directions" :key="d.direction" class="mb-4">
-            <div class="sticky top-0 bg-slate-900 py-1.5 text-xs font-semibold text-slate-300">
+        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+          <div v-for="d in directions" :key="d.direction">
+            <div class="pb-1.5 text-xs font-semibold text-slate-300 lg:text-sm">
               {{ d.direction === 0 ? '上行' : '下行' }} · {{ d.directionName }}
-              <span v-if="currentName(d.direction)" class="ml-1 font-normal text-cyan-300">
-                当前：{{ currentName(d.direction) }}
-              </span>
             </div>
-            <div
-              v-for="s in filteredStops(d.stops)"
-              :key="`${d.direction}-${s.order}`"
-              role="radio"
-              :aria-checked="isPicked(d.direction, s.order)"
-              tabindex="0"
-              class="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-xs lg:text-base"
-              :class="isPicked(d.direction, s.order)
-                ? 'bg-cyan-500/15 text-cyan-200'
-                : 'text-slate-300 hover:bg-slate-800'"
-              @click="toggle(d.direction, s)"
-              @keydown.enter="toggle(d.direction, s)"
-              @keydown.space.prevent="toggle(d.direction, s)"
-            >
-              <span class="min-w-0 truncate">{{ s.name }}</span>
-              <span class="ml-2 shrink-0 font-mono text-xs text-slate-500">第 {{ s.order }} 站</span>
+            <div class="flex items-center gap-1.5">
+              <SearchableCombobox
+                :model-value="picked[d.direction] ? identity(picked[d.direction]!) : null"
+                :selected="selectedOf(d.direction)"
+                :options="optionsFor(d.direction)"
+                :label="`${d.direction === 0 ? '上行' : '下行'}关注站`"
+                placeholder="未设置"
+                search-placeholder="搜索站点名或站序…"
+                empty-text="未找到匹配站点"
+                class="min-w-0 flex-1"
+                @select="onSelect(d.direction, $event)"
+              />
+              <!-- 清除是独立控件：选站与取消是两个意图，combobox 没有内置清除 -->
+              <button
+                v-if="picked[d.direction]"
+                type="button"
+                :aria-label="`清除${d.direction === 0 ? '上行' : '下行'}关注站`"
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-400 transition hover:border-rose-500/40 hover:text-rose-400 active:scale-95"
+                @click="clear(d.direction)"
+              >
+                <X class="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
-            <div v-if="filteredStops(d.stops).length === 0" class="px-3 py-2 text-xs text-slate-500">
-              {{ d.stops.length === 0 ? '该方向站表尚未加载' : '没有匹配的站名' }}
+            <div v-if="d.stops.length === 0" class="px-1 pt-1 text-xs text-slate-500">
+              该方向站表尚未加载
             </div>
           </div>
         </div>

@@ -85,18 +85,6 @@ const modelValue = defineModel<string | null>({ default: null })
 
 const open = shallowRef(false)
 
-/** 触屏设备：回车在搜索框里是收键盘，不是选站（见 onKeydown）。 */
-const isTouchDevice = typeof window !== 'undefined'
-  && window.matchMedia('(pointer: coarse)').matches
-
-/**
- * 上次 pointerdown 落在哪个选项上（option.key）。合法的点选，pointerdown 和 click
- * 必落在同一个选项上；iOS 输入法候选栏上抬手落过来的幽灵点击，要么没有 pointerdown，
- * 要么按下的和抬起命中的不是同一个 —— 直接忽略。
- * 键盘回车/空格是显式动作，不受此限。
- */
-const lastPointerdownKey = shallowRef<string | null>(null)
-
 /**
  * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
  * 不再靠手写正则判断。
@@ -144,10 +132,7 @@ watch(open, (isOpen) => {
  * 先写值、再报选项：调用方自己的重读处理器读的是它持有的那个值，故那次重读必须问的是**刚选中**的
  * 这一个，而不是上一个。
  */
-function choose(option: ComboboxOption, fromKeyboard = false): void {
-  // 幽灵点击（仅触屏）：iOS 输入法候选栏上抬手，click 落在过滤重排后的选项上。
-  // 合法的点选，pointerdown 与 click 必是同一个选项；键盘是显式动作，不受此限。
-  if (isTouchDevice && !fromKeyboard && lastPointerdownKey.value !== option.key) return
+function choose(option: ComboboxOption): void {
   modelValue.value = option.key
   emit('select', option)
   open.value = false
@@ -157,9 +142,6 @@ function choose(option: ComboboxOption, fromKeyboard = false): void {
  * 上/下、回车、Escape。挂在触发器与搜索框两处：面板打开后焦点在哪一个上都能用。
  */
 function onKeydown(event: KeyboardEvent): void {
-  // 输入法组字中（isComposing）：上/下/回车都是输入法在选字，此时劫持会「还在选字就把站选中」。
-  // 一律放行，让输入法先处理。
-  if (event.isComposing) return
   if (event.key === 'Escape') {
     open.value = false
     event.stopPropagation()
@@ -177,25 +159,16 @@ function onKeydown(event: KeyboardEvent): void {
     const step = event.key === 'ArrowDown' ? 1 : -1
     const last = Math.max(filtered.value.length - 1, 0)
     activeIndex.value = Math.min(Math.max(activeIndex.value + step, 0), last)
-    // 键盘导航只走这一套：阻止 reka 的箭头处理，避免两套高亮状态分歧。
     event.preventDefault()
-    event.stopPropagation()
     return
   }
   if (event.key === 'Enter') {
-    // 触屏上搜索框里的回车是「收键盘/结束输入」，不是选站 —— 否则输完拼音点一下回车，
-    // 高亮的那一项（常是过滤到只剩的一条）就被选中，看起来像自动选中。选站只点选项。
-    // 桌面端保留回车选高亮项的标准行为。
-    if (isTouchDevice && event.target instanceof HTMLInputElement) {
-      event.target.blur()
-      return
-    }
     const option = filtered.value[activeIndex.value]
     if (!option) return
     // 这一次回车由本组件兑现，故不再让它冒泡：reka 自己还有一条「对高亮项按下点击」的路径。
     event.preventDefault()
     event.stopPropagation()
-    choose(option, true)
+    choose(option)
   }
 }
 </script>
@@ -206,7 +179,6 @@ function onKeydown(event: KeyboardEvent): void {
     :model-value="modelValue ?? ''"
     :disabled="disabled"
     :ignore-filter="true"
-    :highlight-on-hover="false"
   >
     <ComboboxAnchor as-child>
       <ComboboxTrigger
@@ -242,18 +214,11 @@ function onKeydown(event: KeyboardEvent): void {
             aria-autocomplete="list"
             :aria-expanded="open"
             :placeholder="searchPlaceholder"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
             class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
             @keydown="onKeydown"
           >
         </div>
-        <ComboboxViewport
-          class="touch-pan-y overscroll-contain overflow-y-auto p-1"
-          :class="searchable ? 'h-[240px]' : 'max-h-[240px]'"
-        >
+        <ComboboxViewport class="max-h-[240px] overflow-y-auto p-1">
           <!-- 「没匹配上」是过滤这件事的结论，故只跟着搜索框一起出现：无搜索时列表就是全部选项。 -->
           <ComboboxEmpty
             v-if="searchable"
@@ -265,11 +230,10 @@ function onKeydown(event: KeyboardEvent): void {
             v-for="(option, index) in filtered"
             :key="option.key"
             :value="option.key"
-            class="flex min-h-[38px] cursor-pointer touch-manipulation items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
+            class="flex min-h-[38px] cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs outline-none data-[highlighted]:bg-cyan-500/15 data-[highlighted]:text-cyan-200 lg:gap-2.5 lg:px-3 lg:py-2 lg:text-base"
             :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-200'"
             @select="choose(option)"
             @pointermove="activeIndex = index"
-            @pointerdown="lastPointerdownKey = option.key"
           >
             <span class="min-w-0">
               <span class="block truncate">{{ option.primary }}</span>

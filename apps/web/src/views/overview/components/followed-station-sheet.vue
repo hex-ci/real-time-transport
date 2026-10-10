@@ -41,7 +41,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:open', open: boolean): void
-  (e: 'save', direction: 0 | 1, stop: SheetStop | null): void
+  (e: 'save', changes: Array<{ direction: 0 | 1, stop: SheetStop | null }>): void
 }>()
 
 /** 站身份：站序_站名 —— 同一方向内唯一，两个同名站靠它区分。 */
@@ -93,13 +93,18 @@ function clear(direction: 0 | 1): void {
 function confirm(): void {
   const f = props.favorite
   if (!f) return
+  // 两个方向的变化收拢成一次 save：一次保存动作只弹一个 toast。
+  const changes: Array<{ direction: 0 | 1, stop: SheetStop | null }> = []
   for (const direction of [0, 1] as const) {
     const next = picked.value[direction]
     const prevName = direction === 0 ? f.followedStopName0 : f.followedStopName1
     const prevOrder = direction === 0 ? f.followedStopOrder0 : f.followedStopOrder1
     const prev = prevName && prevOrder != null ? { name: prevName, order: prevOrder } : null
     if (identityOrNull(next) === identityOrNull(prev)) continue // 没动过，不送
-    emit('save', direction, next)
+    changes.push({ direction, stop: next })
+  }
+  if (changes.length > 0) {
+    emit('save', changes)
   }
   emit('update:open', false)
 }

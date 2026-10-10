@@ -216,12 +216,16 @@ function onEditFollowed(card: MiniCardConfig): void {
 }
 
 async function onSaveFollowedStation(
-  direction: 0 | 1,
-  stop: { name: string, order: number } | null,
+  changes: Array<{ direction: 0 | 1, stop: { name: string, order: number } | null }>,
 ): Promise<void> {
   const fav = followedSheetFavorite.value
   if (!fav?.id) return
-  await runWithFeedback('followed-station-save', () => transitStore.setFollowedStation(fav.id!, direction, stop))
+  // 一次保存动作只走一次反馈：两个方向都变了也只弹一个 toast。
+  await runWithFeedback('followed-station-save', async () => {
+    for (const { direction, stop } of changes) {
+      await transitStore.setFollowedStation(fav.id!, direction, stop)
+    }
+  })
 }
 
 /**

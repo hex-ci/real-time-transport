@@ -145,6 +145,13 @@ export class ChelaileProvider implements ITransitProvider {
   } | null>()
 
   /**
+   * 逐线路的站点数缓存。轻量刷新接口（encryptedBusDetail）不带站表，
+   * getLiveStatus 钳制 nextOrder 需要总站数时从这里取。与 routeGeomCache
+   * 用同样的 key（`${cityId}_${lineId}`），由 getLineDetail 解析站表时写入。
+   */
+  private stationCountCache = new Map<string, number>()
+
+  /**
    * 通过 jxPath 轨迹 URL 取这条线路的真实道路折线。
    *
    * `tra` 点串形如 `lng,lat[,tag];...`。带数字 `tag`（1..N-1）的点标出
@@ -363,6 +370,9 @@ export class ChelaileProvider implements ITransitProvider {
       const otherlines = data.otherlines || []
       const otherDirectionLineId = otherlines[0]?.lineId ? String(otherlines[0].lineId) : undefined
 
+      // 站点数写入缓存：轻量刷新接口不带站表，getLiveStatus 靠它钳制 nextOrder。
+      this.stationCountCache.set(`${cityId}_${lineId}`, stops.length)
+
       const geom = await this.fetchRouteGeometry(cityId, lineId, stops.length, data)
 
       return {
@@ -385,6 +395,38 @@ export class ChelaileProvider implements ITransitProvider {
     }
   }
 
+  /**
+   * 实时车辆读取：轻量接口优先，全量接口回退。
+   *
+   * 官方小程序也是这个双接口结构：首屏用 `encryptedLineDetail` 拿全量
+   * （线路+站点+车辆），30 秒轮询用 `encryptedBusDetail` 只拿车辆明细。
+   * 实测轻量接口的 `buses[]` 字段与全量一致（order/speed/
+   * distanceToWaitStn/lat/lng/mileage/travels/busTagList/licence），
+   * 体积小约 65%，但不带 `stations` 站表。
+   *
+   * 回退条件：轻量接口抛错，或返回的载荷里没有车辆数组（形态不对）。
+   * 回退保证上游接口变化时可用性不降级 —— 最坏情况就是回到改动前。
+   */
+  private async requestLiveDetail(
+    cityId: string,
+    lineId: string,
+    extraParams: Record<string, string>,
+  ): Promise<any> {
+    try {
+      const light = await this.request('/bus/line!encryptedBusDetail.action', {
+        ...extraParams,
+        cshow: 'busDetail',
+      })
+      if (light && Array.isArray(light.buses)) {
+        return light
+      }
+    }
+    catch {
+      // 回退全量接口
+    }
+    return this.request('/bus/line!encryptedLineDetail.action', extraParams)
+  }
+
   async getLiveStatus(
     lineId: string,
     direction: number = 0,
@@ -404,11 +446,15 @@ export class ChelaileProvider implements ITransitProvider {
       if (options?.targetOrder) {
         extraParams.targetOrder = String(options.targetOrder)
       }
-      const data = await this.request('/bus/line!encryptedLineDetail.action', extraParams)
+      const data = await this.requestLiveDetail(cityId, lineId, extraParams)
 
       const rawBuses = data.buses || []
       const rawStations = data.stations || []
-      const totalStations = rawStations.length || 1
+      // 轻量接口不带站表：总站数按「响应自带 → getLineDetail 缓存 → 兜底 1」取。
+      // 只用于钳制 nextOrder 不越界，取不到时宁可保守（1）也不编造。
+      const totalStations = rawStations.length
+        || this.stationCountCache.get(`${cityId}_${lineId}`)
+        || 1
 
       // 上游没答出这条线路：载荷里没有身份（见 `holdsLineRecord`），也没有
       // 车辆。这里没有一样是读数，而据此回 `{buses: []}` 会让「这条线路
@@ -420,7 +466,11 @@ export class ChelaileProvider implements ITransitProvider {
 
       // jxPath 的路长把 distanceToWaitStn（到终点站的距离）换算成
       // distanceFromStart（权威的连续位置）。首次调用后即缓存，后续轮询免费。
-      const geom = await this.fetchRouteGeometry(cityId, lineId, totalStations, data)
+      // 轻量接口不带 jxPath：只有全量载荷才配做 preloadedDetail。
+      // 轻量载荷传 undefined，让 fetchRouteGeometry 按缓存未命中走全量获取，
+      // 否则会被误判为"线路无轨迹"而写负缓存，永久关掉这条线的道路几何。
+      const fullDetail = data.jxPath || data.line?.jxPath ? data : undefined
+      const geom = await this.fetchRouteGeometry(cityId, lineId, totalStations, fullDetail)
       const routeLen = geom?.routeLengthMeters
       const sd = geom?.stationDistances
 

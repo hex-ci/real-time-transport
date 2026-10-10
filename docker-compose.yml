@@ -9,7 +9,9 @@ services:
     ports:
       - '${DB_PORT:-5432}:5432'
     volumes:
-      - pgdata:/var/lib/postgresql
+      # 必须挂在 PGDATA 本体（/var/lib/postgresql/data）上：镜像声明了 VOLUME
+      # /var/lib/postgresql/data，挂父目录会被匿名卷影子遮住，down 后数据丢失。
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U transit']
       interval: 5s

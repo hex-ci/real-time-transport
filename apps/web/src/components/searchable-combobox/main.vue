@@ -142,6 +142,9 @@ function choose(option: ComboboxOption): void {
  * 上/下、回车、Escape。挂在触发器与搜索框两处：面板打开后焦点在哪一个上都能用。
  */
 function onKeydown(event: KeyboardEvent): void {
+  // 输入法组字中（isComposing）：上/下/回车都是输入法在选字，此时劫持会「还在选字就把站选中」。
+  // 一律放行，让输入法先处理。
+  if (event.isComposing) return
   if (event.key === 'Escape') {
     open.value = false
     event.stopPropagation()
@@ -218,7 +221,10 @@ function onKeydown(event: KeyboardEvent): void {
             @keydown="onKeydown"
           >
         </div>
-        <ComboboxViewport class="max-h-[240px] overflow-y-auto p-1">
+        <ComboboxViewport
+          class="overflow-y-auto p-1"
+          :class="searchable ? 'h-[240px]' : 'max-h-[240px]'"
+        >
           <!-- 「没匹配上」是过滤这件事的结论，故只跟着搜索框一起出现：无搜索时列表就是全部选项。 -->
           <ComboboxEmpty
             v-if="searchable"

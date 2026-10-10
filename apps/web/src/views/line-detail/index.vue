@@ -268,7 +268,11 @@ const directionOptions = computed<DirectionOption[]>(() => {
   const stops = d.stops
   const first = stops[0]?.name || ''
   const last = stops[stops.length - 1]?.name || ''
-  const isLoop = first !== '' && first === last
+  // 环线判定：首末站同名，或线路名带内/外后缀（如 300内/300外）。
+  // 后者覆盖"同一环线系统但本站首末站名不同"的情况（如 300外 首站十里河桥北、
+  // 末站十里河桥西）——两页的页签展示必须一致，不能一个用线路名、一个用开往。
+  const isLoop = (first !== '' && first === last)
+    || d.lineName.includes('内') || d.lineName.includes('外')
 
   // `detail.direction` 是引擎侧的事实（它不回显查询参数），故它是已加载数据描述哪个方向的可靠锚点。
   const curDir = d.direction

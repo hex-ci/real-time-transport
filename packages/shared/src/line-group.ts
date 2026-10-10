@@ -40,8 +40,19 @@ function toEntry(s: LineSummary): RouteDirectionEntry {
 }
 
 /**
+ * 环线名前缀归一化：300内/300外 → 300，300内环/300外环 → 300。
+ * 环线的两个方向在上游是不同的线路名，不归一化就会被分成两条线路，
+ * 关注时产生重复卡片。只剥离末尾的内外/内外环后缀，基名为空则不处理。
+ */
+function normalizeGroupName(name: string): string {
+  const stripped = name.replace(/(内环|外环|内|外)$/, '').trim()
+  return stripped || name
+}
+
+/**
  * 把逐方向的平铺搜索命中并成每条线路一个结果。
- * 分组规则：同一城市内 lineName 相同的条目算一条线路。
+ * 分组规则：同一城市内归一化后的 lineName 相同的条目算一条线路
+ * （覆盖 300内/300外 这类环线：两方向名不同但属同一线路）。
  * 方向只从真实的上游命中填充，绝不合成 —— 只报了一个方向的线路，
  * 另一个方向保持 null，UI 对它隐藏切换，而不是造一个解析不了的 lineId。
  */
@@ -54,14 +65,14 @@ export function groupLineSummaries(summaries: LineSummary[]): LineGroup[] {
 
     const name = (s.lineName || '').trim()
     const city = s.cityCode || '027'
-    const key = `${city}::${name}`
+    const key = `${city}::${normalizeGroupName(name)}`
     const entry = toEntry(s)
 
     let group = byName.get(key)
     if (!group) {
       group = {
         groupKey: s.lineId,
-        lineName: name || s.lineId,
+        lineName: normalizeGroupName(name) || s.lineId,
         cityCode: city,
         up: null,
         down: null,

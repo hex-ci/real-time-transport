@@ -417,9 +417,10 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">
               {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-400">第 {{ primaryRow.stopOrder }} 站</span>
-              <!-- 回退锚点说出它的来源：GPS 时右侧是距离，不用徽标 -->
-              <span v-if="anchorSource === 'followed'" class="ml-1.5 rounded border border-cyan-500/40 bg-cyan-500/10 px-1 py-px text-[10px] font-medium text-cyan-300">关注站</span>
-              <span v-else-if="anchorSource === 'commute'" class="ml-1.5 rounded border border-slate-600 bg-slate-800 px-1 py-px text-[10px] font-medium text-slate-400">通勤站</span>
+              <!-- 回退锚点说出它的来源：GPS 时右侧是距离，不用徽标。
+                   inline-flex + 固定行高：inline 徽标在移动端小字号下底部边框会被行盒裁掉。 -->
+              <span v-if="anchorSource === 'followed'" class="ml-1.5 inline-flex items-center rounded border border-cyan-500/40 bg-cyan-500/10 px-1 text-[10px] font-medium leading-4 text-cyan-300">关注站</span>
+              <span v-else-if="anchorSource === 'commute'" class="ml-1.5 inline-flex items-center rounded border border-slate-600 bg-slate-800 px-1 text-[10px] font-medium leading-4 text-slate-400">通勤站</span>
             </span>
             <span class="flex shrink-0 items-center gap-1.5">
               <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->

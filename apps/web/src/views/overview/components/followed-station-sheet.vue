@@ -11,7 +11,10 @@ import {
 import type { UserFavoriteLine } from '@real-time-transport/shared'
 
 /**
- * 设关注站的底部弹窗：按方向各选一个站（可只设一边）。
+ * 设关注站的弹窗：按方向各选一个站（可只设一边）。
+ *
+ * 移动端是底部上滑的 sheet，PC 端是居中弹窗 —— 同一组件，定位按断点切换，
+ * PC 上用移动端的 sheet 会很奇怪。两端都有搜索框：一条线 90 多站时纯滚动不可用。
  *
  * 入口在关注卡片上（不是线路详情页 —— 那页交互已多，且是移动端优先）。
  * 站的身份是 (站名, 站序) 一对：同名站（环线首末站、长线路重名站）必须点到具体的一站，
@@ -36,14 +39,17 @@ const emit = defineEmits<{
 
 /** 每方向当前选中的站序；null = 未选（回退链接管）。 */
 const picked = ref<{ 0: number | null, 1: number | null }>({ 0: null, 1: null })
+/** 站名搜索：按字面包含过滤，不排序（站序是行驶顺序，不动它）。 */
+const query = ref('')
 
-// 打开时把已存的关注站读成选中态；关掉重开不带上次的草稿。
+// 打开时把已存的关注站读成选中态、清空搜索；关掉重开不带上次的草稿。
 watch(() => props.open, (open) => {
   if (!open || !props.favorite) return
   picked.value = {
     0: props.favorite.followedStopOrder0 ?? null,
     1: props.favorite.followedStopOrder1 ?? null,
   }
+  query.value = ''
   // 存了站序但站名对不上（上游改了站表）时不预选 —— placeBoardStop 会判 stale，
   // 这里不替用户指认，保持未选让回退链工作。
 })
@@ -61,6 +67,13 @@ function isPicked(direction: 0 | 1, order: number): boolean {
 function toggle(direction: 0 | 1, stop: { name: string, order: number }): void {
   // 点已选中的站 = 取消该方向的关注（回退链接管）。
   picked.value[direction] = isPicked(direction, stop.order) ? null : stop.order
+}
+
+/** 过滤后的站表：空查询返回全部；只按站名包含，不过滤掉站序。 */
+function filteredStops(stops: Array<{ name: string, order: number }>): Array<{ name: string, order: number }> {
+  const q = query.value.trim()
+  if (!q) return stops
+  return stops.filter(s => s.name.includes(q))
 }
 
 function confirm(): void {
@@ -90,9 +103,12 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
     <DialogPortal>
       <DialogOverlay class="fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm" />
       <DialogContent
-        class="fixed inset-x-0 bottom-0 z-[100] flex max-h-[85dvh] flex-col rounded-t-3xl border-t border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none"
+        class="fixed z-[100] flex max-h-[85dvh] flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
+          inset-x-0 bottom-0 rounded-t-3xl border-t
+          lg:inset-0 lg:m-auto lg:h-fit lg:max-h-[80vh] lg:w-[36rem] lg:rounded-3xl lg:border"
       >
-        <div class="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-700"></div>
+        <!-- 拖拽指示条：只在移动端 sheet 形态下有意义 -->
+        <div class="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-700 lg:hidden"></div>
         <div class="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
           <DialogTitle class="text-base font-semibold text-slate-100">{{ title }}</DialogTitle>
           <DialogClose
@@ -102,9 +118,19 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
             ✕
           </DialogClose>
         </div>
-        <p class="shrink-0 px-4 pb-3 text-xs text-slate-400">
+        <p class="shrink-0 px-4 pb-2 text-xs text-slate-400">
           每个方向各选一个站（可只设一边）。设了的站，卡片不再依赖定位，随时显示它的到站。
         </p>
+        <!-- 搜索：站名包含匹配；90 多站的线路纯滚动不可用 -->
+        <div class="shrink-0 px-4 pb-2">
+          <input
+            v-model="query"
+            type="search"
+            placeholder="搜索站名…"
+            aria-label="搜索站名"
+            class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/60 focus:outline-none"
+          >
+        </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <div v-for="d in directions" :key="d.direction" class="mb-4">
@@ -115,7 +141,7 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
               </span>
             </div>
             <div
-              v-for="s in d.stops"
+              v-for="s in filteredStops(d.stops)"
               :key="`${d.direction}-${s.order}`"
               role="radio"
               :aria-checked="isPicked(d.direction, s.order)"
@@ -131,13 +157,14 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
               <span class="min-w-0 truncate">{{ s.name }}</span>
               <span class="ml-2 shrink-0 font-mono text-xs text-slate-500">第 {{ s.order }} 站</span>
             </div>
-            <div v-if="d.stops.length === 0" class="px-3 py-2 text-xs text-slate-500">
-              该方向站表尚未加载
+            <div v-if="filteredStops(d.stops).length === 0" class="px-3 py-2 text-xs text-slate-500">
+              {{ d.stops.length === 0 ? '该方向站表尚未加载' : '没有匹配的站名' }}
             </div>
           </div>
         </div>
 
-        <div class="flex shrink-0 gap-2 border-t border-slate-800 px-4 py-3">
+        <!-- 底部按钮栏：iOS 底部 safe area 计入内边距，按钮不贴 Home 指示条 -->
+        <div class="flex shrink-0 gap-2 border-t border-slate-800 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <DialogClose
             class="flex-1 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-800"
           >

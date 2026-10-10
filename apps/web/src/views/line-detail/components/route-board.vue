@@ -1597,35 +1597,8 @@ watch(
   },
 )
 
-// 通勤聚焦站可能晚于排布到达（设置是异步读的）：排布已在、用户还没动过镜头时，
-// 平滑地把镜头带过去；用户已拖动/缩放或手动选了站，就不再抢。
-watch(
-  () => commuteFocusStationId,
-  (id) => {
-    if (!id || !stage || !currentLayout || userHasTransformed || selectedStation) return
-    if (layoutMode.value === 'linear') {
-      focusKeyStation(true)
-    }
-    else {
-      focusInitialFolded()
-    }
-  },
-)
-
-// 最近站也可能晚于排布到达（定位是异步的）：同上，但通勤目标优先级更高，
-// 已有通勤目标时不抢。
-watch(
-  () => nearestStation?.id,
-  (id) => {
-    if (!id || !stage || !currentLayout || userHasTransformed || selectedStation || commuteFocusStationId) return
-    if (layoutMode.value === 'linear') {
-      focusKeyStation(true)
-    }
-    else {
-      focusInitialFolded()
-    }
-  },
-)
+// 聚焦只在进页面时做：定位/设置的晚到不再触发自动聚焦 ——
+// 条件不具备就不聚焦，镜头不替用户假设目标。
 
 watch(
   () => selectedStation?.id,

@@ -149,6 +149,7 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
                 placeholder="未设置"
                 search-placeholder="搜索站点名或站序…"
                 empty-text="未找到匹配站点"
+                dropdown-z-index="z-[110]"
                 class="min-w-0 flex-1"
                 @select="onSelect(d.direction, $event)"
               />

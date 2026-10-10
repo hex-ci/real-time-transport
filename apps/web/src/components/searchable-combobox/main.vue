@@ -59,6 +59,11 @@ const props = withDefaults(defineProps<{
    * 因此过滤无从发生：`matches` 与 `emptyText` 在无搜索时都不生效。
    */
   searchable?: boolean
+  /**
+   * 下拉面板的 z-index。缺省 z-50；在弹窗（z-[100]）里用时要调高，
+   * 否则 portal 到 body 的面板会被弹窗盖住。
+   */
+  dropdownZIndex?: string
 }>(), {
   modelValue: null,
   selected: null,
@@ -69,6 +74,7 @@ const props = withDefaults(defineProps<{
   disabled: false,
   matches: undefined,
   searchable: true,
+  dropdownZIndex: 'z-50',
 })
 
 const emit = defineEmits<{
@@ -188,7 +194,8 @@ function onKeydown(event: KeyboardEvent): void {
       <ComboboxContent
         position="popper"
         :side-offset="6"
-        class="z-50 max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl"
+        class="max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl"
+        :class="dropdownZIndex"
       >
         <div v-if="searchable" class="border-b border-slate-800 p-2">
           <input

@@ -273,6 +273,28 @@ export function placeBoardStop(
 }
 
 /**
+ * 某方向的关注站，以它本来的身份：站名「与」站序。
+ * 关注站是时间无关的常规站点关注（对标车来了的站点关注）：非通勤时段、异地查线时，
+ * 附近模式卡片锚点链为 GPS最近站(≤3km) → 关注站[方向] → 早/晚通勤上车站。
+ * 缺省表示未设置 —— 回退链跳过它。
+ */
+export function resolveFollowedStopRef(
+  fav: {
+    followedStopName0?: string | null
+    followedStopOrder0?: number | null
+    followedStopName1?: string | null
+    followedStopOrder1?: number | null
+  },
+  direction: 0 | 1,
+): BoardStopRef | null {
+  const name = direction === 0 ? fav.followedStopName0 : fav.followedStopName1
+  if (!name) return null
+  const raw = direction === 0 ? fav.followedStopOrder0 : fav.followedStopOrder1
+  const order = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : null
+  return { name, order }
+}
+
+/**
  * 推导某线路的每个通勤用途由哪个方向服务。
  *
  * 运行时**已不再使用**：方向是存在收藏上的显式用户选择（`morningDirection` / `eveningDirection`），

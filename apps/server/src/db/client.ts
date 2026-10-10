@@ -359,6 +359,10 @@ export class Database {
           eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
           morningDirection: row.morning_direction ?? null,
           eveningDirection: row.evening_direction ?? null,
+          followedStopName0: row.followed_station_name_0 ?? undefined,
+          followedStopOrder0: row.followed_station_order_0 ?? undefined,
+          followedStopName1: row.followed_station_name_1 ?? undefined,
+          followedStopOrder1: row.followed_station_order_1 ?? undefined,
           displayOrder: row.display_order ?? 0,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
           isPinned: row.is_pinned ?? false,
@@ -460,6 +464,10 @@ export class Database {
           eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
           morningDirection: row.morning_direction ?? null,
           eveningDirection: row.evening_direction ?? null,
+          followedStopName0: row.followed_station_name_0 ?? undefined,
+          followedStopOrder0: row.followed_station_order_0 ?? undefined,
+          followedStopName1: row.followed_station_name_1 ?? undefined,
+          followedStopOrder1: row.followed_station_order_1 ?? undefined,
           displayOrder: row.display_order ?? 0,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
           // 置顶是显式的单目标动作（见 setPinned）：会违反「每用户一个置顶」索引的
@@ -616,6 +624,10 @@ export class Database {
     eveningStopOrder?: number | null
     morningDirection?: number | null
     eveningDirection?: number | null
+    followedStopName0?: string | null
+    followedStopOrder0?: number | null
+    followedStopName1?: string | null
+    followedStopOrder1?: number | null
   }): Promise<boolean> {
     const sets: string[] = []
     const values: (string | number | null)[] = [id]
@@ -630,6 +642,10 @@ export class Database {
     push('reverse_pinned_station_order', stops.eveningStopOrder)
     push('morning_direction', stops.morningDirection)
     push('evening_direction', stops.eveningDirection)
+    push('followed_station_name_0', stops.followedStopName0)
+    push('followed_station_order_0', stops.followedStopOrder0)
+    push('followed_station_name_1', stops.followedStopName1)
+    push('followed_station_order_1', stops.followedStopOrder1)
 
     if (sets.length === 0) return false
 
@@ -656,6 +672,10 @@ export class Database {
       if (stops.eveningStopOrder !== undefined) rec.eveningStopOrder = stops.eveningStopOrder ?? undefined
       if (stops.morningDirection !== undefined) rec.morningDirection = stops.morningDirection
       if (stops.eveningDirection !== undefined) rec.eveningDirection = stops.eveningDirection
+      if (stops.followedStopName0 !== undefined) rec.followedStopName0 = stops.followedStopName0 ?? undefined
+      if (stops.followedStopOrder0 !== undefined) rec.followedStopOrder0 = stops.followedStopOrder0 ?? undefined
+      if (stops.followedStopName1 !== undefined) rec.followedStopName1 = stops.followedStopName1 ?? undefined
+      if (stops.followedStopOrder1 !== undefined) rec.followedStopOrder1 = stops.followedStopOrder1 ?? undefined
       return true
     }
     return false

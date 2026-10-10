@@ -10,6 +10,7 @@ import {
   groupLineSummaries,
   isBidirectional,
   resolveFavoriteLineId,
+  resolveFollowedStopRef,
   resolveNearbyStop,
   resolveRouteTarget,
 } from '../line-group.js'
@@ -324,5 +325,29 @@ describe('resolveNearbyStop honors the nearness radius', () => {
     expect(got?.name).toBe('甲站')
     expect(got?.distanceMeters).toBeGreaterThan(800)
     expect(got?.distanceMeters).toBeLessThan(3000)
+  })
+})
+
+describe('resolveFollowedStopRef reads the per-direction followed station', () => {
+  it('returns the (name, order) pair for the requested direction', () => {
+    const fav = {
+      followedStopName0: '路口东',
+      followedStopOrder0: 3,
+      followedStopName1: '路口西',
+      followedStopOrder1: 5,
+    }
+    expect(resolveFollowedStopRef(fav, 0)).toEqual({ name: '路口东', order: 3 })
+    expect(resolveFollowedStopRef(fav, 1)).toEqual({ name: '路口西', order: 5 })
+  })
+
+  it('returns null when that direction has no followed station', () => {
+    const fav = { followedStopName0: '路口东', followedStopOrder0: 3 }
+    expect(resolveFollowedStopRef(fav, 1)).toBeNull()
+    expect(resolveFollowedStopRef({}, 0)).toBeNull()
+  })
+
+  it('drops a non-integer order to null (identity stays name-only)', () => {
+    const fav = { followedStopName0: '路口东', followedStopOrder0: -1 }
+    expect(resolveFollowedStopRef(fav, 0)).toEqual({ name: '路口东', order: null })
   })
 })

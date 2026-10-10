@@ -22,6 +22,7 @@ defineProps<{
 defineEmits<{
   (e: 'switch-direction', card: MiniCardConfig, direction: 0 | 1): void
   (e: 'toggle-pin', card: MiniCardConfig): void
+  (e: 'edit-followed', card: MiniCardConfig): void
 }>()
 </script>
 
@@ -52,6 +53,7 @@ defineEmits<{
         :detail-href="line.detailHref"
         :stop-name="line.stopName"
         :stop-distance-meters="line.stopDistanceMeters"
+        :anchor-source="line.anchorSource ?? null"
         :rows="line.rows.map(r => ({
           ...r,
           arrivals: arrivals[`${r.lineId}_${r.direction}`] ?? { state: 'reading' },
@@ -66,6 +68,7 @@ defineEmits<{
         :is-pinning="pinningId === line.favoriteId"
         @switch-direction="$emit('switch-direction', line, $event)"
         @toggle-pin="$emit('toggle-pin', line)"
+        @edit-followed="$emit('edit-followed', line)"
       />
     </div>
   </TransitionGroup>

@@ -10,18 +10,20 @@ import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { commutePurposeOf } from '@/commute-purpose'
 import { RefreshControl } from '@/components/refresh-control'
-import { CardGrid, EmptyState } from './components'
+import { CardGrid, EmptyState, FollowedStationSheet } from './components'
 import { commuteLegStateOf, commuteStopOf } from './commute-leg'
 import { nearbyLocationStateOf } from './nearby-notice'
 import type { NearbyLocationState } from './nearby-notice'
-import type { ArrivalsFeed, ArrivalsRead, CardRow, MiniCardConfig, OverviewMode } from './types'
+import type { AnchorSource, ArrivalsFeed, ArrivalsRead, CardRow, MiniCardConfig, OverviewMode } from './types'
 import type { LineDetail, RefreshLiveTarget, UserFavoriteLine } from '@real-time-transport/shared'
 import {
   effectiveCommuteDirection,
   favoriteDirections,
   favoriteIsBidirectional,
+  placeBoardStop,
   resolveBoardStopRef,
   resolveFavoriteLineId,
+  resolveFollowedStopRef,
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
 import type { ReadState } from '@/read-state'
@@ -186,6 +188,42 @@ const pinningFavoriteId = shallowRef<string | null>(null)
 const pinRequestId = shallowRef<string | null>(null)
 
 /**
+ * 设关注站底部弹窗的状态。入口在关注卡片上（不是线路详情页）；
+ * 打开时带上该收藏与两个方向的站表，存走 transit store 的 PATCH。
+ */
+const followedSheetOpen = shallowRef(false)
+const followedSheetFavorite = shallowRef<UserFavoriteLine | null>(null)
+const followedSheetDirections = shallowRef<Array<{
+  direction: 0 | 1
+  directionName: string
+  stops: Array<{ name: string, order: number }>
+}>>([])
+
+function onEditFollowed(card: MiniCardConfig): void {
+  const favoriteId = card.favoriteId
+  if (!favoriteId) return
+  const fav = transitStore.favorites.value.find(f => f.id === favoriteId)
+  if (!fav) return
+  const both = detailsOf(fav)
+  followedSheetFavorite.value = fav
+  followedSheetDirections.value = ([0, 1] as const).map(direction => ({
+    direction,
+    directionName: both[direction]?.directionName ?? (direction === 0 ? '上行' : '下行'),
+    stops: (both[direction]?.stops ?? []).map(s => ({ name: s.name, order: s.order })),
+  }))
+  followedSheetOpen.value = true
+}
+
+async function onSaveFollowedStation(
+  direction: 0 | 1,
+  stop: { name: string, order: number } | null,
+): Promise<void> {
+  const fav = followedSheetFavorite.value
+  if (!fav?.id) return
+  await transitStore.setFollowedStation(fav.id, direction, stop)
+}
+
+/**
  * 钉住或取消钉住一条关注线路 —— 总览自己的动作，也是这个状态唯一存在的地方：入口、标记与取消
  * 都在首页卡片上。
  *
@@ -278,6 +316,39 @@ const nearbyByFavorite = computed<Record<string, ReturnType<typeof resolveNearby
 })
 
 /**
+ * 附近模式某方向的锚点站。
+ *
+ * 链：GPS最近站（≤3km，且该方向在该站有站台）→ 关注站[方向] → 早通勤上车站 → 晚通勤上车站。
+ * 每一跳都经 `placeBoardStop` 安放 —— 存的 (站名, 站序) 必须在该方向站表里定位到实体站，
+ * stale/ambiguous/absent 都跳过，绝不谎报。GPS 被门控（如跨城）时，后面的回退保证
+ * 卡片仍有到站信息，而不是白板。
+ *
+ * 各方向独立：路口东/路口西这种上下行异名站，各自锚定各自的方向。
+ */
+function nearbyAnchorFor(
+  f: UserFavoriteLine,
+  direction: 0 | 1,
+  stops: ReadonlyArray<{ name: string, order: number }> | undefined,
+  located: ReturnType<typeof resolveNearbyStop>,
+): { name: string, order: number, source: AnchorSource } | null {
+  const gpsOrder = located?.perDirection[direction]?.order ?? null
+  if (located && gpsOrder !== null) {
+    return { name: located.name, order: gpsOrder, source: 'gps' }
+  }
+  const followed = placeBoardStop(stops, resolveFollowedStopRef(f, direction))
+  if (followed.state === 'placed') {
+    return { name: followed.name, order: followed.order, source: 'followed' }
+  }
+  for (const purpose of ['morning', 'evening'] as const) {
+    const placed = placeBoardStop(stops, resolveBoardStopRef(f, purpose))
+    if (placed.state === 'placed') {
+      return { name: placed.name, order: placed.order, source: 'commute' }
+    }
+  }
+  return null
+}
+
+/**
  * 应用是否有位置，按位置 store 报告的状态。
  *
  * 由 store「自己」的那几项读取推出 —— 定位、在途的请求、失败的请求 —— 而不是模板里的第二次
@@ -346,29 +417,39 @@ const cardsData = computed<MiniCardConfig[]>(() => {
     if (mode === 'nearby') {
       const located = nearbyByFavorite.value[f.id!]
       const rows: CardRow[] = []
+      // 各方向独立锚点：路口东/路口西这种异名站，各自锚定各自的方向。
+      const anchors = {
+        0: nearbyAnchorFor(f, 0, both[0]?.stops, located),
+        1: nearbyAnchorFor(f, 1, both[1]?.stops, located),
+      } as const
       for (const direction of [0, 1] as const) {
         const detail = both[direction]
-        if (!detail || !located) continue
-        const order = located.perDirection[direction]?.order ?? null
-        if (order === null) continue // 这个方向在这里没有站台
+        const anchor = anchors[direction]
+        if (!detail || !anchor) continue
         rows.push({
           lineId: resolveFavoriteLineId(f, direction) ?? detail.lineId,
           direction,
-          stopOrder: order,
+          stopOrder: anchor.order,
           directionName: detail.directionName,
+          rowStopName: anchor.name,
         })
       }
+      const primaryDirection = nearbyPrimaryDirection(f, both, rows)
+      const primaryAnchor = primaryDirection !== null ? anchors[primaryDirection] : anchors[0] ?? anchors[1] ?? null
+      // GPS 锚点才有距离可示；回退锚点（关注/通勤）显示来源徽标。
+      const gpsDistance = primaryAnchor?.source === 'gps' ? located?.distanceMeters ?? null : null
       cards.push({
         lineName: f.lineName,
         directionName: rows[0]?.directionName ?? '',
-        stopName: located?.name ?? null,
-        stopDistanceMeters: located?.distanceMeters ?? null,
+        stopName: primaryAnchor?.name ?? null,
+        stopDistanceMeters: gpsDistance,
+        anchorSource: primaryAnchor?.source ?? null,
         detailLoaded: Boolean(anyDetail),
         isSubway,
         isPinned: f.isPinned,
         rows,
         legState: null,
-        primaryDirection: nearbyPrimaryDirection(f, both, rows),
+        primaryDirection,
         detailHref: detailHrefOf(rows[0]?.lineId ?? f.lineId, rows[0]?.direction ?? 0),
         favoriteId: f.id ?? null,
       })
@@ -856,6 +937,7 @@ onMounted(() => {
       :pinning-id="pinRequestId"
       @switch-direction="onSwitchDirection"
       @toggle-pin="onTogglePin"
+      @edit-followed="onEditFollowed"
     />
 
     <!-- 空状态。「哪一种空」来自读取自己的状态：读不到的列表被陈述为读不到并给出重试，只有答了
@@ -867,4 +949,13 @@ onMounted(() => {
       @retry="reloadForCurrentCity"
     />
   </div>
+
+  <!-- 设关注站弹窗：放在 v-if/v-else 链之外，它不参与卡片列表的条件渲染。 -->
+  <FollowedStationSheet
+    :open="followedSheetOpen"
+    :favorite="followedSheetFavorite"
+    :directions="followedSheetDirections"
+    @update:open="followedSheetOpen = $event"
+    @save="onSaveFollowedStation"
+  />
 </template>

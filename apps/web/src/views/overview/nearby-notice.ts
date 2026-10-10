@@ -45,7 +45,7 @@ export function nearbyEmptyNoticeOf(state: NearbyLocationState): string {
   const notices: Record<NearbyLocationState, string> = {
     absent: '开启定位后显示离你最近的站点车辆',
     locating: '正在获取定位…',
-    fix: '已定位，但附近没有该线路的站台',
+    fix: '附近没有该线路的站台，可为它设一个关注站',
     unsupported: '当前浏览器不支持定位，请换用其他浏览器',
   }
   return notices[state]

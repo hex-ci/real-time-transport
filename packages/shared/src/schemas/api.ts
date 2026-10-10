@@ -74,6 +74,19 @@ export const UserFavoriteLineSchema = z.object({
   morningDirection: z.number().int().min(0).max(1).nullable().optional(),
   /** 用户晚间通勤的方向，独立选择。 */
   eveningDirection: z.number().int().min(0).max(1).nullable().optional(),
+  /**
+   * 方向 0 的关注站（时间无关的常规站点关注，对标车来了的站点关注）。
+   * 落在 followed_station_name_0 列。缺省表示未设置 —— 回退链跳过它。
+   * 站名是站点身份的一半，`followedStopOrder0` 是另一半（上下行站名经常不同，
+   * 如路口东/路口西，故按方向各存一对）。
+   */
+  followedStopName0: StopNameSchema.optional(),
+  /** 方向 0 关注站在其方向停靠列表中的位置。 */
+  followedStopOrder0: z.number().int().min(0).nullable().optional(),
+  /** 方向 1 的关注站，落在 followed_station_name_1 列。 */
+  followedStopName1: StopNameSchema.optional(),
+  /** 方向 1 关注站在其方向停靠列表中的位置。 */
+  followedStopOrder1: z.number().int().min(0).nullable().optional(),
   displayOrder: z.number().int().default(0),
   /**
    * 该行的关注时刻，ISO-8601。排序的最终 tiebreak：`displayOrder` 相同的行按关注先后分开，
@@ -96,6 +109,14 @@ export const UserFavoriteLineSchema = z.object({
   .refine(
     f => boardStopPairGiven(f.eveningStopName, f.eveningStopOrder),
     { message: '下班上车点的站名与站序必须一起给出', path: ['eveningStopOrder'] },
+  )
+  .refine(
+    f => boardStopPairGiven(f.followedStopName0, f.followedStopOrder0),
+    { message: '方向 0 关注站的站名与站序必须一起给出', path: ['followedStopOrder0'] },
+  )
+  .refine(
+    f => boardStopPairGiven(f.followedStopName1, f.followedStopOrder1),
+    { message: '方向 1 关注站的站名与站序必须一起给出', path: ['followedStopOrder1'] },
   )
 export type UserFavoriteLine = z.infer<typeof UserFavoriteLineSchema>
 
@@ -134,6 +155,10 @@ export const UpdateFavoriteSchema = z.object({
   eveningStopOrder: z.number().int().min(0).nullable().optional(),
   morningDirection: z.number().int().min(0).max(1).nullable().optional(),
   eveningDirection: z.number().int().min(0).max(1).nullable().optional(),
+  followedStopName0: StopNameSchema.nullable().optional(),
+  followedStopOrder0: z.number().int().min(0).nullable().optional(),
+  followedStopName1: StopNameSchema.nullable().optional(),
+  followedStopOrder1: z.number().int().min(0).nullable().optional(),
   /** 在用户自己的排序中的位置（0 基），以整份列表写入。 */
   displayOrder: z.number().int().min(0).optional(),
   /** 置顶状态。不可空：置顶不会被清成第三种状态。 */
@@ -146,6 +171,14 @@ export const UpdateFavoriteSchema = z.object({
   .refine(
     f => boardStopPairGiven(f.eveningStopName, f.eveningStopOrder),
     { message: '下班上车点的站名与站序必须一起给出（清空请两列都传 null）', path: ['eveningStopOrder'] },
+  )
+  .refine(
+    f => boardStopPairGiven(f.followedStopName0, f.followedStopOrder0),
+    { message: '方向 0 关注站的站名与站序必须一起给出（清空请两列都传 null）', path: ['followedStopOrder0'] },
+  )
+  .refine(
+    f => boardStopPairGiven(f.followedStopName1, f.followedStopOrder1),
+    { message: '方向 1 关注站的站名与站序必须一起给出（清空请两列都传 null）', path: ['followedStopOrder1'] },
   )
 export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
 

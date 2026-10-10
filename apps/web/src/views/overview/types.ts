@@ -8,7 +8,18 @@ export interface CardRow {
   stopOrder: number | null
   /** 头牌标签（「开往 X」）：让这一行可辨认、可被无障碍读出。 */
   directionName: string
+  /**
+   * 这一行锚定的站名。附近模式各方向锚点独立（路口东/路口西）时，
+   * 与卡片头部的站名可能不同，此时行内展示它。
+   */
+  rowStopName?: string
 }
+
+/**
+ * 卡片头部站名的来源：GPS 测距、用户设的关注站、通勤上车站回退。
+ * GPS 时右侧显示距离；后两者显示来源徽标（无距离可示）。
+ */
+export type AnchorSource = 'gps' | 'followed' | 'commute'
 
 export interface ArrivalsFeed {
   /**
@@ -58,6 +69,11 @@ export interface MiniCardConfig {
   directionName: string
   stopName: string | null
   stopDistanceMeters: number | null
+  /**
+   * 头部站名的来源。GPS 时右侧显示距离；关注站/通勤站回退时显示来源徽标。
+   * 通勤模式（morning/evening）不用它 —— 模式本身已说明来源。
+   */
+  anchorSource?: AnchorSource | null
   detailLoaded: boolean
   /** 地铁用琥珀色、公交用青色 —— 共用的线路类型规则。 */
   isSubway: boolean

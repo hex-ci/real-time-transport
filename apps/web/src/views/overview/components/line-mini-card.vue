@@ -33,6 +33,11 @@ const props = defineProps<{
   /** 到那个站的 GPS 距离，米 —— 仅附近模式。 */
   stopDistanceMeters: number | null
   /**
+   * 头部站名的来源：GPS 测距、用户设的关注站、通勤上车站回退。
+   * GPS 时右侧显示距离；后两者显示来源徽标。通勤模式不用它。
+   */
+  anchorSource?: 'gps' | 'followed' | 'commute' | null
+  /**
    * 调用方从关注行自己的上车点与方向建立起来的这一段通勤 —— 附近视图没有通勤段时为 null，
    * 所选方向的站表尚未加载时也是 null。
    *
@@ -73,6 +78,8 @@ defineEmits<{
   (e: 'switch-direction', direction: 0 | 1): void
   /** 用户点了置顶控件：钉住这张卡片，或在它已被钉住时取消钉住。 */
   (e: 'toggle-pin'): void
+  /** 用户要点设关注站：打开按方向选站的底部弹窗。 */
+  (e: 'edit-followed'): void
 }>()
 
 /**
@@ -410,10 +417,24 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">
               {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-400">第 {{ primaryRow.stopOrder }} 站</span>
+              <!-- 回退锚点说出它的来源：GPS 时右侧是距离，不用徽标 -->
+              <span v-if="anchorSource === 'followed'" class="ml-1.5 rounded border border-cyan-500/40 bg-cyan-500/10 px-1 py-px text-[10px] font-medium text-cyan-300">关注站</span>
+              <span v-else-if="anchorSource === 'commute'" class="ml-1.5 rounded border border-slate-600 bg-slate-800 px-1 py-px text-[10px] font-medium text-slate-400">通勤站</span>
             </span>
-            <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->
-            <span v-if="stopDistanceMeters !== null" class="shrink-0 font-mono text-slate-400">
-              {{ stopDistanceMeters }}m
+            <span class="flex shrink-0 items-center gap-1.5">
+              <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->
+              <span v-if="stopDistanceMeters !== null" class="font-mono text-slate-400">
+                {{ stopDistanceMeters }}m
+              </span>
+              <!-- 设关注站：卡片级入口，不进线路详情页 -->
+              <button
+                v-if="mode === 'nearby'"
+                type="button"
+                class="rounded border border-slate-700 px-1.5 py-px text-[10px] font-medium text-slate-400 hover:border-cyan-500/50 hover:text-cyan-300"
+                @click="$emit('edit-followed')"
+              >
+                设关注站
+              </button>
             </span>
           </div>
 
@@ -455,7 +476,7 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             v-if="secondaryRow"
             class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs lg:gap-2.5 lg:pt-2.5 lg:text-base"
           >
-            <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}</span>
+            <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}<template v-if="secondaryRow.rowStopName && secondaryRow.rowStopName !== stopName"> · {{ secondaryRow.rowStopName }}</template></span>
             <span class="flex shrink-0 items-baseline gap-1.5">
               <template v-if="secondaryHasArrivals">
                 <template v-if="minutesOf(secondaryArrivals) !== null">

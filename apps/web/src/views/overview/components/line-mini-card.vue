@@ -403,8 +403,19 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
       <template v-else>
         <!-- 诚实的空状态，一种成因一条 -->
-        <div v-if="nearbyNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
-          {{ nearbyNotice }}
+        <div v-if="nearbyNotice" class="mt-3.5 flex grow flex-col items-center justify-center gap-2 rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+          <span>{{ nearbyNotice }}</span>
+          <!-- 空状态正是最需要设关注站的时候：给一个可点的入口。
+               fix（有定位但附近无站）与 unsupported（浏览器不能定位）都适用；
+               absent 请用户先开定位，locating 等定位到来，都不打扰。 -->
+          <button
+            v-if="mode === 'nearby' && (nearbyLocation === 'fix' || nearbyLocation === 'unsupported')"
+            type="button"
+            class="rounded-lg border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25"
+            @click="$emit('edit-followed')"
+          >
+            设关注站
+          </button>
         </div>
         <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}

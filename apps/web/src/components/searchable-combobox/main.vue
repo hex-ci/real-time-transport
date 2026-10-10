@@ -30,7 +30,19 @@ import type { ComboboxOption, OptionsMatch, SelectedText } from './types'
  * 键盘在两种焦点位置都能用（触发器与搜索框）：面板打开后焦点仍停在触发器（上面那一条），
  * 故上/下、回车、Escape 由本组件自己处理，不依赖焦点落进面板。
  */
-const props = withDefaults(defineProps<{
+const {
+  modelValue = null,
+  selected = null,
+  placeholder = '未设置',
+  searchPlaceholder = '搜索…',
+  emptyText = '未找到匹配项',
+  warning = false,
+  disabled = false,
+  matches = undefined,
+  searchable = true,
+  contentClass,
+  options,
+} = defineProps<{
   /**
    * 控件自己的可访问名，落在触发器的 `aria-label` 上（同 `refresh-control` 的 `label`）。
    * 由调用方给：周围文字区分不开两个同类控件时，只有调用方知道该叫它什么。它不是一个由值算出来的
@@ -65,17 +77,7 @@ const props = withDefaults(defineProps<{
    * 传 z-[110] 之类调高，否则 portal 到 body 的面板会被弹窗盖住。
    */
   contentClass?: string
-}>(), {
-  modelValue: null,
-  selected: null,
-  placeholder: '未设置',
-  searchPlaceholder: '搜索…',
-  emptyText: '未找到匹配项',
-  warning: false,
-  disabled: false,
-  matches: undefined,
-  searchable: true,
-})
+}>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', key: string): void
@@ -90,7 +92,7 @@ const open = shallowRef(false)
  */
 const contentClassList = computed(() => twMerge(
   'z-50 max-h-[300px] w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900 shadow-2xl',
-  props.contentClass,
+  contentClass,
 ))
 /** 过滤文字；reka-ui 把输入框保持为非受控，故自行跟踪它以便过滤。 */
 const query = shallowRef('')
@@ -104,13 +106,13 @@ function matchesBothSegments(option: ComboboxOption, text: string): boolean {
 
 const filtered = computed(() => {
   const text = query.value.trim().toLowerCase()
-  if (!text) return props.options
-  const match = props.matches ?? matchesBothSegments
-  return props.options.filter(option => match(option, text))
+  if (!text) return options
+  const match = matches ?? matchesBothSegments
+  return options.filter(option => match(option, text))
 })
 
 // 列表或过滤文字变了：高亮回到第一个候选，没有候选就没有。
-watch([query, () => props.options], () => {
+watch([query, () => options], () => {
   activeIndex.value = filtered.value.length > 0 ? 0 : -1
 })
 
@@ -118,7 +120,7 @@ watch([query, () => props.options], () => {
 // 打开时高亮落到已选的那一项上。
 watch(open, (isOpen) => {
   if (isOpen) {
-    activeIndex.value = filtered.value.findIndex(option => option.key === props.modelValue)
+    activeIndex.value = filtered.value.findIndex(option => option.key === modelValue)
     return
   }
   query.value = ''

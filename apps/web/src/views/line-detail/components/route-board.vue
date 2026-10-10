@@ -1284,13 +1284,33 @@ function fitWidthScale(): number {
   return clampScale((viewW - m.fitPadding * 2) / box.w)
 }
 
-/** 邻里聚焦：视口宽度内约放下几个站间距。 */
+/** 邻里聚焦：视口宽度内约放下几个站间距（直线模式用，见 focusGapsAcross）。 */
 const FOCUS_GAPS_ACROSS = 4.5
 /** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
 const MAX_FOCUS_SCALE = 2.5
 
 /**
- * 邻里视图：镜头缩放到"视口宽度内约 FOCUS_GAPS_ACROSS 个站间距"的级别，并把目标站居中。
+ * 邻里聚焦的目标站间距数（响应式）。
+ *
+ * 固定 4.5 在移动端会失效：响应式折返布局在窄屏下每行只有 4~5 站，
+ * 按宽度适应的默认视图本来就只放下约 4.5 个站间距，`max(defaultScale, fit)`
+ * 取了原值，手机上肉眼无感（桌面端每行 8~16 站才有放大）。
+ * 改为相对目标——折返取半行、直线取视口内可见站数的一半，
+ * 任何屏幕下都有确定的放大。
+ */
+function focusGapsAcross(): number {
+  if (layoutMode.value === 'folded' && currentLayout) {
+    return Math.max(2, currentLayout.stopsPerRow / 2)
+  }
+  if (stage) {
+    const visibleGaps = Math.max(1, stage.width() / boardMetrics().linearStepX)
+    return Math.max(2, visibleGaps / 2)
+  }
+  return FOCUS_GAPS_ACROSS
+}
+
+/**
+ * 邻里视图：镜头缩放到"视口宽度内约 focusGapsAcross() 个站间距"的级别，并把目标站居中。
  * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），封顶 MAX_FOCUS_SCALE。
  * 倍数按平均站间距定，而非包围盒 fit：折返模式下一行的宽度≈整条内容宽，
  * 行内窗口的包围盒 fit 几乎无缩放，站间距倍数才能在任何布局下给出确定的放大。
@@ -1311,7 +1331,7 @@ function neighborhoodView(targetStationId: string): { scale: number, x: number, 
   const viewW = Math.max(1, stage.width())
   const viewH = Math.max(1, stage.height())
   const pad = 28 // 屏幕像素边距
-  const fit = (viewW - pad * 2) / (avgGap * FOCUS_GAPS_ACROSS)
+  const fit = (viewW - pad * 2) / (avgGap * focusGapsAcross())
   const defaultScale = layoutMode.value === 'linear' ? 1.0 : fitWidthScale()
   const scale = clampScale(Math.min(MAX_FOCUS_SCALE, Math.max(defaultScale, fit)))
   return { scale, x: viewW / 2 - target.x * scale, y: viewH / 2 - target.y * scale }

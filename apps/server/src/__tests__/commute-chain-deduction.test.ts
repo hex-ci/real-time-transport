@@ -193,6 +193,7 @@ const SETTINGS: StoredUserSettings = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 }
 
 /** 同一行里两个锚点都有坐标：起点由目的决定，故两者必须能被区分开。 */
@@ -206,6 +207,7 @@ const BOTH_ANCHORS: StoredUserSettings = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 }
 
 /** 一次步行定价请求的起点，按上游收到的样子（`origin=lng,lat`）。 */

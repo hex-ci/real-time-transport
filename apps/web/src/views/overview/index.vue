@@ -420,8 +420,8 @@ const cardsData = computed<MiniCardConfig[]>(() => {
       const rows: CardRow[] = []
       // 各方向独立锚点：路口东/路口西这种异名站，各自锚定各自的方向。
       const anchors = {
-        0: nearbyAnchorFor(f, 0, both[0]?.stops, located),
-        1: nearbyAnchorFor(f, 1, both[1]?.stops, located),
+        0: nearbyAnchorFor(f, 0, both[0]?.stops, located ?? null),
+        1: nearbyAnchorFor(f, 1, both[1]?.stops, located ?? null),
       } as const
       for (const direction of [0, 1] as const) {
         const detail = both[direction]

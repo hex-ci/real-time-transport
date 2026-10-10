@@ -124,7 +124,7 @@ function onStation(which: 'board' | 'alight', choice: StationChoice | null): voi
  *
  * 参数就是选项自己的 key，控件只报已选中的那一条，故「未设置」只由草稿持有的 null 表示。
  */
-function onLineChange(key: string): void {
+function onLineChange(key: string | null): void {
   const hadStations = props.leg.boardStationName !== null || props.leg.alightStationName !== null
   clearedByLineChange.value = hadStations && key !== (props.leg.lineKey ?? '')
   emit('update:leg', {

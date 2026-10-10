@@ -101,11 +101,11 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
 <template>
   <DialogRoot :open="open" @update:open="emit('update:open', $event)">
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm" />
+      <DialogOverlay class="followed-overlay fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm" />
       <DialogContent
-        class="fixed z-[100] flex max-h-[85dvh] flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
+        class="followed-sheet fixed z-[100] flex h-[85dvh] flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
           inset-x-0 bottom-0 rounded-t-3xl border-t
-          lg:inset-0 lg:m-auto lg:h-fit lg:max-h-[80vh] lg:w-[36rem] lg:rounded-3xl lg:border"
+          lg:inset-0 lg:m-auto lg:h-[70vh] lg:max-h-[36rem] lg:w-[36rem] lg:rounded-3xl lg:border"
       >
         <!-- 拖拽指示条：只在移动端 sheet 形态下有意义 -->
         <div class="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-700 lg:hidden"></div>
@@ -182,3 +182,30 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
     </DialogPortal>
   </DialogRoot>
 </template>
+
+<style scoped>
+/*
+ * 进出场动效：reka-ui 在 DialogContent/Overlay 上打 data-state。
+ * 移动端 sheet 从底部滑入，PC 端居中弹窗做缩放+淡入 —— 两套 keyframes 按断点切换。
+ */
+
+/* 遮罩：两端都是淡入淡出 */
+.followed-overlay[data-state='open'] { animation: followed-fade-in 0.2s ease-out; }
+.followed-overlay[data-state='closed'] { animation: followed-fade-out 0.15s ease-in; }
+@keyframes followed-fade-in { from { opacity: 0; } }
+@keyframes followed-fade-out { to { opacity: 0; } }
+
+/* 移动端：底部 sheet 上滑 */
+.followed-sheet[data-state='open'] { animation: followed-slide-in 0.28s cubic-bezier(0.32, 0.72, 0, 1); }
+.followed-sheet[data-state='closed'] { animation: followed-slide-out 0.2s ease-in; }
+@keyframes followed-slide-in { from { transform: translateY(100%); } }
+@keyframes followed-slide-out { to { transform: translateY(100%); } }
+
+/* PC 端：居中弹窗缩放+淡入，覆盖掉上面的滑入 */
+@media (min-width: 1024px) {
+  .followed-sheet[data-state='open'] { animation: followed-zoom-in 0.2s ease-out; }
+  .followed-sheet[data-state='closed'] { animation: followed-zoom-out 0.15s ease-in; }
+  @keyframes followed-zoom-in { from { opacity: 0; transform: scale(0.96); } }
+  @keyframes followed-zoom-out { to { opacity: 0; transform: scale(0.96); } }
+}
+</style>

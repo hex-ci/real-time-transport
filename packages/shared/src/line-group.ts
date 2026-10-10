@@ -41,8 +41,7 @@ function toEntry(s: LineSummary): RouteDirectionEntry {
 
 /**
  * 环线名前缀归一化：300内/300外 → 300，300内环/300外环 → 300。
- * 环线的两个方向在上游是不同的线路名，不归一化就会被分成两条线路，
- * 关注时产生重复卡片。只剥离末尾的内外/内外环后缀，基名为空则不处理。
+ * 只剥离末尾的内外/内外环后缀，基名为空则返回原名。
  */
 function normalizeGroupName(name: string): string {
   const stripped = name.replace(/(内环|外环|内|外)$/, '').trim()
@@ -50,9 +49,28 @@ function normalizeGroupName(name: string): string {
 }
 
 /**
+ * 判断两个线路名是否构成环线对（300内/300外）：归一化后基名相同，
+ * 且后缀恰为内/外（或内环/外环）的一对。避免单个"X内"（无"X外"配对）
+ * 被误并入"X"—— 必须双向确认才合并。
+ */
+function isLoopPair(a: string, b: string): boolean {
+  if (a === b) return false
+  const baseA = normalizeGroupName(a)
+  const baseB = normalizeGroupName(b)
+  if (baseA !== baseB || baseA === a) return false
+  const suffixA = a.slice(baseA.length)
+  const suffixB = b.slice(baseB.length)
+  const pairs: Array<[string, string]> = [['内', '外'], ['内环', '外环']]
+  return pairs.some(([x, y]) =>
+    (suffixA === x && suffixB === y) || (suffixA === y && suffixB === x),
+  )
+}
+
+/**
  * 把逐方向的平铺搜索命中并成每条线路一个结果。
- * 分组规则：同一城市内归一化后的 lineName 相同的条目算一条线路
- * （覆盖 300内/300外 这类环线：两方向名不同但属同一线路）。
+ * 分组规则：同一城市内 lineName 相同的条目算一条线路；环线对（300内/300外）
+ * 按基名合并 —— 但必须双向确认（结果里同时出现内/外两个版本）才并，
+ * 单个"X内"无配对时保持独立，避免误伤。
  * 方向只从真实的上游命中填充，绝不合成 —— 只报了一个方向的线路，
  * 另一个方向保持 null，UI 对它隐藏切换，而不是造一个解析不了的 lineId。
  */
@@ -60,19 +78,28 @@ export function groupLineSummaries(summaries: LineSummary[]): LineGroup[] {
   const byName = new Map<string, LineGroup>()
   const groups: LineGroup[] = []
 
+  // 先按原名分组，收集所有出现过的名字供环线对确认用。
+  const seenNames = new Set<string>()
+  for (const s of summaries) {
+    if (s.lineId) seenNames.add((s.lineName || '').trim())
+  }
+
   for (const s of summaries) {
     if (!s.lineId) continue
 
     const name = (s.lineName || '').trim()
     const city = s.cityCode || '027'
-    const key = `${city}::${normalizeGroupName(name)}`
+    // 环线对才用基名分组：结果里必须同时有内/外两个版本。
+    const loopPeer = [...seenNames].find(n => isLoopPair(name, n))
+    const groupName = loopPeer ? normalizeGroupName(name) : name
+    const key = `${city}::${groupName}`
     const entry = toEntry(s)
 
     let group = byName.get(key)
     if (!group) {
       group = {
         groupKey: s.lineId,
-        lineName: normalizeGroupName(name) || s.lineId,
+        lineName: groupName || s.lineId,
         cityCode: city,
         up: null,
         down: null,

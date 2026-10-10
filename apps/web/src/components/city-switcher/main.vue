@@ -216,6 +216,7 @@ onMounted(() => {
         <DialogPortal>
           <DialogOverlay class="fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0" />
           <DialogContent
+            aria-describedby
             class="fixed inset-x-0 bottom-0 z-[100] flex h-[82vh] max-h-[85dvh] flex-col rounded-t-3xl border-t border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full"
           >
             <!-- 拖拽指示条 -->

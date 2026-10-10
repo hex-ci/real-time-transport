@@ -121,6 +121,7 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
     <DialogPortal>
       <DialogOverlay class="followed-overlay fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm" />
       <DialogContent
+        aria-describedby
         class="followed-sheet fixed z-[100] flex flex-col border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none
           inset-x-0 bottom-0 max-h-[85dvh] rounded-t-3xl border-t
           lg:inset-0 lg:m-auto lg:h-fit lg:max-h-[80vh] lg:w-[36rem] lg:rounded-3xl lg:border"

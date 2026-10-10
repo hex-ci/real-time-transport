@@ -89,16 +89,13 @@ const open = shallowRef(false)
 const isTouchDevice = typeof window !== 'undefined'
   && window.matchMedia('(pointer: coarse)').matches
 
-/** 上次输入法组字结束的时刻。iOS 上选字时手指未抬起、列表已过滤重排，抬手 click
- *  会落在刚出现的选项上（幽灵点击）—— 350ms 内的选择一律忽略，真想选就再点一次。 */
-const lastCompositionEnd = shallowRef(0)
-
 /**
- * 上次 pointerdown 落在列表上的时刻。合法的点选（触屏 tap / 鼠标 click）必有一次
- * pointerdown 先行；iOS 输入法候选栏上抬手落过来的幽灵点击没有 —— 直接忽略。
- * 键盘回车走另一条路径（见 onKeydown），不受此限。
+ * 上次 pointerdown 落在哪个选项上（option.key）。合法的点选，pointerdown 和 click
+ * 必落在同一个选项上；iOS 输入法候选栏上抬手落过来的幽灵点击，要么没有 pointerdown，
+ * 要么按下的和抬起命中的不是同一个 —— 直接忽略。
+ * 键盘回车/空格是显式动作，不受此限。
  */
-const lastPointerdownOnList = shallowRef(0)
+const lastPointerdownKey = shallowRef<string | null>(null)
 
 /**
  * 下拉面板的 class：twMerge 处理冲突 —— contentClass 里带 z-* 就覆盖缺省 z-50，
@@ -149,10 +146,8 @@ watch(open, (isOpen) => {
  */
 function choose(option: ComboboxOption, fromKeyboard = false): void {
   // 幽灵点击（仅触屏）：iOS 输入法候选栏上抬手，click 落在过滤重排后的选项上。
-  // 合法的点选必有一次落在列表上的 pointerdown 先行；键盘是显式动作，不受此限。
-  // （另有 compositionend 350ms 兜底，防 IME 事件时序异常。）
-  if (isTouchDevice && !fromKeyboard && Date.now() - lastPointerdownOnList.value > 500) return
-  if (isTouchDevice && !fromKeyboard && Date.now() - lastCompositionEnd.value < 350) return
+  // 合法的点选，pointerdown 与 click 必是同一个选项；键盘是显式动作，不受此限。
+  if (isTouchDevice && !fromKeyboard && lastPointerdownKey.value !== option.key) return
   modelValue.value = option.key
   emit('select', option)
   open.value = false
@@ -253,13 +248,11 @@ function onKeydown(event: KeyboardEvent): void {
             spellcheck="false"
             class="min-h-[36px] w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 md:text-xs lg:px-3 lg:text-base"
             @keydown="onKeydown"
-            @compositionend="lastCompositionEnd = Date.now()"
           >
         </div>
         <ComboboxViewport
           class="touch-pan-y overscroll-contain overflow-y-auto p-1"
           :class="searchable ? 'h-[240px]' : 'max-h-[240px]'"
-          @pointerdown="lastPointerdownOnList = Date.now()"
         >
           <!-- 「没匹配上」是过滤这件事的结论，故只跟着搜索框一起出现：无搜索时列表就是全部选项。 -->
           <ComboboxEmpty
@@ -276,6 +269,7 @@ function onKeydown(event: KeyboardEvent): void {
             :class="index === activeIndex ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-200'"
             @select="choose(option)"
             @pointermove="activeIndex = index"
+            @pointerdown="lastPointerdownKey = option.key"
           >
             <span class="min-w-0">
               <span class="block truncate">{{ option.primary }}</span>

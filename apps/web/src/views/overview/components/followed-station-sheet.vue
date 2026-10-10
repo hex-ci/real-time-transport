@@ -128,7 +128,7 @@ const title = computed(() => props.favorite ? `${props.favorite.lineName} · 设
             type="search"
             placeholder="搜索站名…"
             aria-label="搜索站名"
-            class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/60 focus:outline-none"
+            class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-base text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/60 focus:outline-none"
           >
         </div>
 

@@ -403,19 +403,8 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
 
       <template v-else>
         <!-- 诚实的空状态，一种成因一条 -->
-        <div v-if="nearbyNotice" class="mt-3.5 flex grow flex-col items-center justify-center gap-2 rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
-          <span>{{ nearbyNotice }}</span>
-          <!-- 空状态正是最需要设关注站的时候：给一个可点的入口。
-               fix（有定位但附近无站）与 unsupported（浏览器不能定位）都适用；
-               absent 请用户先开定位，locating 等定位到来，都不打扰。 -->
-          <button
-            v-if="mode === 'nearby' && (nearbyLocation === 'fix' || nearbyLocation === 'unsupported')"
-            type="button"
-            class="rounded-lg border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25"
-            @click="$emit('edit-followed')"
-          >
-            设关注站
-          </button>
+        <div v-if="nearbyNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+          {{ nearbyNotice }}
         </div>
         <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
@@ -437,15 +426,6 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
               <span v-if="stopDistanceMeters !== null" class="font-mono text-slate-400">
                 {{ stopDistanceMeters }}m
               </span>
-              <!-- 设关注站：卡片级入口，不进线路详情页 -->
-              <button
-                v-if="mode === 'nearby'"
-                type="button"
-                class="rounded border border-slate-700 px-1.5 py-px text-[10px] font-medium text-slate-400 hover:border-cyan-500/50 hover:text-cyan-300"
-                @click="$emit('edit-followed')"
-              >
-                设关注站
-              </button>
             </span>
           </div>
 
@@ -579,6 +559,19 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
       >
         <ArrowLeftRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>切换方向</span>
+      </button>
+
+      <!-- 设关注站只在附近模式：它是附近模式锚点链的一环（GPS→关注站→通勤站）；
+           上班/下班模式锚点恒为通勤站，这里不摆。放在操作栏 —— 卡片主体是去详情页的链接，
+           动作按钮不进链接，与置顶/切换方向同一规则。 -->
+      <button
+        v-if="mode === 'nearby'"
+        type="button"
+        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        aria-label="为这条线路设置关注站"
+        @click="$emit('edit-followed')"
+      >
+        <span>设关注站</span>
       </button>
 
       <RouterLink

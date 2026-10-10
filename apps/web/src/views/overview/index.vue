@@ -202,7 +202,7 @@ const followedSheetDirections = shallowRef<Array<{
 function onEditFollowed(card: MiniCardConfig): void {
   const favoriteId = card.favoriteId
   if (!favoriteId) return
-  const fav = transitStore.favorites.value.find(f => f.id === favoriteId)
+  const fav = transitStore.favorites.find(f => f.id === favoriteId)
   if (!fav) return
   const both = detailsOf(fav)
   followedSheetFavorite.value = fav

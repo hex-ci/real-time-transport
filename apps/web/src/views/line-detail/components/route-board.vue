@@ -1167,8 +1167,8 @@ function syncVehicles(): void {
 /**
  * 把镜头对准关键站（选中 > 通勤聚焦 > 最近）。
  * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约 focusGapsAcross()
- * 个站间距的级别（折返约半行）、目标站居中，点进来一眼看清站点附近有没有车；
- * 手动选中的站只居中不缩放。
+ * 个站间距的级别（折返约半行）、目标站落在纵向黄金分割偏上处，点进来一眼看清
+ * 站点附近有没有车；手动选中的站同样锚定该位置但不缩放。
  * 条件都不具备（无选中、无通勤目标、无最近站）时不聚焦、不替用户假设目标，
  * 镜头保持原位。
  */
@@ -1218,7 +1218,7 @@ function focusKeyStation(smooth = false): void {
   const scale = clampScale(viewW < 640 ? 1.0 : 1.0)
 
   const targetX = (viewW / 2) - targetPt.x * scale
-  const targetY = (viewH / 2) - targetPt.y * scale
+  const targetY = viewH * FOCUS_ANCHOR_Y - targetPt.y * scale
 
   if (smooth) {
     stage.to({
@@ -1269,6 +1269,12 @@ function fitWidthScale(): number {
 const FOCUS_GAPS_ACROSS = 4.5
 /** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
 const MAX_FOCUS_SCALE = 2.5
+/**
+ * 聚焦时目标站的纵向锚点：黄金分割偏上（0.382），而非绝对垂直居中。
+ * 横向保持绝对居中。绝对居中会让视觉重心下沉，偏上更符合观看习惯，
+ * 上方也给浮动工具留出呼吸空间。
+ */
+const FOCUS_ANCHOR_Y = 0.382
 
 /**
  * 邻里聚焦的目标站间距数（响应式）。
@@ -1291,7 +1297,8 @@ function focusGapsAcross(): number {
 }
 
 /**
- * 邻里视图：镜头缩放到"视口宽度内约 focusGapsAcross() 个站间距"的级别，并把目标站居中。
+ * 邻里视图：镜头缩放到"视口宽度内约 focusGapsAcross() 个站间距"的级别，目标站横向居中、
+ * 纵向落在黄金分割偏上处（FOCUS_ANCHOR_Y）。
  * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），封顶 MAX_FOCUS_SCALE。
  * 倍数按平均站间距定，而非包围盒 fit：折返模式下一行的宽度≈整条内容宽，
  * 行内窗口的包围盒 fit 几乎无缩放，站间距倍数才能在任何布局下给出确定的放大。
@@ -1315,7 +1322,7 @@ function neighborhoodView(targetStationId: string): { scale: number, x: number, 
   const fit = (viewW - pad * 2) / (avgGap * focusGapsAcross())
   const defaultScale = layoutMode.value === 'linear' ? 1.0 : fitWidthScale()
   const scale = clampScale(Math.min(MAX_FOCUS_SCALE, Math.max(defaultScale, fit)))
-  return { scale, x: viewW / 2 - target.x * scale, y: viewH / 2 - target.y * scale }
+  return { scale, x: viewW / 2 - target.x * scale, y: viewH * FOCUS_ANCHOR_Y - target.y * scale }
 }
 
 /** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */

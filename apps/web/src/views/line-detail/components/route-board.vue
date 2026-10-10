@@ -1237,16 +1237,17 @@ function focusKeyStation(smooth = false): void {
 }
 
 /**
- * 把纵向位置钳在内容边界内：居中目标站时不让画布滑出内容之外。
+ * 纵向位置处理：内容矮于视口时整体垂直居中；内容高于视口时（聚焦场景）
+ * 优先让目标站真正居中 —— 调用方传进来的就是居中坐标，这里不再把内容
+ * 边缘钉在视口边缘，否则靠近内容顶部/底部的站会被顶到画布边缘，看着像
+ * 被半裁。X 轴本就是直接居中的，纵向与之对齐。
  */
 function clampStageY(y: number, scale: number, viewH: number): number {
   const box = contentBounds()
   if (!box) return y
   const contentH = box.h * scale
   if (contentH <= viewH) return (viewH - contentH) / 2 - box.minY * scale
-  const minY = viewH - contentH - box.minY * scale
-  const maxY = -box.minY * scale
-  return Math.min(maxY, Math.max(minY, y))
+  return y
 }
 
 /**

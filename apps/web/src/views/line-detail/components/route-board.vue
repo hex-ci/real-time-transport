@@ -123,7 +123,6 @@ const containerRef = useTemplateRef('containerEl')
  * 高度留出内缩；桌面端这些元素是 display: none，量得零尺寸——一次测量同时覆盖两种情况，
  * 无需可能与 `md:` 可见性类漂开的断点判断。
  */
-const mobileModePillRef = useTemplateRef('mobileModePillEl')
 /**
  * 只有 FAB 触发按钮，不含它的容器：工具列表展开时容器会长大，按那个临时的堆叠内缩会把报站板
  * 往下推。
@@ -1420,17 +1419,13 @@ function contentBounds(): { minX: number, minY: number, w: number, h: number } |
  * 故内缩不会与 `md:` 可见性类漂开。
  */
 function toolbarInsetTop(): number {
-  const els = [mobileModePillRef.value, mobileFabTriggerRef.value].filter(Boolean) as HTMLElement[]
-  if (els.length === 0) return 0
+  const el = mobileFabTriggerRef.value
+  if (!el) return 0
   const containerTop = containerRef.value?.getBoundingClientRect().top ?? 0
-  let inset = 0
-  for (const el of els) {
-    const rect = el.getBoundingClientRect()
-    if (rect.height <= 0) continue // 桌面端为 display:none
-    // 从画布顶到这个覆盖层下沿的距离。
-    inset = Math.max(inset, rect.bottom - containerTop)
-  }
-  return inset > 0 ? inset + TOOLBAR_GAP : 0
+  const rect = el.getBoundingClientRect()
+  if (rect.height <= 0) return 0 // 桌面端为 display:none
+  // 从画布顶到这个覆盖层下沿的距离。
+  return rect.bottom - containerTop + TOOLBAR_GAP
 }
 
 function handleFitWidth(): void {
@@ -1800,27 +1795,8 @@ function handleResize(): void {
       </div>
     </div>
 
-    <!-- 移动端浮动控件（md 以下） -->
-    <!-- 模式药丸：移动端点一下即切换排布。图例在移动端线路信息抽屉里，
-         不占画布空间。 -->
-    <div
-      ref="mobileModePillEl"
-      class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md"
-    >
-      <button
-        type="button"
-        class="flex items-center gap-1 text-slate-300 active:scale-95"
-        @click="toggleLayoutMode"
-      >
-        <component :is="layoutMode === 'folded' ? WrapText : GitCommitHorizontal" class="h-3.5 w-3.5 text-cyan-400" />
-        <span class="font-medium text-slate-200">{{ layoutMode === 'folded' ? '折返' : '直线' }}</span>
-      </button>
-      <span class="text-slate-500">|</span>
-      <span class="flex items-center gap-1 text-slate-300">
-        <span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
-        定位
-      </span>
-    </div>
+    <!-- 移动端浮动控件（md 以下）：收拢在右上 FAB 里，左上不再放 pill ——
+         排布切换已在工具列表首位，定位图例在抽屉里，画布上方保持干净。 -->
 
     <!-- 移动端右侧 FAB 操作按钮：可折叠以省下可视面积（默认折叠） -->
     <div class="md:hidden absolute right-2.5 top-2.5 z-10 flex flex-col items-end gap-1.5">

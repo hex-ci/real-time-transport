@@ -14,7 +14,8 @@ export interface TransitCity {
   hot: boolean
 }
 
-export { CITY_DICTIONARY } from './cities.generated.js'
+import { CITY_DICTIONARY } from './cities.generated.js'
+export { CITY_DICTIONARY }
 
 /** 热门城市用于 amap GIS 调用的额外元数据。 */
 export interface CityGisMeta {
@@ -86,9 +87,16 @@ export function normalizeCityCode(cityCode: string): string {
   return LEGACY_CODE_ALIASES[cityCode] || cityCode
 }
 
-/** 城市码对应的 amap adcode；未知城市回落到城市码本身。 */
+/**
+ * 给高德的城市限定参数：热门城市用精确的 adcode，其余用城市名
+ * （高德 city 参数中文名/adcode 都认）。不再回落到车来了 cityId ——
+ * 高德不认那个（如东莞的 '008'）。
+ */
 export function getCityAdcode(cityCode: string): string {
-  return AD_CODE_MAP[normalizeCityCode(cityCode)] || cityCode
+  const code = normalizeCityCode(cityCode)
+  return AD_CODE_MAP[code]
+    || CITY_DICTIONARY.find(c => c.code === code)?.name
+    || cityCode
 }
 
 /** 城市码的人工维护显示名；非热门城市为 undefined。 */

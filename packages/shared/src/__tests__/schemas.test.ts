@@ -99,7 +99,9 @@ describe('Shared Schemas', () => {
     expect(beijing!.hasMetro).toBe(true)
     expect(getCityAdcode('027')).toBe('110000')
     expect(getCityAdcode('999')).toBe('999')
-    // 广州 / 深圳由人工维护的 amap-only 条目覆盖。
+    // 非热门城市回落到城市名（高德认），而不是车来了 cityId。
+    expect(getCityAdcode('008')).toBe('东莞')
+    // 广州 / 深圳现在是真实车来了 cityId，不再是占位码。
     expect(HOT_CITY_META.some(c => c.name === '广州')).toBe(true)
     expect(HOT_CITY_META.some(c => c.name === '深圳')).toBe(true)
   })

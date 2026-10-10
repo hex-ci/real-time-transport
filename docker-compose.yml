@@ -9,9 +9,10 @@ services:
     ports:
       - '${DB_PORT:-5432}:5432'
     volumes:
-      # 必须挂在 PGDATA 本体（/var/lib/postgresql/data）上：镜像声明了 VOLUME
-      # /var/lib/postgresql/data，挂父目录会被匿名卷影子遮住，down 后数据丢失。
-      - pgdata:/var/lib/postgresql/data
+      # postgres:18+ 用版本子目录（如 18/main）存数据，官方推荐挂父目录。
+      # 不要挂到 /var/lib/postgresql/data —— 那是旧版路径，18 会认成
+      # "未升级的残留数据" 而拒绝启动。
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U transit']
       interval: 5s

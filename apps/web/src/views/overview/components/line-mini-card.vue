@@ -420,16 +420,10 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
-        <!-- 占位行：该方向可切换但无锚点。直接给设关注站的入口 —— 用户切过来多半就是为了设它。 -->
-        <div v-else-if="isPrimaryPlaceholder" class="mt-3.5 flex grow flex-col items-center justify-center gap-2 rounded-xl bg-slate-950/80 px-3 py-2.5 text-center lg:px-3.5 lg:py-3">
-          <span class="text-xs text-slate-400 lg:text-base">{{ primaryRow?.directionName }}暂无站点可显示</span>
-          <button
-            type="button"
-            class="rounded-lg border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25 lg:text-sm"
-            @click="$emit('edit-followed')"
-          >
-            设关注站
-          </button>
+        <!-- 占位行：该方向可切换但无锚点。卡片主体是详情页链接，动作只放底部操作栏，
+             这里只陈述状态，不放按钮。 -->
+        <div v-else-if="isPrimaryPlaceholder" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+          {{ primaryRow?.directionName }}暂无站点可显示，可在底部操作栏设关注站
         </div>
 
         <!-- 这一块也必须吃掉余下高度：同一行里内容少的卡片会被拉高，富余空间若落在面板外

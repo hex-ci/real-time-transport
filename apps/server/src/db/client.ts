@@ -329,8 +329,12 @@ export class Database {
       }
     }
     catch (err: any) {
-      console.warn('PostgreSQL connection skipped (using memory store):', err.message)
-      this.pool = null
+      // DATABASE_URL 配了但连不上：直接报错退出，不静默回退内存存储。
+      // 内存数据重启即丢，会让用户误以为数据丢失；没 DB 就该像普通网站一样起不来。
+      throw new Error(
+        `PostgreSQL 连接失败，服务无法启动: ${err.message}。请确认数据库容器已启动 (docker compose up -d)。`,
+        { cause: err },
+      )
     }
   }
 

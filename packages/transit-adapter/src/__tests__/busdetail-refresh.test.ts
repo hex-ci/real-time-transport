@@ -146,3 +146,26 @@ describe('station count without stations in the light payload', () => {
     expect(status?.buses[0]?.nextOrder).toBe(1)
   })
 })
+
+describe('non-chelaile cities (amap_ placeholder codes)', () => {
+  it('searchLines returns [] without hitting upstream', async () => {
+    const seen = stubEndpoints({
+      encryptedBusDetail: () => envelope(LIGHT_PAYLOAD),
+      encryptedLineDetail: () => envelope(FULL_PAYLOAD),
+    })
+    const result = await new ChelaileProvider().searchLines('1路', 'amap_120000')
+    expect(result).toEqual([])
+    expect(seen, 'upstream should not be called for amap_ cities').toEqual([])
+  })
+
+  it('getLineDetail and getLiveStatus return null without hitting upstream', async () => {
+    const seen = stubEndpoints({
+      encryptedBusDetail: () => envelope(LIGHT_PAYLOAD),
+      encryptedLineDetail: () => envelope(FULL_PAYLOAD),
+    })
+    const provider = new ChelaileProvider()
+    expect(await provider.getLineDetail('line_1', 0, 'amap_440100')).toBeNull()
+    expect(await provider.getLiveStatus('line_1', 0, 'amap_440300')).toBeNull()
+    expect(seen, 'upstream should not be called for amap_ cities').toEqual([])
+  })
+})

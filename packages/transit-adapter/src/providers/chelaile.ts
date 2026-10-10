@@ -132,6 +132,16 @@ function holdsLineRecord(data: any): boolean {
   return Boolean(rawLine.name || rawLine.lineName) || stations.length > 0
 }
 
+/**
+ * 车来了上游认不认这个城市码：cityId 是纯数字串（如北京 '027'）。
+ * `amap_` 前缀的码是给高德系引擎（地铁）用的占位码，车来了不认 ——
+ * 这类城市（如天津/广州/深圳/厦门/兰州）上游 497 城表里就没有，
+ * 调用前直接返回空，不浪费一次上游调用，也不让无效 cityId 透传。
+ */
+function isChelaileCity(cityCode?: string): boolean {
+  return !cityCode || !cityCode.startsWith('amap_')
+}
+
 export class ChelaileProvider implements ITransitProvider {
   readonly name: DataSourceType = 'chelaile'
 
@@ -300,6 +310,8 @@ export class ChelaileProvider implements ITransitProvider {
   }
 
   async searchLines(keyword: string, cityCode: string = '027'): Promise<LineSummary[]> {
+    // 非车来了覆盖城市（如 amap_ 占位码）：上游不认，直接返回空。
+    if (!isChelaileCity(cityCode)) return []
     try {
       const data = await this.request('/bus/query!nSearch.action', {
         cityId: cityCode,
@@ -332,6 +344,10 @@ export class ChelaileProvider implements ITransitProvider {
 
   async getLineDetail(lineId: string, _direction?: number, cityCode?: string): Promise<LineDetail | null> {
     if (lineId.startsWith('subway_')) {
+      return null
+    }
+    // 非车来了覆盖城市：上游不认，直接返回空。
+    if (!isChelaileCity(cityCode)) {
       return null
     }
 
@@ -432,6 +448,10 @@ export class ChelaileProvider implements ITransitProvider {
     options?: { targetOrder?: number },
   ): Promise<LiveLineStatus | null> {
     if (lineId.startsWith('subway_')) {
+      return null
+    }
+    // 非车来了覆盖城市：上游不认，直接返回空。
+    if (!isChelaileCity(cityCode)) {
       return null
     }
 

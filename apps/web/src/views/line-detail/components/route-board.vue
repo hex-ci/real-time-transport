@@ -236,8 +236,7 @@ const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
 const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
-const FREEZE_FALLBACK_MS = 2000 // 算不出等待时长时（无速度）的默认冻住时长
-const FREEZE_MAX_MS = 5000 // 冻住时长上限，避免车定住太久像卡死
+const FREEZE_FALLBACK_MS = 2000 // 速度为 0 时算不出等待时长，默认冻住 2 秒
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -577,14 +576,14 @@ function initAnimation(): void {
           else if (delta < -OVERSHOOT_EPS_M) {
             // 外推出超前：就地冻住，不跳回去。冻住时长按"数据时间线追上
             // 当前位置"的时刻计算——不等下一次数据，到期自动恢复巡游。
+            // 用 base 速度（含 DEFAULT_SPEED_MS 兜底），与动画实际速度一致。
             v.mode = 'hold'
             v.convergeTo = v.fixDist
             const overshoot = -delta
-            const speed = v.speedMs && v.speedMs > 0 ? v.speedMs : 0
-            const waitMs = speed > 0
-              ? (overshoot / speed) * 1000
+            const waitMs = base > 0
+              ? (overshoot / base) * 1000
               : FREEZE_FALLBACK_MS
-            v.frozenUntil = time + Math.min(waitMs, FREEZE_MAX_MS)
+            v.frozenUntil = time + waitMs
           }
           else {
             v.mode = 'cruise'

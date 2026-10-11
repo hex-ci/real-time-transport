@@ -314,8 +314,9 @@ function nearestPlatformDist(dist: number): number | null {
  * 巡航外推的上限距离（防超站核心）。
  *
  * 没新数据时车允许一直往前开，但上限是**下一站站台**：开到站就停在站上等，
- * 永不冲过站台。若最新数据已证明车过了下一站（数据位置 > 站台），说明车已出站，
- * 此时放开钳制、车继续走，不停；下一站未知时退回定位点钳制，避免无依据前冲。
+ * 永不冲过站台。图标已过站台（动画外推超过）时，退回上一定位点钳制——
+ * 不按里程放开，因为上游离散的 order/nextOrder 更新比里程慢，放开会导致
+ * 动画与弹窗（用 order 判"在本站"）不一致。下一站未知时同样退回定位点。
  * 返回 null 表示无从钳制（此时仅靠 [0, L] 兜底）。
  */
 function cruiseCapDist(v: AnimatedVehicle): number | null {
@@ -326,8 +327,6 @@ function cruiseCapDist(v: AnimatedVehicle): number | null {
     && sd.length >= 2 && order - 1 < sd.length
   ) {
     const stationDist = sd[order - 1]!
-    // 数据已确认出站：放开钳制
-    if (v.fixDist !== null && v.fixDist > stationDist) return null
     if (v.displayedDist <= stationDist) return stationDist
   }
   return v.fixDist

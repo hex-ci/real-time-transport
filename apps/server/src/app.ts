@@ -656,7 +656,9 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (!stored) {
       return { success: true, settingsState: 'unset', data: null }
     }
-    return { success: true, settingsState: 'stored', data: stored }
+    // 调试用：返回当前实际生效的轮询间隔（秒），与 DB 存的值对照。
+    const effective = { pollIntervalSec: transitService.getPollIntervalSec() }
+    return { success: true, settingsState: 'stored', data: { ...stored, ...effective } }
   })
 
   app.patch('/api/transit/settings', async (req, reply) => {

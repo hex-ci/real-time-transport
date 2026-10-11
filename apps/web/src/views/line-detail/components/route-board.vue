@@ -672,15 +672,24 @@ function initAnimation(): void {
         ? Math.max(0, Math.min(L, nextDist))
         : Math.max(prevDist, Math.min(L, nextDist))
 
-      // 速度标签跟动画实际速度走：冻住/钳住时图标没动，标签就显示 0，
-      // 不展示上游那个已经过时的速度。只在取整值变化时更新，避免每帧写文本。
-      // 用实际位移（钳制后）算，不用 effectiveSpeed——被钳住时位移为 0，
-      // 标签必须显示 0km/h 而不是"想走"的速度。
+      // 速度标签跟动画实际速度走：冻住/钳住时图标没动，标签渐隐；
+      // 动起来时渐显。用实际位移（钳制后）算，不用 effectiveSpeed——
+      // 被钳住时位移为 0，标签隐藏而不是显示"想走"的速度。
+      // 只在取整值变化时更新文本；透明度每帧向目标插值，平滑过渡。
       if (v.label) {
         const actualSpeed = dt > 0 ? (v.displayedDist - prevDist) / dt : 0
         const kmh = Math.round(Math.max(0, actualSpeed) * 3.6)
-        const text = `${kmh}km/h`
-        if (v.label.text() !== text) v.label.text(text)
+        const targetOp = kmh > 0 ? 1 : 0
+        if (kmh > 0) {
+          const text = `${kmh}km/h`
+          if (v.label.text() !== text) v.label.text(text)
+        }
+        const curOp = v.label.opacity()
+        if (curOp !== targetOp) {
+          const nextOp = curOp + (targetOp - curOp) * Math.min(1, dt * 6)
+          // 接近目标时直接贴合，避免永远差一点点
+          v.label.opacity(Math.abs(nextOp - targetOp) < 0.02 ? targetOp : nextOp)
+        }
       }
 
       const pos = layoutPosition(v.displayedDist)

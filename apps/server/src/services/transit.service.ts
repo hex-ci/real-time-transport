@@ -1329,28 +1329,32 @@ export class TransitService {
   private async pollActiveLines(): Promise<void> {
     if (this.activeSubscriptions.size === 0) return
 
+    // 并行拉取：串行 await 会让多条线路的总耗时超过轮询间隔，
+    // 导致实际更新节拍远慢于设置值。
+    const tasks: Promise<void>[] = []
     for (const [, sub] of this.activeSubscriptions.entries()) {
       if (sub.clients.size === 0) continue
-
-      try {
-        const status = await this.getLiveStatus(sub.lineId, sub.direction, sub.cityCode)
-        if (!status) continue
-
-        const payload = JSON.stringify({
-          type: 'line_update',
-          lineId: sub.lineId,
-          direction: sub.direction,
-          status,
-        } satisfies WsServerMessage)
-
-        for (const ws of sub.clients) {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(payload)
-          }
-        }
-      }
-      catch (err) {
+      tasks.push(this.pollOneLine(sub).catch((err) => {
         console.warn(`Failed to poll line ${sub.lineId}:`, err)
+      }))
+    }
+    await Promise.all(tasks)
+  }
+
+  private async pollOneLine(sub: { lineId: string, direction: number, cityCode?: string, clients: Set<any> }): Promise<void> {
+    const status = await this.getLiveStatus(sub.lineId, sub.direction, sub.cityCode)
+    if (!status) return
+
+    const payload = JSON.stringify({
+      type: 'line_update',
+      lineId: sub.lineId,
+      direction: sub.direction,
+      status,
+    } satisfies WsServerMessage)
+
+    for (const ws of sub.clients) {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(payload)
       }
     }
   }

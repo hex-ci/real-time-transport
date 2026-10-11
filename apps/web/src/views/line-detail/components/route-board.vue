@@ -204,6 +204,9 @@ interface AnimatedVehicle {
   mode: 'cruise' | 'catchup' | 'hold'
   /** 'catchup' 模式收敛到的目标。 */
   convergeTo: number
+  /** 'hold' 模式下冻住到期的 Konva 帧时间（ms）；到期前速度为 0，到期后自动恢复巡游。
+    到期时间按"数据时间线追上冻住位置"的时刻计算，不等下一次数据到来。 */
+  frozenUntil: number
   /** 上游报的下一站站序（1-based）：巡航外推的上限钳在该站站台；缺失时退回定位点钳制。 */
   nextOrder: number | undefined
   /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
@@ -232,8 +235,9 @@ const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
-const FREERUN_CRUISE_MS = 8000 // 满速巡游 8 秒
-const MAX_FREERUN_MS = 20000 // 之后 20 秒内平滑衰减到 0
+const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
+const FREEZE_FALLBACK_MS = 2000 // 算不出等待时长时（无速度）的默认冻住时长
+const FREEZE_MAX_MS = 5000 // 冻住时长上限，避免车定住太久像卡死
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -306,10 +310,10 @@ function nearestPlatformDist(dist: number): number | null {
 /**
  * 巡航外推的上限距离（防超站核心）。
  *
- * 没新数据时车允许继续往前开，但上限是**下一站站台**：开到站就停在站上等，
- * 永不冲过站台。图标还没到下一站时钳在站台上；图标已在站台上或已过站
- * （数据确认）时，退回上一定位点钳制，避免无依据前冲；下一站未知时同样
- * 退回定位点。返回 null 表示无从钳制（此时仅靠 [0, L] 兜底）。
+ * 没新数据时车允许一直往前开，但上限是**下一站站台**：开到站就停在站上等，
+ * 永不冲过站台。若最新数据已证明车过了下一站（数据位置 > 站台），说明车已出站，
+ * 此时放开钳制、车继续走，不停；下一站未知时退回定位点钳制，避免无依据前冲。
+ * 返回 null 表示无从钳制（此时仅靠 [0, L] 兜底）。
  */
 function cruiseCapDist(v: AnimatedVehicle): number | null {
   const sd = effectiveStationDistances.value
@@ -319,6 +323,8 @@ function cruiseCapDist(v: AnimatedVehicle): number | null {
     && sd.length >= 2 && order - 1 < sd.length
   ) {
     const stationDist = sd[order - 1]!
+    // 数据已确认出站：放开钳制
+    if (v.fixDist !== null && v.fixDist > stationDist) return null
     if (v.displayedDist <= stationDist) return stationDist
   }
   return v.fixDist
@@ -568,9 +574,17 @@ function initAnimation(): void {
             v.mode = 'catchup'
             v.convergeTo = v.fixDist
           }
-          else if (delta < -15) {
+          else if (delta < -OVERSHOOT_EPS_M) {
+            // 外推出超前：就地冻住，不跳回去。冻住时长按"数据时间线追上
+            // 当前位置"的时刻计算——不等下一次数据，到期自动恢复巡游。
             v.mode = 'hold'
             v.convergeTo = v.fixDist
+            const overshoot = -delta
+            const speed = v.speedMs && v.speedMs > 0 ? v.speedMs : 0
+            const waitMs = speed > 0
+              ? (overshoot / speed) * 1000
+              : FREEZE_FALLBACK_MS
+            v.frozenUntil = time + Math.min(waitMs, FREEZE_MAX_MS)
           }
           else {
             v.mode = 'cruise'
@@ -579,22 +593,15 @@ function initAnimation(): void {
         }
       }
 
-      const sinceLastFix = time - v.lastFixAt
-      // 平滑外推衰减：0 ~ 8 秒满速；8 ~ 20 秒线性衰减到 0（模拟接近路口/信号）；之后保持位置，直到新的实时定位到来。
-      let extrapolationFactor = 0
-      if (sinceLastFix < FREERUN_CRUISE_MS) {
-        extrapolationFactor = 1.0
-      }
-      else if (sinceLastFix < MAX_FREERUN_MS) {
-        extrapolationFactor = Math.max(0, 1.0 - (sinceLastFix - FREERUN_CRUISE_MS) / (MAX_FREERUN_MS - FREERUN_CRUISE_MS))
-      }
+      // 无衰减外推：没新数据时按最后已知速度一直走，直到下一站钳制。
+      // 不再 20 秒归零——车宁可在站上等，不冻在半路。
 
       let effectiveSpeed: number
       if (v.mode === 'catchup') {
         const remaining = v.convergeTo - v.displayedDist
         if (remaining <= 0.5) {
           v.mode = 'cruise'
-          effectiveSpeed = base * extrapolationFactor
+          effectiveSpeed = base
         }
         else {
           // 有界的平滑追赶：3.5 秒内温和合上差距，且严格受物理速度上限封顶。
@@ -603,17 +610,18 @@ function initAnimation(): void {
         }
       }
       else if (v.mode === 'hold') {
-        // 真车在路口或站被拦住时，以 0 速度温和等待，直到真实位置前进。
-        if (v.fixDist !== null && v.displayedDist <= v.fixDist + 0.5) {
+        // 外推出超前时的冻住：到期自动恢复巡游，不等下一次数据。
+        // 若期间来了新数据且位置已追上，上面 fixPending 分支会切走 hold。
+        if (time >= v.frozenUntil) {
           v.mode = 'cruise'
-          effectiveSpeed = base * extrapolationFactor
+          effectiveSpeed = base
         }
         else {
           effectiveSpeed = 0
         }
       }
       else {
-        effectiveSpeed = base * extrapolationFactor
+        effectiveSpeed = base
       }
 
       if (effectiveSpeed > 0 && dt > 0) {
@@ -1120,6 +1128,7 @@ function syncVehicles(): void {
         lastFixUpdatedAt: fixUpdatedAt,
         mode: 'cruise',
         convergeTo: initialDist,
+        frozenUntil: 0,
         nextOrder: bus.nextOrder,
         speedMs,
         dwell,

@@ -1342,6 +1342,10 @@ export class TransitService {
   }
 
   private async pollOneLine(sub: { lineId: string, direction: number, cityCode?: string, clients: Set<any> }): Promise<void> {
+    // 先清缓存再拉：上游慢时（fetch 耗时接近间隔），缓存的过期时刻会从
+    // fetch 完成时起算，导致轮询拿到未过期的旧数据，实际节拍翻倍。
+    // 手动刷新（refreshLive）同样先 invalidate，这里对齐。
+    this.aggregator.invalidateLive(sub.lineId, sub.direction)
     const status = await this.getLiveStatus(sub.lineId, sub.direction, sub.cityCode)
     if (!status) return
 

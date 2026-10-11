@@ -517,6 +517,26 @@ async function computeWalkDecision(): Promise<void> {
  * 文本与标记刻意由同一个分支决定——陈述分钟的线路必须带上它陈述的那个分钟的来源，陈述营运事实的
  * 线路不带，因为没有数字可分类。把两者分开正是算出来的分钟看起来像一次读取的原因。
  */
+
+/**
+ * 车辆是否正在目标站台（35 米内）。标准与服务端 isAtStation 一致。
+ *
+ * 不能用离散的 order 判：b.order 是"刚经过的站"，车开到半路时 order 还停在
+ * 本站，会误判为"在本站"。必须用连续里程。
+ */
+function isBusAtPlatform(b: { travelTimeSec?: number, distanceFromStart?: number, nextOrder?: number }, targetOrder: number): boolean {
+  // 上游明确说在站上（travelTime 0）
+  if (b.travelTimeSec === 0) return true
+  // 里程在站台 35 米内
+  const sd = currentLineDetail.value?.stationDistances
+  const targetDist = sd?.[targetOrder - 1]
+  if (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number') {
+    return Math.abs(b.distanceFromStart - targetDist) <= 35
+  }
+  // 无里程数据时降级：只有正开往本站才算（order 是"刚经过"，不能算）
+  return b.nextOrder === targetOrder
+}
+
 const selectedStationEta = computed<{ text: string, mark: string | null }>(() => {
   if (!selectedStation.value) return { text: '等待发车', mark: null }
   const targetOrder = selectedStation.value.order
@@ -573,7 +593,10 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next > targetOrder
     })
-    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    // 「在本站」必须用连续里程判（35 米内），不能用离散 order：
+    // b.order 是"刚经过的站"，车开到半路时 order 还停在本站，会误判。
+    // 标准与服务端 isAtStation 一致。
+    const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
       return { text: AT_PLATFORM_ETA_TEXT, mark: null }
@@ -601,7 +624,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next > targetOrder
     })
-    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
       return { text: AT_PLATFORM_ETA_TEXT, mark: null }

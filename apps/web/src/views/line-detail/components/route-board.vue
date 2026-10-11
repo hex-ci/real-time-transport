@@ -238,8 +238,6 @@ const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
-const AT_PLATFORM_SNAP_M = 35 // 在站吸附半径：与业务"在本站"阈值一致。
-// 画布是示意图——业务判在站上时，图标就压在站台上，不展示 20-30 米的偏移。
 const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
 const FREEZE_MAX_MS = 5000 // 冻住时长上限：超时后转低速爬行，不死等
 const RECOVER_SPEED_FACTOR = 0.3 // 冻住超时后的爬行速度系数
@@ -666,20 +664,6 @@ function initAnimation(): void {
         // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
         if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
-        }
-      }
-      else {
-        // 在站吸附：业务上"在本站"（数据位置距目标站 35 米内）时，画布是示意图，
-        // 直接把图标拉到站台上——视觉与"在本站"的结论一致，不展示偏移。
-        // 用 fixDist（数据位置）判，不用 displayedDist（动画可能已外推出去）。
-        const targetOrder = v.nextOrder
-        if (typeof targetOrder === 'number' && v.fixDist !== null) {
-          const sd = effectiveStationDistances.value
-          const stationDist = sd[targetOrder - 1]
-          if (typeof stationDist === 'number'
-            && Math.abs(v.fixDist - stationDist) <= AT_PLATFORM_SNAP_M) {
-            nextDist += (stationDist - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
-          }
         }
       }
 

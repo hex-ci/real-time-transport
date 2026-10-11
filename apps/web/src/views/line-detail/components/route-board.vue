@@ -672,6 +672,14 @@ function initAnimation(): void {
         ? Math.max(0, Math.min(L, nextDist))
         : Math.max(prevDist, Math.min(L, nextDist))
 
+      // 速度标签跟动画实际速度走：冻住/钳住时图标没动，标签就显示 0，
+      // 不展示上游那个已经过时的速度。只在取整值变化时更新，避免每帧写文本。
+      if (v.label) {
+        const kmh = Math.round(effectiveSpeed * 3.6)
+        const text = `${kmh}km/h`
+        if (v.label.text() !== text) v.label.text(text)
+      }
+
       const pos = layoutPosition(v.displayedDist)
       v.container.position({ x: pos.x, y: pos.y })
       v.body.rotation(pos.angleDeg)
@@ -1159,15 +1167,6 @@ function syncVehicles(): void {
       v.nextOrder = bus.nextOrder
       v.speedMs = speedMs
       v.dwell = dwell
-    }
-
-    if (v.label) {
-      if (typeof bus.speed === 'number' && Number.isFinite(bus.speed)) {
-        v.label.text(`${Math.round(bus.speed * 3.6)}km/h`)
-      }
-      else {
-        v.label.text('')
-      }
     }
   }
 

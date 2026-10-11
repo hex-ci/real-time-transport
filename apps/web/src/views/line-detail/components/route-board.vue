@@ -204,9 +204,12 @@ interface AnimatedVehicle {
   mode: 'cruise' | 'catchup' | 'hold'
   /** 'catchup' 模式收敛到的目标。 */
   convergeTo: number
-  /** 'hold' 模式下冻住到期的 Konva 帧时间（ms）；到期前速度为 0，到期后自动恢复巡游。
-    到期时间按"数据时间线追上冻住位置"的时刻计算，不等下一次数据到来。 */
+  /** 'hold' 模式下冻住到期的 Konva 帧时间（ms）；到期前速度为 0，到期后转低速爬行。
+    到期时间按"数据时间线追上冻住位置"的时刻计算，但受 FREEZE_MAX_MS 封顶，
+    不等下一次数据到来。 */
   frozenUntil: number
+  /** 巡游速度系数：正常为 1；冻住超时后转 0.3 低速爬行，直到新数据证明不再超调才恢复。 */
+  speedFactor: number
   /** 上游报的下一站站序（1-based）：巡航外推的上限钳在该站站台；缺失时退回定位点钳制。 */
   nextOrder: number | undefined
   /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
@@ -236,6 +239,8 @@ const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
 const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
+const FREEZE_MAX_MS = 5000 // 冻住时长上限：超时后转低速爬行，不死等
+const RECOVER_SPEED_FACTOR = 0.3 // 冻住超时后的爬行速度系数
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -571,22 +576,26 @@ function initAnimation(): void {
           if (delta > 0) {
             v.mode = 'catchup'
             v.convergeTo = v.fixDist
+            v.speedFactor = 1
           }
           else if (delta < -OVERSHOOT_EPS_M) {
             // 外推出超前：就地冻住，不跳回去。冻住时长按"数据时间线追上
-            // 当前位置"的时刻计算——不等下一次数据，到期自动恢复巡游。
+            // 冻住位置"的时刻计算，受 FREEZE_MAX_MS 封顶——不等下一次数据，
+            // 到期后转低速爬行；下次数据若还超调则再冻，循环。
             // 用 base 速度（含 DEFAULT_SPEED_MS 兜底），与动画实际速度一致。
             // base 为 0（车在站上）时算不出时长，直接冻到新数据来重新判定。
             v.mode = 'hold'
             v.convergeTo = v.fixDist
             const overshoot = -delta
             v.frozenUntil = base > 0
-              ? time + (overshoot / base) * 1000
+              ? time + Math.min((overshoot / base) * 1000, FREEZE_MAX_MS)
               : Number.POSITIVE_INFINITY
+            v.speedFactor = RECOVER_SPEED_FACTOR
           }
           else {
             v.mode = 'cruise'
             v.convergeTo = v.fixDist
+            v.speedFactor = 1
           }
         }
       }
@@ -608,18 +617,18 @@ function initAnimation(): void {
         }
       }
       else if (v.mode === 'hold') {
-        // 外推出超前时的冻住：到期自动恢复巡游，不等下一次数据。
+        // 外推出超前时的冻住：到期转低速爬行，不等下一次数据。
         // 若期间来了新数据且位置已追上，上面 fixPending 分支会切走 hold。
         if (time >= v.frozenUntil) {
           v.mode = 'cruise'
-          effectiveSpeed = base
+          effectiveSpeed = base * v.speedFactor
         }
         else {
           effectiveSpeed = 0
         }
       }
       else {
-        effectiveSpeed = base
+        effectiveSpeed = base * v.speedFactor
       }
 
       if (effectiveSpeed > 0 && dt > 0) {
@@ -1127,6 +1136,7 @@ function syncVehicles(): void {
         mode: 'cruise',
         convergeTo: initialDist,
         frozenUntil: 0,
+        speedFactor: 1,
         nextOrder: bus.nextOrder,
         speedMs,
         dwell,

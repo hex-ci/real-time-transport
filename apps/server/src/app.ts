@@ -268,7 +268,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const transitService = new TransitService(db, {
     apizeroKey: options.apizeroKey || process.env.APIZERO_KEY,
     amapKey: options.amapKey,
-    pollIntervalSec: options.pollIntervalSec ?? configuredIntervalSec,
+    // configuredIntervalSec 已含"DB > 环境变量"的回退链，options 只是显式传入时的兜底：
+    // 顺序反了会让环境变量盖掉用户在设置页的选择（DB），启动日志却打印 DB 的值，
+    // 表现为"日志说 10s、实际跑 18s"。
+    pollIntervalSec: configuredIntervalSec ?? options.pollIntervalSec,
   })
 
   app.addHook('onClose', async () => {

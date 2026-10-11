@@ -232,8 +232,6 @@ export class TransitService {
     const intervalSec = normalizePollIntervalSec(sec)
     const ms = intervalSec * 1000
     if (ms === this.pollIntervalMs) return intervalSec
-    console.log(`[poll] 间隔变更: ${this.pollIntervalMs / 1000}s -> ${intervalSec}s (输入=${JSON.stringify(sec)})`)
-    console.log(new Error('[poll] 调用栈').stack?.split('\n').slice(1, 5).join('\n'))
     this.pollIntervalMs = ms
     this.refreshCooldownMs = ms
     this.aggregator.setLiveCacheTtlMs(ms)

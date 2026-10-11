@@ -257,13 +257,9 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
 
   // 实时刷新间隔的优先级：用户在设置页的选择 > 环境变量 > 默认 18s。
   // DB 里 null 即"没选过"，走后面的回退；normalize 在 TransitService 构造里统一做。
-  const storedSettings = await db.getUserSettings().catch((err) => {
-    console.warn('[startup] 读取用户刷新间隔失败，回退到环境变量/默认值:', err?.message)
-    return null
-  })
+  const storedSettings = await db.getUserSettings().catch(() => null)
   const configuredIntervalSec = storedSettings?.refreshIntervalSec
     ?? (process.env.TRANSIT_POLL_INTERVAL_SEC ? Number(process.env.TRANSIT_POLL_INTERVAL_SEC) : undefined)
-  console.log(`[startup] 轮询间隔: DB=${storedSettings?.refreshIntervalSec ?? 'null'} / ENV=${process.env.TRANSIT_POLL_INTERVAL_SEC ?? 'null'} / 生效=${configuredIntervalSec ?? 18}s`)
 
   const transitService = new TransitService(db, {
     apizeroKey: options.apizeroKey || process.env.APIZERO_KEY,
@@ -663,9 +659,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (!stored) {
       return { success: true, settingsState: 'unset', data: null }
     }
-    // 调试用：返回当前实际生效的轮询间隔（秒），与 DB 存的值对照。
-    const effective = { pollIntervalSec: transitService.getPollIntervalSec() }
-    return { success: true, settingsState: 'stored', data: { ...stored, ...effective } }
+    return { success: true, settingsState: 'stored', data: stored }
   })
 
   app.patch('/api/transit/settings', async (req, reply) => {

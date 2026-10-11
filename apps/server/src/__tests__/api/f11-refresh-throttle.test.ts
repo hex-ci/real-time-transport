@@ -79,6 +79,16 @@ describeEachStore('F11 刷新节流', (store) => {
 
   const calls = () => api.upstream.mock.calls.length
 
+  /**
+   * 这条线路被**读了一次**的那个事实：按轻量读计数。
+   *
+   * 一次实时读在 adapter 层可能展开成两次 HTTP（轻量读 + 该线几何尚未缓存时的全量补读，
+   * 见 `refresh-endpoint.test.ts` 的 `COLD_LIVE_READ`），几何补读不是「又读了一遍这条线」，
+   * 故本文件数的是轻量那一次。
+   */
+  const liveReads = () => api.upstream.mock.calls
+    .filter(call => String(call[0]).includes('encryptedBusDetail')).length
+
   const refresh = (lines: Array<{ lineId: string }>, userId?: string) => api.inject({
     method: 'POST',
     url: '/api/transit/refresh',
@@ -182,7 +192,7 @@ describeEachStore('F11 刷新节流', (store) => {
 
     expect(res.statusCode, res.body).toBe(200)
     expect(res.json().data.lines).toHaveLength(1)
-    expect(calls(), '重复点名的线路被读了两次').toBe(1)
+    expect(liveReads(), '重复点名的线路被读了两次').toBe(1)
   })
 
   it('刷新丢掉两类实时键：按站读数与整线读数都真的重取', async () => {

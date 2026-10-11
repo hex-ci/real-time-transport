@@ -11,7 +11,7 @@
 | 0 静态 | `pnpm code-check` | typecheck + ESLint |
 | 1 离线 | `pnpm test` | 全仓库单元 / 契约用例，服务端跑内存存储，不碰数据库 |
 | 2 API/SQL | `pnpm test:db` → `pnpm test:api` | `app.inject()` 走 HTTP 边界，断言真的落在 SQL 上 |
-| 3 浏览器 | `pnpm test:e2e` | 真实浏览器 e2e（本批次不在范围内） |
+| 3 浏览器 | `pnpm test:e2e` | 真实浏览器 e2e，六个场景（含站台大屏的键盘场景） |
 
 「怎么证」一列给的是**真能区分行为的断言**（改坏被测路径会红的那条），不是「它测了」这种话。
 标「变异验证」的那些行，是被实际改坏过、确认会变红的（见文末）。
@@ -34,6 +34,10 @@
 | 参考行口径 `eta₁−walk ≤ T → 现在走`，否则给出门分钟 | `web/__tests__/reference-line.test.ts` ·「gives a departure time when there is slack to spare」「says leaving now still works, without instructing the user」「says the bus is gone when the walk outlasts it」 | 三种结论互不相同（`reads every verdict differently`） | 1 |
 | 无锚点不给参考行（不用默认步行耗时） | `web/__tests__/reference-line.test.ts` ·「the reference line names an unsaved anchor instead of pricing a walk」 | 无锚点时指向设置页，**不**定价 | 1 |
 | 参考行是辅助，不隐藏/压缩班次列表 | `web/__tests__/reference-line.test.ts` ·「renders the reference row once…」「places it after the arrivals it refers to」 | DOM 顺序 + 与班次列表互不影响 | 1 |
+| **关注站（015 的四列）：按方向各存一对 (站名, 站序)，与时段无关** | `api/f1-followed-station.test.ts` ·「两个方向各存一对，读回同一对；SQL 路径真的落在它自己的列上」「只写一个方向时，另一个方向保持原样」「清空要成对：两列都传 null 才清得掉」「半对被拒：只给站名、或只给站序，都是 400，且原来那一对一动不动」 | 读回值逐字等于写入值；SQL 路径由 `api.rows` **直接读那四列**（不经过服务端映射）；半对 → 400 且原值不动；**这条新用例当场抓到过一个真缺陷**：内存路径的读映射漏了这四列（写路径存了、读回来永远像没设过），已修 | 2 |
+| 关注站按方向解析，缺省即跳过回退链 | `shared/__tests__/line-group.test.ts` ·「returns the (name, order) pair for the requested direction」「returns null when that direction has no followed station」「drops a non-integer order to null (identity stays name-only)」 | 两个方向各解出自己那一对；非整数站序退成 `order: null`，不是 -1，也不是编一个 | 1 |
+| 附近模式的回退链有半径：超出 3km 就不给「最近站」 | `shared/__tests__/line-group.test.ts` ·「returns null when the nearest stop is beyond NEARBY_RADIUS_M」；`web/__tests__/nearest-station-rule.test.ts` describe「nearness has a radius: beyond it there is NO nearest stop」 | 半径外返回 null（而不是「最近的远站」）；半径内仍给 | 1 |
+| 卡片说得出它为什么没有站台，并指向「设关注站」 | `web/__tests__/views/overview/nearby-card.test.ts` ·「says this line has no platform nearby when a position exists」「drops the notice entirely once a platform resolves」 | 有定位且该线附近确实没有站台时才说那一句；站台一解析出来就一个字都不留 | 1 |
 
 ## F2 · 通勤起终点锚点
 
@@ -212,7 +216,18 @@
 | 只刷实时类，不重读长 TTL | `api/f11-…` ·「刷新丢掉两类实时键：按站读数与整线读数都真的重取」「刷新不重读长 TTL 的线路数据」 | 长 TTL 键的取数计数不变 | 2 |
 | 上游答不出 → 502，不把作答时刻当读数时刻 | `api/f11-…` ·「上游答不出来时是 502，且绝不把作答时刻当成读数时刻」 | 502 + 时刻字段不动 | 2 |
 | UI 三态文案（正在刷新 / 已刷新 / 刷新太频繁） | `web/__tests__/refresh-throttle-ui.test.ts` ·describe「the three states the control has to state」 | 三态三句 | 1 |
-| 刷新不清空已在屏上的行；「最后更新」跟随读数 | `web/__tests__/views/platform/refresh-retention.test.ts` ·「(a)…已在屏上的行保持渲染，加载态不出现」「(d)…「最后更新」仍是产生屏上行的那次读取的时刻」 | 刷新中行仍在；时刻不被改写 | 1 |
+| 刷新不清空已在屏上的行；「最后更新」跟随读数 | `web/__tests__/views/platform/refresh-retention.test.ts` ·「(a)…已在屏上的行保持渲染，加载态不出现」「(d)…「最后更新」仍是产生屏上的行的那次读取的时刻」 | 刷新中行仍在；时刻不被改写 | 1 |
+| **实时节拍可调：10~120 秒，越界钳两端，非法回退 18** | `server/__tests__/refresh-interval.test.ts` ·「区间内的整数原样保留」「越界被钳到两端，小数四舍五入」「环境变量给的是字符串也算数」「读不出数就回退默认，绝不写成 NaN 或 0」 | 钳制后的值逐个相等；回退值是 18 而不是 0 或 NaN | 1 |
+| **手动刷新的冷却跟随当前节拍，且热切换不重启服务** | 同上 ·「按 30 秒配置：窗口开在尝试那一刻，29 999ms 拒、30 000ms 放行」「换成 10 秒：同一个进程里立刻按新的节拍算窗口」「保存一个非法值时回退默认 18，而不是让节拍变成 0 秒」 | 窗口长度 == 节拍（由响应自己的 `nextAllowedAt` 与 `retryAfterSeconds` 读）；`setPollIntervalSec` 之后另一个窗口立刻按新节拍开；**已开的窗口保留自己的到期时刻**（调快不改写别人手里那个） | 1 |
+| 设置索引那一行的四种事实（没选过 / 选过 / 读不到 / 连生效值都没读到） | `web/__tests__/views/settings/settings-index.test.ts` ·「实时刷新间隔行说此刻生效的秒数或所选秒数，读不到就说读不到」 | 「未设置（默认每 18 秒）」/「未设置（默认每 30 秒）」（运维改过环境变量的服务端）/「每 N 秒」/「未读到」/「未设置」五句互不相同；读不到时不许出现「18 秒」；答案里没有生效值时只说「未设置」，不拿 18 顶上 | 1 |
+| 刷新间隔子页的「当前」与编辑器起点 | `web/__tests__/views/settings/refresh-interval-page.test.ts` ·「生效 30 秒 → 起点是 30 而不是 18」「生效 18 秒」「读完但没有生效值」「选了 10 秒」「读取失败」「按 60 秒再保存」 | 那句话与起点都取**此刻在跑的**数（30/18 各一句）、读不到时说「未读到设置」且不印「只是起点」那句、保存写回的请求体是选中那一档且写完那句话跟着改 | 2 |
+| 站点选择器的键盘（打开 / 移动高亮 / 回车选中 + 重读 / Escape 关且不动值） | `e2e` ·场景「站台大屏」 ·「关着时上/下键不开面板：开面板是原生激活那条路」「Enter 打开面板并列出候选」「下键建立高亮，且恰有一项（reka 的 data-highlighted）」「再按一次把高亮移到另一项」「回车拿走的是高亮那一项」「Escape 关掉面板且不动值」 | 真按键打到真浏览器：高亮读 reka 的 `data-highlighted`、回车后 `trigger` 换成高亮那一站且 `/live` 重读过；**背景**：组件换成 reka 的 Combobox 后，宿主（不冒泡、不跑默认动作）量不到这些，单元层只剩「本组件不抢键」那半 | 3 |
+| **节拍听谁的：设置页的选择（DB）> 环境变量 > 启动参数 > 默认 18s** | `server/__tests__/refresh-interval.test.ts` ·「三处都给了：用设置页那个」「设置页没选过（NULL）：落到环境变量」「设置页与环境变量都没有：用启动参数」「三处都没有：undefined，交给构造时落默认 18」「环境变量读不出数就当它没给，不吃掉后面的来源」「这条链不钳制取值」 | 六种来源组合各给出确定的答案；`abc` 这类读不出数的环境变量被当作「没给」而不是「给过」；**接线**另有三条源码断言：`buildApp` 把来源喂给那条链、`index.ts` 不再自己解析环境变量、`app.ts` 里那个环境变量也只读一次（曾经两处各写一份、对无效值的判法还不一样） | 1 |
+| **接口答出的「生效节拍」就是此刻在跑的** | `server/__tests__/refresh-interval.test.ts` ·「没选过 + 环境变量 30 → 答 30，而不是存储行说的 18」「选过 10 → 答 10：环境变量的 30 盖不掉使用者的选择」「清空选择（PATCH null）→ 回到环境变量的 30，与重启后同一个答案」「两个来源都没有 → 18」 | 真 app + `inject`：读的答复（与写回的答复）里的 `effectiveRefreshIntervalSec` 逐个相等；清空之后那一列回到 NULL 而行还在，且节拍落到**与环境变量一致**的 30 —— 同一份存储状态不因「有没有重启过」得到两个节拍 | 2 |
+
+**如实说明**：这条优先级的**规则**有纯函数（`resolvePollIntervalSec`）与它的用例，**接线**由三条源码断言钉住，
+「此刻在跑几秒」由接口答出并有真 app 的用例（含清空后与重启同一个答案）；
+仍没有测试的是服务自身的定时器真的按那个数触发一次 —— 那要观测真实推送节奏，属浏览器层，未做。
 
 ## F12 · 车厢拥挤度
 
@@ -273,8 +288,32 @@
 3. **F7 加到主屏**：安装面的字段、图标与「不加 worker、不加推送」已逐条钉住；仍**未覆盖**
    真实安装与「点一下直达」的端到端 —— 属浏览器 e2e。
 4. **F13**：存储迁移本体（008 迁移 + 导入 + DB 加载路径）—— **代码未实施，无 spec**。既有覆写机制有覆盖。
+5. **「此刻在跑的节拍」与「轮询真的按它跑」之间那一步**：接口答出的生效值有 spec（F11 第 5 行），
+   来源规则与清空的回落也都有；仍**未覆盖**服务自身的定时器真的按 N 秒触发一次 ——
+   观测它要靠真实推送节奏，属浏览器层，未做。
+6. **关注站的写入界面**：`web/__tests__/views/overview/` 下有卡片空态与回退链的用例，但
+   `views/overview/components/followed-station-sheet.vue`（保存与清除的差异合并）与
+   `stores/transit.store.ts` 的 `setFollowedStation` 仍**无 spec** —— 面板把哪几个方向送回去、
+   清除时送什么，目前只有实现本身说了算（落库那半已在 F1 的 `api/f1-followed-station.test.ts` 钉住）。
+7. **环线分组**（`line-group.ts` 的 `normalizeGroupName` / `isLoopPair`）：`groupLineSummaries` 的用例
+   全是普通线路名，**没有 300内 / 300外 这一对**；「环线必须双向确认、单个 X 内不得误伤」这条
+   判据目前没有用例。混搭后缀的限制已写进 `isLoopPair` 的注释（实测数据里都是同风格成对）。
+8. **城市码的新增与归一**：`cities.ts` 的新城市（006 / 040 / 014 / 036 / 017）与 `normalizeCityCode`
+   的别名归一，唯一断言它的 `multi-city-smoke.live.test.ts` 是 `describe.skip`（默认恒跳过）。
+9. **`use-commute-purpose` 的 hook 形态**（60 秒 tick 与卸载清理）：纯函数 `purposeForMinutes` 有 spec，
+   但 `useCommutePurpose` 的读取与定时器**无 spec**。
+10. **「在本站」的 20 米阈值**：`at-platform-arrival.test.ts` 用的是 60 米（35 / 20 两档都落在它之外，
+    而阈值本身已从 35 改成 20 米，注释同步过了），即阈值那一侧没有用例。
+11. **`db/client.ts` 的「DATABASE_URL 配了但连不上 → 直接报错、不回退内存」**：`db-connection-guard.test.ts`
+    的 pg 桩 `connect` 恒成功，走不到那个 `catch`。
 
 ## 变异验证（本次实做）
+
+> **下面的摘要是「当时那一版」文件的**：此后这些文件又被后续改动过，故它们**不再等于现在盘上的文件**
+> （2026-10 复核：`app.ts`、`router/index.ts`、`services/transit.service.ts`、`db/client.ts`、
+> `schemas/api.ts`、`geo.ts`、`views/settings/anchor-detail.vue` 七个已与表里不同；`013` 迁移、
+> `anchors.ts`、`schemas/gis.ts`、`amap-gis.service.ts` 四个仍未变）。
+> 表本身记录的是「那一次改坏确实被抓到了」，不是「当前文件的指纹」—— 要恢复这个用途就得重跑一遍。
 
 对从未验证过承重的路径各自改坏一次，对应 spec 均变红后从副本复原、`sha256` 核对一致
 （1–4 是前一批，5–8 是本批新增的三支 spec 与建库脚本那支）：

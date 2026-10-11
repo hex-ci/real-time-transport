@@ -395,6 +395,12 @@ export class Database {
         eveningStopOrder: f.eveningStopOrder ?? undefined,
         morningDirection: f.morningDirection ?? null,
         eveningDirection: f.eveningDirection ?? null,
+        // 关注站与上面那些成对字段一样：写路径存了它，读路径就必须交回它 ——
+        // 少了这四行，内存路径上「设过的关注站」读起来永远像没设过。
+        followedStopName0: f.followedStopName0 ?? undefined,
+        followedStopOrder0: f.followedStopOrder0 ?? undefined,
+        followedStopName1: f.followedStopName1 ?? undefined,
+        followedStopOrder1: f.followedStopOrder1 ?? undefined,
         displayOrder: f.displayOrder ?? 0,
         createdAt: f.createdAt,
         isPinned: f.isPinned ?? false,

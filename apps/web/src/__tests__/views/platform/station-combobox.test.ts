@@ -139,9 +139,13 @@ function minuteSpans(host: MountedHost): string[] {
     .map(item => item.text.trim())
 }
 
-/** 一次按键，按浏览器投递 keydown 的方式送给渲染出的节点。 */
-function keydown(element: HostElement, key: string): boolean {
+/**
+ * 一次按键，按浏览器投递 keydown 的方式送给渲染出的节点，并记下这次按键被本组件怎么处置 ——
+ * 是改了默认行为，还是挡住了冒泡。
+ */
+function keydown(element: HostElement, key: string): { prevented: boolean, stopped: boolean } {
   let prevented = false
+  let stopped = false
   const handler = element.props.onKeydown
   const handlers = Array.isArray(handler) ? handler : [handler]
   const event = {
@@ -151,10 +155,10 @@ function keydown(element: HostElement, key: string): boolean {
     currentTarget: element,
     preventDefault: () => { prevented = true },
     get defaultPrevented() { return prevented },
-    stopPropagation: () => {},
+    stopPropagation: () => { stopped = true },
   }
   for (const each of handlers) each?.(event)
-  return prevented
+  return { prevented, stopped }
 }
 
 const liveOf = (host: MountedHost): RecordedRequest[] => host.server.seen(/\/live/)
@@ -209,40 +213,32 @@ describe('屏上的站台选择器是共用的带搜索的下拉，不是原生 
   })
 })
 
-describe('键盘也能用：开 / 移动 / 选中 / 关上', () => {
-  it('下键开面板、上下移动高亮、Escape 关上', async () => {
+/**
+ * 键盘：按键由 reka 承担，本组件不抢（与 `searchable-combobox.test.ts` 同一份契约）。
+ *
+ * 面板的打开是浏览器对触发器的**原生激活**（Enter / Space），打开之后的移动、选中与关闭都在面板
+ * （`role=listbox`）那一层由 reka 处理。本仓的宿主只把事件交给被按的那个节点自己的处理器，不冒泡、
+ * 也不跑浏览器的默认动作，所以那些行为在这里量不到 —— 它们在 `tests/e2e/scenarios/platform.mjs`
+ * 的真浏览器键盘场景里钉。这一节钉的是组件自己那一半：不抢键、不把输入冒泡出去。
+ */
+describe('键盘：按键交给 reka，本组件不抢', () => {
+  it('触发器上没有本组件的按键处理；搜索框只放行三个导航键，其余键挡冒泡', async () => {
     const host = await mountPlatform()
     expect(searchBoxOf(host)).toBeNull()
 
-    keydown(triggerOf(host), 'ArrowDown')
-    await host.flush()
-    expect(optionsOf(host)).toHaveLength(3)
+    expect(triggerOf(host).props.onKeydown, '触发器又自己处理按键了').toBeUndefined()
 
-    keydown(triggerOf(host), 'ArrowUp')
-    await host.flush()
-    expect(optionsOf(host)).toHaveLength(3)
-
-    keydown(triggerOf(host), 'Escape')
-    await host.flush()
-    expect(searchBoxOf(host)).toBeNull()
-    host.unmount()
-  })
-
-  it('回车选中高亮的那一个，并像点一下那样重读车况', async () => {
-    const host = await mountPlatform()
-    const target = otherStation(host)
     await press(host, triggerOf(host))
+    const search = searchBoxOf(host)!
+    for (const key of ['ArrowDown', 'ArrowUp', 'Escape']) {
+      const handled = keydown(search, key)
+      expect(handled.prevented, `${key} 被本组件改了默认行为`).toBe(false)
+      expect(handled.stopped, `${key} 在本组件里被挡住冒泡`).toBe(false)
+    }
 
-    const before = liveOf(host).length
-    // 敲进站名后只剩它一个候选，高亮落回第一个候选上，回车拿走的就是它。
-    await type(host, searchBoxOf(host)!, target)
-    keydown(searchBoxOf(host)!, 'Enter')
-    await host.flush()
-
-    expect(optionsOf(host), '回车后面板没关').toEqual([])
-    expect(host.textOf(triggerOf(host))).toContain(target)
-    expect(liveOf(host).length, '回车没有触发重读').toBeGreaterThan(before)
-    expect(orderOf(liveOf(host).at(-1)!.url)).toBe(ORDER_OF[target])
+    const typed = keydown(search, 'a')
+    expect(typed.prevented).toBe(false)
+    expect(typed.stopped, '输入漏到了页面上的其它监听器').toBe(true)
     host.unmount()
   })
 })

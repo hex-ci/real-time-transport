@@ -135,6 +135,7 @@ interface LiveBus {
 function detailOf(lineId: string, stops: Station[], direction: number): Record<string, unknown> {
   return {
     lineId,
+    lineName: '52',
     direction,
     directionName: direction === 0 ? '开往 靛厂新村' : '开往 潘道庙',
     otherDirectionLineId: direction === 0 ? DOWN : UP,

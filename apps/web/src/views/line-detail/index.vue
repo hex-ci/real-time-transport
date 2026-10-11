@@ -525,7 +525,7 @@ async function computeWalkDecision(): Promise<void> {
  * 本站，会误判为"在本站"。必须用连续里程。
  */
 function isBusAtPlatform(b: { travelTimeSec?: number, distanceFromStart?: number, nextOrder?: number }, targetOrder: number): boolean {
-  // 上游明确说在站上（travelTime 0）
+  // 来源明确说车在站上（travelTime 0）
   if (b.travelTimeSec === 0) return true
   // 里程在站台 20 米内
   const sd = currentLineDetail.value?.stationDistances
@@ -593,7 +593,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next > targetOrder
     })
-    // 「在本站」必须用连续里程判（35 米内），不能用离散 order：
+    // 「在本站」必须用连续里程判（20 米内），不能用离散 order：
     // b.order 是"刚经过的站"，车开到半路时 order 还停在本站，会误判。
     // 标准与服务端 isAtStation 一致。
     const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))

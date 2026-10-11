@@ -106,6 +106,7 @@ const FAVOURITE = {
 /** 上游方向 0 的那条线（收藏行编号里的方向 1）。桩件点的是首站，所以首站不是上车点那一站。 */
 const DETAIL_UP = {
   lineId: UP,
+  lineName: '52',
   direction: 0,
   directionName: '开往 靛厂新村',
   otherDirectionLineId: DOWN,
@@ -120,6 +121,7 @@ const DETAIL_UP = {
 /** 上游方向 1 的那条线（收藏行编号里的方向 0，也就是早上那条）。 */
 const DETAIL_DOWN = {
   lineId: DOWN,
+  lineName: '52',
   direction: 1,
   directionName: '开往 潘道庙',
   otherDirectionLineId: UP,
@@ -133,6 +135,7 @@ const DETAIL_DOWN = {
 
 const SUBWAY_DETAIL = {
   lineId: 'subway_027_1',
+  lineName: '地铁1号线',
   direction: 1,
   directionName: '开往 青龙湖东',
   otherDirectionLineId: 'subway_027_1',

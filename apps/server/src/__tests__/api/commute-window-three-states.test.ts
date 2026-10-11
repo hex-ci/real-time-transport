@@ -34,10 +34,19 @@ describeEachStore('通勤时段的三态', (store) => {
     await api?.close()
   })
 
-  async function readSettings(): Promise<{ settingsState: string, data: Record<string, unknown> | null }> {
+  async function readSettings(): Promise<{
+    /** 服务端此刻生效的节拍（秒）：读的答复里总带着它，界面照它说「默认每 N 秒」。 */
+    effectiveRefreshIntervalSec: number
+    settingsState: string
+    data: Record<string, unknown> | null
+  }> {
     const res = await api.inject({ method: 'GET', url: '/api/transit/settings' })
     expect(res.statusCode, res.body).toBe(200)
-    return res.json() as { settingsState: string, data: Record<string, unknown> | null }
+    return res.json() as {
+      effectiveRefreshIntervalSec: number
+      settingsState: string
+      data: Record<string, unknown> | null
+    }
   }
 
   async function readWindowState(): Promise<{ windowState: string, description: string }> {
@@ -57,7 +66,13 @@ describeEachStore('通勤时段的三态', (store) => {
   }
 
   it('第一态：从没存过行 —— unset、data 为 null、档案说未设置', async () => {
-    expect(await readSettings()).toEqual({ success: true, settingsState: 'unset', data: null })
+    expect(await readSettings()).toEqual({
+      success: true,
+      settingsState: 'unset',
+      data: null,
+      // 没存过行时在跑的就是默认的 18 秒（这个库里没配环境变量）。
+      effectiveRefreshIntervalSec: 18,
+    })
 
     const profile = await readWindowState()
     expect(profile.windowState).toBe('unset')

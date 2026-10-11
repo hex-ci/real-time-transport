@@ -29,9 +29,13 @@ cp .env.prod.example .env.prod
 #   - 填 AMAP_MAPS_API_KEY（逆地理编码，仅服务端使用）
 #   - CHELAILE_SIGN_SALT / CHELAILE_AES_KEY 留空即用代码内置默认值
 #   - TRANSIT_SIMULATION 生产必须 false
+#   - TRANSIT_POLL_INTERVAL_SEC 只是回退值：设置页里的「实时刷新间隔」优先于它
+#     （两者的关系见 docs/PRD.md F11 的补充条款）
 ```
 
 `DATABASE_URL` 中的主机名是 compose 服务名 `postgres`（容器内 DNS），不是 localhost。
+**配了但连不上时服务直接起不来**（不静默回退内存存储）：日志里会是那条 PostgreSQL 连接失败的错误，
+先查容器是否 Up 与密码是否一致。
 
 ## 部署
 

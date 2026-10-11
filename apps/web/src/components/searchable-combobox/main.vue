@@ -27,8 +27,10 @@ import type { ComboboxOption, OptionsMatch, SelectedText } from './types'
  * 而不是去列表里找一个碰巧同名的主文本。可访问名由调用方给：周围文字区分不开两个同类控件时，
  * 只有调用方知道该叫它什么。
  *
- * 键盘在两种焦点位置都能用（触发器与搜索框）：面板打开后焦点仍停在触发器（上面那一条），
- * 故上/下、回车、Escape 由本组件自己处理，不依赖焦点落进面板。
+ * 键盘由 reka 承担：打开面板走浏览器对触发器的原生激活（Enter / Space），打开之后的上/下移动高亮、
+ * 回车选中与 Escape 关闭都由 reka 在面板（`role=listbox`）那一层处理 —— 两条路在真浏览器里都通
+ * （`tests/e2e/scenarios/platform.mjs` 的键盘场景钉住）。本组件自己只做一件事：搜索框上的
+ * Escape / 上 / 下不拦截（原样放行给 reka），其余键挡住冒泡，免得输入漏到页面上的其它监听器。
  */
 const {
   selected = null,

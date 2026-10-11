@@ -50,7 +50,9 @@ afterEach(() => {
 })
 
 /**
- * 线上形式的实时读数：两站一车，没有轨迹，所以提供方从站表解出几何，恰好只花一次请求。
+ * 全量接口（`encryptedLineDetail`）的线上形态：线路 + 站表 + 车辆。
+ * 没有 `jxPath`（轨迹另有一条 URL），故它既是「上游没答」的表达方式，也是提供方为几何
+ * 再花一次请求的原因 —— 见下面的 `COLD_LIVE_READ`。
  */
 const liveBody = JSON.stringify({
   jsonr: {
@@ -66,6 +68,35 @@ const liveBody = JSON.stringify({
 })
 
 /**
+ * 轻量接口（`encryptedBusDetail`）的线上形态：只有车辆，没有站表、没有 `jxPath` ——
+ * 车来了官方小程序就是「首屏全量 + 轮询走轻量」这个双接口结构，提供方也优先用它。
+ */
+const lightLiveBody = JSON.stringify({
+  jsonr: {
+    data: {
+      line: { name: LINE_ID, direction: 0, firstTime: '05:00', lastTime: '23:00' },
+      buses: [{ busId: 'v1', order: 2, distanceToWaitStn: 900, mileage: 300, speed: 6 }],
+    },
+  },
+})
+
+/**
+ * 一次实时读数花掉的上游请求，按接口名列出。
+ *
+ * 轻量载荷不带 `jxPath`，几何只能从全量接口拿（`chelaile.ts` 的 `fetchRouteGeometry`），
+ * 于是某条线路在本进程里的**第一次**实时读是两次：轻量 + 几何全量。几何的结论（含「这条线
+ * 没有轨迹」这个负结论）随即进缓存，之后的读数只花轻量那一次。
+ *
+ * 因此这里的断言数的是**接口序列**，不是裸的请求个数：多一次几何补读是设计，多一次读数才是缺陷。
+ */
+const COLD_LIVE_READ = ['encryptedBusDetail', 'encryptedLineDetail']
+const WARM_LIVE_READ = ['encryptedBusDetail']
+
+function endpointsOf(urls: string[]): string[] {
+  return urls.map(href => href.match(/line!(\w+)\.action/)?.[1] ?? 'other')
+}
+
+/**
  * 服务端能触到的每个上游的计数替身。所有提供方都经 `fetch` 发 HTTP，所以这里没有测试花真实配额。
  *
  * `unavailable` 给出提供方读不了的主体（没有 `jsonr.data`），不可达的上游就是这样到达服务的：
@@ -78,6 +109,9 @@ function stubUpstream(): { urls: string[], mode: 'ok' | 'unavailable' } {
     const href = String(url)
     state.urls.push(href)
 
+    if (href.includes('encryptedBusDetail')) {
+      return state.mode === 'ok' ? body(lightLiveBody) : body(JSON.stringify({ jsonr: {} }))
+    }
     if (!href.includes('encryptedLineDetail')) return body(JSON.stringify({ jsonr: { data: {} } }))
     return state.mode === 'ok' ? body(liveBody) : body(JSON.stringify({ jsonr: {} }))
   }))
@@ -208,6 +242,9 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
     const app = await buildApp()
     try {
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
+      // 这条线在本进程里的第一次实时读：轻量 + 一次几何全量（见 COLD_LIVE_READ）。
+      expect(endpointsOf(upstream.urls)).toEqual(COLD_LIVE_READ)
+      const spentByFirst = upstream.urls.length
 
       // 一秒之后，另一块屏幕问另一条线路。
       // 按线路给窗口设键，两块屏幕就能各刷一次，按需的上游读取随之翻倍。
@@ -216,7 +253,8 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
 
       expect(second.statusCode, second.body).toBe(429)
       expect(second.json().data.throttled).toBe(true)
-      expect(upstream.urls.length).toBe(1)
+      // 被拒的那一次一个币都没花：窗口按用户算，换一条线路也在同一个窗口里。
+      expect(upstream.urls.length).toBe(spentByFirst)
     }
     finally {
       await app.close()
@@ -264,6 +302,9 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
 
       expect(third.statusCode, third.body).toBe(200)
       expect(upstream.urls.length).toBeGreaterThan(spentByFirst)
+      // 几何（含「这条线没有轨迹」这个负结论）在本进程里已经读过一次，故这一次只剩轻量那一次：
+      // 窗口打开换来的是「重读读数」，而不是「重读这条线的所有上游数据」。
+      expect(endpointsOf(upstream.urls.slice(spentByFirst))).toEqual(WARM_LIVE_READ)
       // 这里证明的是「窗口打开」：报出的时刻是新读数的，取自冷却到期的那一刻。它不证明失效 ——
       // 把 `invalidateLive` 换成空操作，这个测试照样通过；失效由数提供方读取次数的那些测试来测。
       expect(third.json().data.lines[0].lastUpdatedAt).toBe(T0_MS + LIVE_CADENCE_MS)
@@ -285,23 +326,27 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
           + '?direction=0&count=3&cityCode=027&order=2',
       })
 
+      // 只数「读这条线的实时数据」那一次轻量读：几何补读与站表读取不是读数。
+      const liveReads = () => endpointsOf(upstream.urls)
+        .filter(endpoint => endpoint === 'encryptedBusDetail').length
+
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
 
       // 站牌在窗口允许下一次按的时刻打开：它读自己的按站条目，站表来自线路详情缓存（长 TTL 数据），
-      // 所以这里恰好花掉一次上游读取。
+      // 几何也已经读过，所以这里恰好只花一次实时读数。
       vi.setSystemTime(T0_MS + LIVE_CADENCE_MS)
       expect((await board()).statusCode).toBe(200)
-      const afterBoard = upstream.urls.length
+      const afterBoard = liveReads()
 
       // 同一时刻，第二次按：它自己的读数是整条线路的那一次。
       expect((await refresh(app, [target(LINE_ID)])).statusCode).toBe(200)
-      const afterRefresh = upstream.urls.length
+      const afterRefresh = liveReads()
       expect(afterRefresh).toBeGreaterThan(afterBoard)
 
       // 站牌紧接着在缓存窗口之内再问一次：它的条目刚被预热过；只丢掉整线键的那一次按下，会让这次
-      // 读由那个条目作答，一个币都不花。
+      // 读由那个条目作答，一个币都不花。读数多出一次，正是「刷新把按站的那条键也丢掉了」。
       expect((await board()).statusCode).toBe(200)
-      expect(upstream.urls.length).toBe(afterRefresh + 1)
+      expect(liveReads()).toBe(afterRefresh + 1)
     }
     finally {
       await app.close()
@@ -318,7 +363,8 @@ describe('F11: one refresh per cooldown per user, shared by every screen', () =>
 
       expect(res.statusCode, res.body).toBe(200)
       expect(res.json().data.lines).toHaveLength(1)
-      expect(upstream.urls.length).toBe(1)
+      // 重复点名仍是一次读数：冷态的一次读数 = 轻量 + 几何全量，而不是两套。
+      expect(endpointsOf(upstream.urls)).toEqual(COLD_LIVE_READ)
     }
     finally {
       await app.close()

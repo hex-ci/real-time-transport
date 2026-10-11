@@ -18,7 +18,7 @@ import {
   type UpdateSettings,
   type UserFavoriteLine,
 } from '@real-time-transport/shared'
-import { TransitService } from './services/transit.service.js'
+import { TransitService, resolvePollIntervalSec } from './services/transit.service.js'
 import { Database, databaseUrlFor, isUniqueViolation } from './db/client.js'
 import { resolveUserId } from './user-id.js'
 import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
@@ -255,19 +255,26 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const db = new Database(dbUrl)
   await db.init()
 
-  // 实时刷新间隔的优先级：用户在设置页的选择 > 环境变量 > 默认 18s。
-  // DB 里 null 即"没选过"，走后面的回退；normalize 在 TransitService 构造里统一做。
+  // 实时刷新间隔的优先级：用户在设置页的选择（DB）> 环境变量 > 启动参数 > 默认 18s。
+  // 这条链只在一处实现（`resolvePollIntervalSec`），这里只把来源喂进去；
+  // 取值的钳制与默认值由 TransitService 构造里的 `normalizePollIntervalSec` 统一做。
+  //
+  // 环境变量只在这个函数里被读这一次：启动时的解析与「设置页清空选择」时的回落是同一个答案，
+  // 两处各读一次的话，同一份存储状态会因为「有没有重启过」得到两个节拍。
+  const pollIntervalFallbackSec = resolvePollIntervalSec({
+    fromEnv: process.env.TRANSIT_POLL_INTERVAL_SEC,
+    explicit: options.pollIntervalSec,
+  })
   const storedSettings = await db.getUserSettings().catch(() => null)
-  const configuredIntervalSec = storedSettings?.refreshIntervalSec
-    ?? (process.env.TRANSIT_POLL_INTERVAL_SEC ? Number(process.env.TRANSIT_POLL_INTERVAL_SEC) : undefined)
+  const pollIntervalSec = resolvePollIntervalSec({
+    stored: storedSettings?.refreshIntervalSec,
+    fromEnv: pollIntervalFallbackSec,
+  })
 
   const transitService = new TransitService(db, {
     apizeroKey: options.apizeroKey || process.env.APIZERO_KEY,
     amapKey: options.amapKey,
-    // configuredIntervalSec 已含"DB > 环境变量"的回退链，options 只是显式传入时的兜底：
-    // 顺序反了会让环境变量盖掉用户在设置页的选择（DB），启动日志却打印 DB 的值，
-    // 表现为"日志说 10s、实际跑 18s"。
-    pollIntervalSec: configuredIntervalSec ?? options.pollIntervalSec,
+    pollIntervalSec,
   })
 
   app.addHook('onClose', async () => {
@@ -656,10 +663,14 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   app.get('/api/transit/settings', async (req) => {
     const userId = resolveUserId(req)
     const stored = await db.getUserSettings(userId)
+    // 「此刻生效的节拍」是服务端在跑的那个数，未必等于存储行里的值：没选过时它由环境变量/启动参数决定。
+    // 界面那句「默认 18 秒」必须说这个数 —— 运维改过 TRANSIT_POLL_INTERVAL_SEC 之后，
+    // 照存储行说出来的那句话就成了假的。
+    const effectiveRefreshIntervalSec = transitService.getPollIntervalSec()
     if (!stored) {
-      return { success: true, settingsState: 'unset', data: null }
+      return { success: true, settingsState: 'unset', data: null, effectiveRefreshIntervalSec }
     }
-    return { success: true, settingsState: 'stored', data: stored }
+    return { success: true, settingsState: 'stored', data: stored, effectiveRefreshIntervalSec }
   })
 
   app.patch('/api/transit/settings', async (req, reply) => {
@@ -683,12 +694,20 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
 
     const saved = await db.saveUserSettings(resolveUserId(req), { ...body.data, ...anchors.patch })
     // 刷新间隔改了就即时生效：不断服务，不断 WS —— 只重启轮询节拍。
-    // schema 已把取值钳在 10~120（UpdateSettingsSchema），这里只处理"带了该字段"的情况；
-    // 传 null 表示清掉选择，回退默认 18s。
+    // schema 已把取值钳在 10~120（UpdateSettingsSchema），这里只处理"带了该字段"的情况。
+    // 传 null 表示清掉选择：那就回到启动时那个「没选过」的答案（`pollIntervalFallbackSec`，
+    // 同一份环境变量/启动参数），而不是在这里硬落 18 —— 否则同一份存储状态会因为
+    // 「有没有重启过」得到两个节拍。
     if (body.data.refreshIntervalSec !== undefined) {
-      transitService.setPollIntervalSec(body.data.refreshIntervalSec ?? undefined)
+      transitService.setPollIntervalSec(body.data.refreshIntervalSec ?? pollIntervalFallbackSec)
     }
-    return { success: true, settingsState: 'stored', data: saved }
+    // 答复与 GET 一样携带状态，并说清此刻在跑的节拍。
+    return {
+      success: true,
+      settingsState: 'stored',
+      data: saved,
+      effectiveRefreshIntervalSec: transitService.getPollIntervalSec(),
+    }
   })
 
   // F10：通勤链路。一条链路是命名的、有序的乘车腿序列 —— 每条腿是一条线路加上车站与下车站 ——

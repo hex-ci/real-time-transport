@@ -275,21 +275,23 @@ describe('操作栏始终贴着卡片底边', () => {
       'utf-8',
     )
     // 面板不 `grow` 时，富余空间落在面板外面 —— 同一行里内容少的卡片会被邻居拉高，于是露出浅色底，
-    // 深浅两块的比例随行内邻居而变。四种面板（加载 / 附近空 / 通勤段空 / 有内容）一个都不能漏：
-    // 上一版这条断言只覆盖了前三种，第四种就是这么漏过去的（实测把卡高拉长 90px，它纹丝不动）。
+    // 深浅两块的比例随行内邻居而变。五块面板（加载 / 附近空 / 通勤段空 / 占位行 / 有内容）一个都不能漏：
+    // 上一版这条断言只覆盖了前三种，第四种就是这么漏过去的（实测把卡高拉长 90px，它纹丝不动）；
+    // 占位行是后加的一种，属同一类缺陷，故一并钉住。
     const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
-    expect(panels).toHaveLength(4)
+    expect(panels).toHaveLength(5)
     for (const cls of panels) expect(cls).toContain('grow')
 
+    // 四块空/加载面板的文字垂直居中（有内容那一块是正文，不居中）。
     const emptyPanels = panels.filter((c: string) => !c.includes('space-y-2.5'))
-    expect(emptyPanels).toHaveLength(3)
+    expect(emptyPanels).toHaveLength(4)
     for (const cls of emptyPanels) {
       expect(cls).toContain('items-center')
       expect(cls).toContain('justify-center')
     }
   })
 
-  it('四块面板同一圆角 —— 同一个盒子不因「这次有没有数据」换形状', () => {
+  it('五块面板同一圆角 —— 同一个盒子不因「这次有没有数据」换形状', async () => {
     const source = readFileSync(
       fileURLToPath(new URL('../../../views/overview/components/line-mini-card.vue', import.meta.url)),
       'utf-8',
@@ -297,7 +299,7 @@ describe('操作栏始终贴着卡片底边', () => {
     // 12px 是这一类内嵌面板在仓库里的既有约定（同卡的线路徽标、线路详情那几块都是它），
     // 而徽标恰好也是 36px 高 —— 与 375 下的通知面板同尺寸，故不存在「太圆了像胶囊」。
     const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
-    expect(panels).toHaveLength(4)
+    expect(panels).toHaveLength(5)
     const radii = new Set(panels.map((c: string) => c.match(/rounded-[a-z0-9]+/)?.[0]))
     expect([...radii]).toEqual(['rounded-xl'])
   })
@@ -308,9 +310,9 @@ describe('操作栏始终贴着卡片底边', () => {
       'utf-8',
     )
     // 面板曾经是 `my-3.5`，于是它到操作栏之间是 14 + 16 = 30px，而卡片内其余间距都在 10~16px：
-    // 同一张卡里一处比别处大一倍，看起来像内容与动作分成了两块。四块面板一个都不能漏。
+    // 同一张卡里一处比别处大一倍，看起来像内容与动作分成了两块。五块面板一个都不能漏。
     const panels = source.match(/class="[^"]*bg-slate-950\/80[^"]*"/g) ?? []
-    expect(panels).toHaveLength(4)
+    expect(panels).toHaveLength(5)
     for (const cls of panels) {
       expect(cls).toContain('mt-3.5')
       expect(cls).not.toContain('my-3.5')

@@ -328,4 +328,63 @@ export async function run({ check, note, fixtures }) {
   )
   const movedTo = await pageEval(`JSON.stringify(document.querySelector('main button[aria-label="选择站台"]')?.innerText.trim() ?? null)`)
   check('选择器显示换过去的那个站', movedTo === target, `期望 ${JSON.stringify(target)}，实际 ${JSON.stringify(movedTo)}`)
+
+  // ---- 键盘：交给 reka，在真浏览器里真的通 -----------------------------------------
+  // 组件侧的契约写在 `apps/web/src/components/searchable-combobox/main.vue`：打开面板走浏览器对
+  // 触发器的原生激活（Enter / Space），打开之后的上下移动、回车选中与 Escape 关闭由 reka 在面板
+  // 那一层处理。单元宿主只把事件交给被按的节点自己、不冒泡也不跑默认动作，量不到这些 —— 只有
+  // 真按键能证明它们还在，故这一节用 playwright 的按键打。
+  const PANEL_COUNT = `JSON.stringify(document.querySelectorAll('[role=listbox]').length)`
+  const TRIGGER_TEXT = `JSON.stringify(document.querySelector('main button[aria-label="选择站台"]')?.innerText.trim() ?? null)`
+  const HIGHLIGHTED = `JSON.stringify([...document.querySelectorAll('[role=option][data-highlighted]')].map(el => el.innerText.trim()))`
+  const focusTrigger = `(() => { const el = document.querySelector('main button[aria-label="选择站台"]'); el.focus(); return document.activeElement === el })()`
+
+  await pageEval(focusTrigger)
+  await cli(['press', 'ArrowDown'])
+  await delay(300)
+  const afterClosedDown = await pageEval(PANEL_COUNT)
+  // 现行契约（2026-10 换成 reka 的那一版）：开面板走 Enter / Space 的原生激活，上/下键不做这件事。
+  check('关着时上/下键不开面板：开面板是原生激活那条路', afterClosedDown === 0, `按键后面板数 ${afterClosedDown}`)
+
+  await cli(['press', 'Enter'])
+  await waitForValue(PANEL_COUNT, count => count > 0, { what: '键盘打开面板', timeout: 10_000 })
+  const openedOptions = await pageEval(`JSON.stringify(document.querySelectorAll('[role=option]').length)`)
+  check('Enter 打开面板并列出候选', typeof openedOptions === 'number' && openedOptions > 0, `${openedOptions} 个候选`)
+
+  // reka 的高亮在按键之后才落到某一项上（打开那一刻还没有），故第一次下键建立高亮、第二次移动它。
+  await cli(['press', 'ArrowDown'])
+  await delay(300)
+  const highlightedFirst = await pageEval(HIGHLIGHTED)
+  check('下键建立高亮，且恰有一项（reka 的 data-highlighted）', (highlightedFirst ?? []).length === 1, JSON.stringify(highlightedFirst))
+
+  await cli(['press', 'ArrowDown'])
+  await delay(300)
+  const highlightedNext = await pageEval(HIGHLIGHTED)
+  check(
+    '再按一次把高亮移到另一项',
+    (highlightedNext ?? []).length === 1 && highlightedNext[0] !== highlightedFirst[0],
+    `${JSON.stringify(highlightedFirst)} → ${JSON.stringify(highlightedNext)}`,
+  )
+
+  await clearRecordedRequests()
+  await cli(['press', 'Enter'])
+  await waitForValue(PANEL_COUNT, count => count === 0, { what: '回车后面板关闭', timeout: 10_000 })
+  await waitForValue(
+    `JSON.stringify((window.__e2eFetch || []).filter(r => r.url.includes('/live?')).length)`,
+    count => typeof count === 'number' && count > 0,
+    { what: '回车选站后真的重读了实时数据', timeout: 20_000 },
+  )
+  const afterEnter = await pageEval(TRIGGER_TEXT)
+  check('回车拿走的是高亮那一项', afterEnter === highlightedNext[0], `高亮 ${JSON.stringify(highlightedNext)}，屏上 ${JSON.stringify(afterEnter)}`)
+
+  // Escape：关掉面板，值一动不动。
+  await pageEval(focusTrigger)
+  await cli(['press', 'Enter'])
+  await waitForValue(PANEL_COUNT, count => count > 0, { what: '再次打开面板', timeout: 10_000 })
+  const beforeEscape = await pageEval(TRIGGER_TEXT)
+  await cli(['press', 'Escape'])
+  await waitForValue(PANEL_COUNT, count => count === 0, { what: 'Escape 关掉面板', timeout: 10_000 })
+  const afterEscape = await pageEval(TRIGGER_TEXT)
+  check('Escape 关掉面板且不动值', afterEscape === beforeEscape, `${JSON.stringify(beforeEscape)} → ${JSON.stringify(afterEscape)}`)
+  note(`Escape 关闭后焦点落在 ${await pageEval(`JSON.stringify(document.activeElement?.tagName ?? null)`)}——当前实现不把它还给触发器`)
 }

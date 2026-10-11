@@ -15,12 +15,13 @@ import AnchorDetailPage from '../../../views/settings/anchor-detail.vue'
 import ChainsPage from '../../../views/settings/chains.vue'
 import ChainEditorPage from '../../../views/settings/chain-editor.vue'
 import RemovalDialog from '../../../views/settings/components/removal-dialog.vue'
+import RefreshIntervalPage from '../../../views/settings/refresh-interval.vue'
 import OverviewEmptyState from '@/views/overview/components/empty-state.vue'
 import ChainEmptyState from '@/views/commute-chain/components/chain-empty-state.vue'
 import { emptyStateOf } from '@/views/commute-chain/empty-state'
 
 /**
- * `设置` 拆分成的四个子页面，以及拆分后必须跟上的三个应用内指针。
+ * `设置` 拆分成的五个子页面，以及拆分后必须跟上的应用内指针。
  *
  * 三项断言，各由**渲染出的东西**而非源码所说守住：
  *
@@ -201,6 +202,7 @@ const PAGES = [
   // 一条关注线路自己的页面：它退到**关注线路列表**，不是设置索引 —— 从这一条退出去跳过列表
   // 那一层，用户就回不到他刚才在编的那一条所在的那一屏。
   { name: 'favorite-editor', component: FavoriteEditorPage, heading: '编辑', props: { favoriteId: 'fav-1' }, back: { href: '/settings/lines', words: '返回关注线路' } },
+  { name: 'refresh-interval', component: RefreshIntervalPage, heading: '实时刷新间隔', props: {} },
 ]
 
 describe('子页面各自成页：真正的 h2、应用内的返回控件', () => {

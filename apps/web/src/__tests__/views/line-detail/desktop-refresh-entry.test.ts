@@ -37,6 +37,7 @@ const OPPOSITE = '010-52-1'
 
 const LINE_DETAIL = {
   lineId: LINE,
+  lineName: '52',
   direction: 0,
   directionName: '开往 靛厂新村',
   otherDirectionLineId: OPPOSITE,

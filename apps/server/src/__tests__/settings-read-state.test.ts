@@ -167,7 +167,11 @@ describe('G-D3: the departure reference keeps its own honest answer with no stor
   function stubBusLine(): void {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       const href = String(url)
-      if (!href.includes('encryptedLineDetail')) throw new Error(`unexpected upstream call: ${href}`)
+      // 车来了的两类取数接口都作答：全量（站表/几何）与轻量（车辆）。本套件问的是「有没有多花调用」，
+      // 载荷形状由 adapter 自己的用例管，故这里两者给同一个信封。
+      if (!href.includes('encryptedLineDetail') && !href.includes('encryptedBusDetail')) {
+        throw new Error(`unexpected upstream call: ${href}`)
+      }
       return {
         ok: true,
         status: 200,
@@ -216,8 +220,10 @@ describe('G-D3: the departure reference keeps its own honest answer with no stor
       const data = JSON.parse(res.body).data
 
       expect(data.reference).toEqual({ status: 'anchor-unset', anchor: 'home' })
-      // 没有步行请求：这句话说的是存下来的行。
-      expect(vi.mocked(fetch).mock.calls.filter(c => !String(c[0]).includes('encryptedLineDetail'))).toHaveLength(0)
+      // 没有步行请求、也没有别的上游调用：这句话说的是存下来的行，取数只有车来了那两类接口。
+      expect(vi.mocked(fetch).mock.calls.filter(
+        c => !String(c[0]).includes('encryptedLineDetail') && !String(c[0]).includes('encryptedBusDetail'),
+      )).toHaveLength(0)
       for (const invented of ['06:30', '11:30', '17:00', '22:00']) {
         expect(res.body.includes(invented), `the arrivals answer carries ${invented}`).toBe(false)
       }

@@ -1,5 +1,5 @@
 /**
- * 设置页：四个子页可达、链路列表拖动排序后顺序保持、站点选择器带直线距离与「最近」标记、
+ * 设置页：五个子页可达、链路列表拖动排序后顺序保持、站点选择器带直线距离与「最近」标记、
  * 移动端线路详情头部有上下班方向标识。
  *
  * 「拖动排序后顺序保持」是这一页真正会坏的那件事：拖动是**存储顺序**的编辑，
@@ -36,23 +36,30 @@ async function dragOnto(from, to) {
 }
 
 export async function run({ check, equal, note, fixtures }) {
-  // ---- 四个子页可达 -------------------------------------------------------------
+  // ---- 五个子页可达 -------------------------------------------------------------
   await goto(`${WEB_ORIGIN}/settings`)
   await waitForValue(
     `JSON.stringify([...document.querySelectorAll('main a[href^="/settings/"]')].map(a => a.getAttribute('href')))`,
-    hrefs => Array.isArray(hrefs) && hrefs.length === 4,
-    { what: '设置索引的四行', timeout: 20_000 },
+    hrefs => Array.isArray(hrefs) && hrefs.length === 5,
+    { what: '设置索引的五行', timeout: 20_000 },
   )
   const rows = await pageEval(`JSON.stringify([...document.querySelectorAll('main a[href^="/settings/"]')]
     .map(a => ({ href: a.getAttribute('href'), text: a.innerText.split('\\n')[0] })))`)
-  equal('索引列出四个域（通勤链路紧跟关注线路）', rows.map(r => r.href), ['/settings/lines', '/settings/chains', '/settings/schedule', '/settings/anchors'])
-  note(`四个域：${JSON.stringify(rows.map(r => r.text))}`)
+  equal('索引列出五个域（通勤链路紧跟关注线路）', rows.map(r => r.href), [
+    '/settings/lines',
+    '/settings/chains',
+    '/settings/schedule',
+    '/settings/anchors',
+    '/settings/refresh-interval',
+  ])
+  note(`五个域：${JSON.stringify(rows.map(r => r.text))}`)
 
   const EXPECTED_HEADING = {
     '/settings/lines': '关注线路',
     '/settings/schedule': '通勤时段',
     '/settings/anchors': '位置锚点',
     '/settings/chains': '通勤链路',
+    '/settings/refresh-interval': '实时刷新间隔',
   }
   for (const [href, heading] of Object.entries(EXPECTED_HEADING)) {
     await goto(`${WEB_ORIGIN}${href}`)

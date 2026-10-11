@@ -91,6 +91,13 @@ NNN路                   开往 XX公交场站
 - **无在途车辆** → 按 F3 显示运营状态
 - **数据陈旧或降级** → 按 F4 标记来源；参考行不给。基于陈旧数据说「现在走」比不给更危险
 
+**关注站（第四类锚点，时间无关）**：
+
+- 每条关注线路按**方向**各存一个「关注站」，身份是 (站名, 站序) 一**对**（同 F2 的上车点）。它与上下班上车点是**两件事**：上车点绑在通勤时段与目的上（morning / evening，见 F2 / F10），关注站不随时段变 —— 它是常规实时公交的站点关注（对标车来了的站点关注），解决的是非通勤时段、异地查线时卡片无处可锚的问题。两列可空、无默认值：**未设置是合法状态**，回退链跳过它
+- **附近模式的卡片锚点按这条链取，各方向独立**：GPS 最近站（≤3km 且该方向在该站有站台）→ 关注站[方向] → 早通勤上车站 → 晚通勤上车站。每一跳都要在该方向的站表里定位到**实体站**（站名已改、同名多站、本方向不停这类情形一律跳过，绝不谎报）；GPS 被门控时（如跨城定位看另一城的线）靠后面的回退让卡片仍有到站信息，而不是白板
+- **卡的锚点来自哪一跳要标出来**：回退到关注站或通勤站时，那一行说明它是「关注站」还是「通勤站」，别让使用者以为屏幕在用他的当前位置
+- **设置入口在卡片自己的操作栏里**（「设关注站」），不在设置页：这是「这一条我盯哪一站」的当下动作，与置顶同类 —— 放进设置页就失去意义。面板里保存与清除走同一个出口，一次动作只说一句话
+
 ### F2 · 通勤起终点锚点
 
 保存「家」和「公司」两个位置，作为 F1 参考行的起点，并记下每个锚点的地点名。
@@ -311,6 +318,16 @@ Web 做不了小组件 / 锁屏 / Live Activity / 后台到站围栏（全部要
 
 **边界**：刷新按钮不是绕过缓存的通用后门，它只作用于实时类数据。
 
+**实时节拍可调（设置页 `/settings/refresh-interval`，本页的补充条款）**：
+
+- 这个值是服务端**实时数据的权威节拍**：轮询活跃线路的间隔、聚合器实时缓存的 TTL、手动刷新的冷却 —— **三处同源**，改一处三处一起变。在同一个进程里**热生效**：不重启服务、不断 WS，只重启轮询节拍
+- 取值 **10~120 秒**，非法输入回退默认 **18 秒**。下限是**保护上游**的（车来了 H5 是非公开接口，刷太快有被限流封 IP 的风险），上限是免得读数旧到失去意义；越界值被钳到两端而不是拒绝写入
+- **优先级：使用者在设置页选过的值（DB）> 环境变量 `TRANSIT_POLL_INTERVAL_SEC` > 默认 18 秒。** 环境变量只是回退值，绝不覆盖使用者的选择（顺序反了会表现为「启动日志说 10s、实际跑 18s」）。这条链只在一处实现（`resolvePollIntervalSec`），另有一个只供程序化调用方用的显式参数处在最低一级
+- **「没选过」是 NULL，不是 18**：把 18 存进列里就等于替使用者做了这次选择
+- **此刻在跑几秒要说得出，且界面说的必须是它**：设置读（`GET /api/transit/settings`）与写回的答复都另带一个 `effectiveRefreshIntervalSec` —— 服务端此刻生效的那个数。索引页与 `/settings/refresh-interval` 的「当前」照它说：没选过时是「未设置（默认每 N 秒）」，N 就是它。运维把环境变量改成非 18 之后，照 18 说出来的那句话就是假的
+- **清空选择落到与重启同一个答案**：PATCH `null` 走的是启动时的同一条回退链（环境变量 > 默认），故同一份存储状态不会因为「有没有重启过」得到两个节拍
+- 已开的冷却窗口保留它自己的到期时刻：调快节拍不会把别人手里那个已经在跑的窗口一起改写
+
 ---
 
 ### F12 · 车厢拥挤度
@@ -417,16 +434,17 @@ Web 做不了小组件 / 锁屏 / Live Activity / 后台到站围栏（全部要
    │
    ├── [站台聚合 /platform]   虚拟站台多线起降看板
    │
-   └── [设置 /settings]      设置索引：四行，每行给出该域的当前状态（事实，见 4.1）
+   └── [设置 /settings]      设置索引：五行，每行给出该域的当前状态（事实，见 4.1）
           ├── [关注线路 /settings/lines]     关注线路增删与拖动排序（F9）
           │      └── [编辑一条 /settings/lines/:favoriteId]  该线路的上下班方向与上车点
           ├── [通勤链路 /settings/chains]    链路录入与编辑（线路 + 上车站 + 下车站，逐段录入，见 F10）
           │      ├── [新建 /settings/chains/new]       一条新链路
           │      └── [编辑 /settings/chains/:chainId]  已有链路
           ├── [通勤时段 /settings/schedule]  早晚高峰起止时刻（存 `user_settings`）
-          └── [位置锚点 /settings/anchors]   家 / 公司（F1 参考行的起点，见 F2）
-                 ├── [家 /settings/anchors/home]    搜索地点或抓当前位置 → 保存
-                 └── [公司 /settings/anchors/work]  同一套，文案与图标不同
+          ├── [位置锚点 /settings/anchors]   家 / 公司（F1 参考行的起点，见 F2）
+          │      ├── [家 /settings/anchors/home]    搜索地点或抓当前位置 → 保存
+          │      └── [公司 /settings/anchors/work]  同一套，文案与图标不同
+          └── [实时刷新间隔 /settings/refresh-interval]  实时节拍可调（10~120 秒，见 F11）
 ```
 
 **列表页与编辑页的分工（这一层的判据）**
@@ -458,19 +476,19 @@ Web 做不了小组件 / 锁屏 / Live Activity / 后台到站围栏（全部要
 
 ### 4.1 设置页的页面结构
 
-**改造内容**：把一个 841 行的设置页（`apps/web/src/views/settings/index.vue`，四个域同屏）拆成**一个索引页 + 四个子页面**。这是**纯结构搬移**：同一批控件、同一套行为与数据，只变它们所在的位置。页面树与 URL 见本节上文。
+**改造内容**：把一个 841 行的设置页（`apps/web/src/views/settings/index.vue`，四个域同屏）拆成**一个索引页 + 五个子页面**（第五个「实时刷新间隔」是后加的域，见 F11）。索引页本身是**纯结构搬移**：同一批控件、同一套行为与数据，只变它们所在的位置。页面树与 URL 见本节上文。
 
 **索引行的摘要只陈述事实**：
 
-- 每行给该域**当前的**状态：关注线路给条数、通勤链路给条数、通勤时段给已保存的时刻（写法沿用折叠态，如 `07:00–10:30 · 17:30–21:30` 这样的**实存值**；**没选过就给「未设置」** —— 无论因为从没存过行，还是存过行但从没选过时段：内置默认值不得显示成使用者自己的配置）、位置锚点给「已设置 / 未设置」
+- 每行给该域**当前的**状态：关注线路给条数、通勤链路给条数、通勤时段给已保存的时刻（写法沿用折叠态，如 `07:00–10:30 · 17:30–21:30` 这样的**实存值**；**没选过就给「未设置」** —— 无论因为从没存过行，还是存过行但从没选过时段：内置默认值不得显示成使用者自己的配置）、位置锚点给「已设置 / 未设置」、实时刷新间隔给选过的秒数（**没选过就说「未设置（默认每 N 秒）」**，N 取答复里的 `effectiveRefreshIntervalSec` —— 把「此刻在跑几秒」说出来，而不是留一个似有似无的空，也不是写死 18）
 - 摘要里没有建议、没有评价、没有「去配置」这类动作词 —— 动作由行本身的链接承担，摘要只放事实；条数只在列表读到之后给（**读失败与确实为空必须分得开**：`transit.store.ts` 的 `fetchFavorites` 报告服务端到底答没答，索引行据此分别说「已关注 0 条」与「未读到」。**「未读到」不是在两者之间新造区分** —— 它就是这一行该报的事实：把没读到的列表渲染成「0 条」才是替使用者编了一个数字。这条与下一句的「读不到就是读不到」是同一条规则）
 - **读不到就是读不到**：`GET /api/transit/settings` 失败时，锚点行与时段行给「未读到」这个事实，不给「未设置」，也不给默认时刻。这与**第三个事实**并列而不重叠：接口明确答「这个用户没有配置」时是**未设置**，既不是「未读到」也不是一组值 —— 两种形状对使用者是同一个事实、对代码是两个状态：**没存过行**（`settingsState: 'unset'` 且 `data: null`）与 **存过行但四列全空**（行在、时刻为 NULL）。消费者若忽略这个状态，拿到的是一行空值，而不是一套看起来像真的时刻。今天的折叠态摘要在读取失败时保留默认值（`index.vue` 的 `savedHours` 初值与 `catch`），索引行不继承这一点。口径与既有两处一致：F1 参考行在无结论时整行不渲染（`views/overview/reference-line.ts`），F10 空态对读不到的锚点状态既不说已保存也不说未保存（`views/commute-chain/empty-state.ts`）
 
-**深链接**：四个子页面都是真实路径 —— `/settings/lines`、`/settings/schedule`、`/settings/anchors`、`/settings/chains`。刷新、收藏、浏览器后退都必须落在同一页；子页面不得依赖「从索引页带过来的状态」才有内容。
+**深链接**：五个子页面都是真实路径 —— `/settings/lines`、`/settings/schedule`、`/settings/anchors`、`/settings/chains`、`/settings/refresh-interval`。刷新、收藏、浏览器后退都必须落在同一页；子页面不得依赖「从索引页带过来的状态」才有内容。
 
 **每个设置子页面都带应用内的返回入口**：一个「返回设置」控件指向 `/settings`，不依赖系统手势，也不依赖浏览器后退键。
 
-**导航模型（已定）：只有返回 —— 不做常驻 Tab 条，不做桌面侧边栏。** 理由：域只有四个，且极少来回切换；常驻导航占的是移动端最紧张的那部分屏幕，换来的收益接近零。四个域各自独立成页，返回足以表达「我在哪、怎么出去」。
+**导航模型（已定）：只有返回 —— 不做常驻 Tab 条，不做桌面侧边栏。** 理由：域只有五个，且极少来回切换；常驻导航占的是移动端最紧张的那部分屏幕，换来的收益接近零。五个域各自独立成页，返回足以表达「我在哪、怎么出去」。
 
 **宽度**：索引页内容居中 `max-w-2xl`，子页面居中 `max-w-3xl`。今天的 `mx-auto max-w-6xl` 与 xl 双栏（`xl:grid-cols-[minmax(0,1fr)_20rem]`）随侧栏一起去掉。
 
@@ -601,11 +619,13 @@ real-time-transport/
 
 单一权威源：根目录一个 `.env`。服务端脚本用 `--env-file=../../.env`；Vite 用 `envDir` 指向根目录并绑定端口。**杜绝分应用维护多个 `.env`** 导致端口与配置脱节。
 
+`TRANSIT_POLL_INTERVAL_SEC` 只是**回退值**：设置页里的「实时刷新间隔」优先于它（使用者选过就用使用者的），两者都没设才用代码里的默认 18 秒。读侧把此刻生效的那个数随设置一起答出来（`effectiveRefreshIntervalSec`），故界面不必猜，见 F11。
+
 ---
 
 ## 8. 数据库模型（PostgreSQL 18）
 
-迁移为文件式 SQL（`migrations/001~008`），按序应用。**一条线路只关注一次**（`008` 迁移）：`user_favorite_lines` 上建立 `(user_id, city_code, line_id)` 唯一索引 `uniq_favorite_per_user_city_line` —— 两个方向是**同一个关注**，不是两行（方向由 `preferred_direction` / `morning_direction` / `evening_direction` 与 `reverse_line_id` 承载）；同名线路落在不同城市是不同线路，索引三列即判据。迁移遇到既有重复行**大声失败**并列出冲突键，不做静默合并（挑哪一行幸存无法从数据推导）。当前实际表：
+迁移为文件式 SQL（`migrations/001~015`），按序应用。**一条线路只关注一次**（`008` 迁移）：`user_favorite_lines` 上建立 `(user_id, city_code, line_id)` 唯一索引 `uniq_favorite_per_user_city_line` —— 两个方向是**同一个关注**，不是两行（方向由 `preferred_direction` / `morning_direction` / `evening_direction` 与 `reverse_line_id` 承载）；同名线路落在不同城市是不同线路，索引三列即判据。迁移遇到既有重复行**大声失败**并列出冲突键，不做静默合并（挑哪一行幸存无法从数据推导）。当前实际表：
 
 ```sql
 -- 1. 用户关注线路（线路 + 通勤目的站 + 双向）
@@ -618,7 +638,13 @@ CREATE TABLE user_favorite_lines (
     preferred_direction INT NOT NULL DEFAULT 0,
     reverse_line_id VARCHAR(64),                        -- 反向线路 id（公交方向不同 id 不同）
     pinned_station_name VARCHAR(64),                    -- 本方向上车点
+    pinned_station_order INT,                           -- 上车点身份的另一半（010）
     reverse_pinned_station_name VARCHAR(64),            -- 反方向上车点
+    reverse_pinned_station_order INT,
+    followed_station_name_0 TEXT,                       -- 方向 0 的关注站（015，时间无关）
+    followed_station_order_0 INTEGER,
+    followed_station_name_1 TEXT,                       -- 方向 1 的关注站
+    followed_station_order_1 INTEGER,
     morning_direction INT,                              -- 上下班各自的方向
     evening_direction INT,
     display_order INT NOT NULL DEFAULT 0,
@@ -629,13 +655,14 @@ CREATE TABLE user_favorite_lines (
 CREATE UNIQUE INDEX uniq_favorite_per_user_city_line
     ON user_favorite_lines (user_id, city_code, line_id);
 
--- 2. 用户设置（通勤时段）
+-- 2. 用户设置（通勤时段 + 实时刷新间隔）
 CREATE TABLE user_settings (
     user_id VARCHAR(64) PRIMARY KEY DEFAULT 'default_user',
     morning_start TIME,                                 -- NULL = 从没选过（009 已移除 NOT NULL/DEFAULT）
     morning_end   TIME,
     evening_start TIME,
     evening_end   TIME,
+    refresh_interval_sec INTEGER,                       -- NULL = 没选过，按回退链跑着（014）
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -656,7 +683,11 @@ CREATE TABLE cached_transit_lines (
 
 **`013` 迁移**：锚点再各加两列 —— `home_place_name` / `work_place_name`（`TEXT`，可空，搜索来的地点名）与 `home_anchor_source` / `work_anchor_source`（`TEXT`，可空，`device` | `search`）。名字供界面认人（没有名字时显示坐标），**来源是 5.4 那条「按来源决定是否换算」的凭据**：来源为 `search` 的坐标已是 `GCJ-02`，写入时不再换算。
 
-更新通道也已就绪：`UpdateFavoriteSchema` 接受 `displayOrder` 与 `isPinned`，`PATCH /api/transit/favorites/:id` 据此落库；设置页的拖动排序与首页置顶都走它。
+**`014` 迁移**：`user_settings.refresh_interval_sec`（`INTEGER`，可空、无默认值、无 `CHECK`）—— 实时节拍的使用者选择，见 F11。可空是刻意的：NULL 就是「没选过」，`NOT NULL DEFAULT 18` 会把「用户从未调过」说成「用户选了 18」；取值范围（10~120）由应用层 schema 保证，读侧对越界值的回退与「未设置」走同一条路。
+
+**`015` 迁移**：`user_favorite_lines` 加四列 —— `followed_station_name_0 / followed_station_order_0 / followed_station_name_1 / followed_station_order_1`（`TEXT` / `INTEGER`，都可空、无默认值、无 `CHECK`）—— 两个方向各一个「关注站」的 (站名, 站序) 对，见 F1。按方向各存一对而不是只存一个名字：上下行站名经常不同（路口东 / 路口西），环线还有同名多站，站的身份是**一对**（同 `010` 的上车点写法）。
+
+更新通道也已就绪：`UpdateFavoriteSchema` 接受 `displayOrder`、`isPinned` 与四列关注站（站名与站序必须成对给出，清空请两列都传 `null`），`PATCH /api/transit/favorites/:id` 据此落库；设置页的拖动排序、首页置顶与卡片上的「设关注站」都走它。
 
 **换乘链路表**（`007` 迁移）：新增 `commute_chains`（`origin_anchor` ∈ {home, work}、`purpose` ∈ {morning, evening}，带 `display_order`）与 `commute_chain_legs`（链路的乘车段）。
 

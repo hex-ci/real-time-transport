@@ -22,6 +22,7 @@ import type { StoredAnchors } from './anchors'
 import {
   anchorsText,
   chainsText,
+  effectiveRefreshIntervalOf,
   followedLinesText,
   hoursText,
   refreshIntervalReadOf,
@@ -50,9 +51,11 @@ const savedHours = shallowRef<SettingsSummaryValue<UserSettings>>({ state: 'read
 const anchors = shallowRef<SummaryValue<StoredAnchors>>({ state: 'reading' })
 const chains = shallowRef<SummaryValue<number>>({ state: 'reading' })
 const refreshInterval = shallowRef<SummaryValue<number | null>>({ state: 'reading' })
+/** 服务端此刻生效的节拍：没选过时那行「默认每 N 秒」里的 N 来自它，而不是写死的 18。 */
+const refreshEffective = shallowRef<number | null>(null)
 
 /**
- * 各行，按各域的既定次序：关注线路、通勤时段、位置锚点、通勤链路、实时刷新间隔。
+ * 各行，按各域的既定次序：关注线路、通勤链路、通勤时段、位置锚点、实时刷新间隔。
  *
  * 其中三个在此读取，而非取自子页面：本页可能是会话渲染的第一屏，
  * 故它陈述的每个事实都必须来自自己的读取。
@@ -62,7 +65,7 @@ const rows = computed(() => [
   { to: '/settings/chains', label: '通勤链路', icon: Waypoints, summary: chainsText(chains.value) },
   { to: '/settings/schedule', label: '通勤时段', icon: Clock, summary: hoursText(savedHours.value) },
   { to: '/settings/anchors', label: '位置锚点', icon: MapPin, summary: anchorsText(anchors.value) },
-  { to: '/settings/refresh-interval', label: '实时刷新间隔', icon: RefreshCw, summary: refreshIntervalText(refreshInterval.value) },
+  { to: '/settings/refresh-interval', label: '实时刷新间隔', icon: RefreshCw, summary: refreshIntervalText(refreshInterval.value, refreshEffective.value) },
 ])
 
 onMounted(() => {
@@ -111,6 +114,7 @@ async function readSettings(): Promise<void> {
     savedHours.value = read.hours
     anchors.value = read.anchors
     refreshInterval.value = refreshIntervalReadOf(json)
+    refreshEffective.value = effectiveRefreshIntervalOf(json)
   }
   catch {
     // 请求从未作答，或答案无法解析：关于已存记录一无所知。
@@ -118,6 +122,7 @@ async function readSettings(): Promise<void> {
     savedHours.value = { state: 'unreadable' }
     anchors.value = { state: 'unreadable' }
     refreshInterval.value = { state: 'unreadable' }
+    refreshEffective.value = null
   }
 }
 </script>

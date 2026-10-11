@@ -13,8 +13,9 @@ import SettingsIndex from '../../../views/settings/index.vue'
 /**
  * `设置` 的**索引页**，由**行为**守住。
  *
- * `设置` 变成索引加四个子页面（`/settings/lines`、`/schedule`、`/anchors`、`/chains`），本文件守住
- * 属于索引自己的那一半：四行，每行整行是链接，各行以事实陈述**本域**当前状态——而在该状态读不到时
+ * `设置` 变成索引加五个子页面（`/settings/lines`、`/settings/chains`、`/settings/schedule`、
+ * `/settings/anchors`、`/settings/refresh-interval`），本文件守住
+ * 属于索引自己的那一半：五行，每行整行是链接，各行以事实陈述**本域**当前状态——而在该状态读不到时
  * 什么都不陈述。页面经 `settings-harness.ts` 挂载（Vue 的 runtime-core 渲染为普通对象，无 jsdom）
  * 并按浏览器驱动它的方式驱动，故被断言的是该行实际说了什么。
  *
@@ -81,6 +82,17 @@ interface IndexRoutes {
   /** 设置行携带的坐标：默认只有「家」，除非被覆盖。 */
   anchors?: Record<string, unknown>
   /**
+   * 设置行携带的实时刷新间隔（秒）。缺省即「从未选过」那一栏：`null` ——
+   * 与线上的列语义一致（014 的 `refresh_interval_sec` 可空、无默认值）。
+   */
+  refreshIntervalSec?: number
+  /**
+   * 答案里那个「此刻生效的节拍」（秒）。缺省 18（线上什么都没配时的默认）；
+   * 设为别的数即模拟运维改过 `TRANSIT_POLL_INTERVAL_SEC` 的服务端；
+   * 设为 `'absent'` 即答案里没有这个数（客户端据此只说「未设置」，绝不拿 18 顶上）。
+   */
+  effectiveRefreshIntervalSec?: number | 'absent'
+  /**
    * 读取所答的关注线路，用于测试需要 `favourites(count)` 之外的形状时——例如来自**不止一个城市**的线路，
    * 那是区分「屏幕所在城市的计数」与「所有存储行的计数」的形状。
    */
@@ -103,8 +115,13 @@ function routes(options: IndexRoutes = {}): Route[] {
   return [
     [/\/api\/transit\/favorites$/, () => answered(options.favourites, options.favouriteLines ?? favourites(2), [])],
     [/\/api\/transit\/settings/, () => {
+      // 答案里总带「此刻生效的节拍」：没选过时那行「默认每 N 秒」里的 N 就是它 ——
+      // 存储行说的是「用户选没选过」，这个数说的是「此刻跑几秒」，两者可以不同。
+      const effective = options.effectiveRefreshIntervalSec === 'absent'
+        ? {}
+        : { effectiveRefreshIntervalSec: options.effectiveRefreshIntervalSec ?? 18 }
       if (options.settings === 'fail') return { success: false, error: '读取失败' }
-      if (options.settings === 'unset') return { success: true, settingsState: 'unset', data: null }
+      if (options.settings === 'unset') return { success: true, settingsState: 'unset', data: null, ...effective }
       if (options.settings === 'no-state') return { success: true, data: { ...HOURS } }
       // 该行存在（可能携带锚点）且其四个时刻**从未**选择过：线上四个都是 null
       // （`settingsState: 'stored'`，不是 'unset'）。
@@ -118,13 +135,20 @@ function routes(options: IndexRoutes = {}): Route[] {
             eveningStart: null,
             eveningEnd: null,
             ...(options.anchors ?? { homeLat: 39.9, homeLng: 116.4 }),
+            ...(options.refreshIntervalSec === undefined ? {} : { refreshIntervalSec: options.refreshIntervalSec }),
           },
+          ...effective,
         }
       }
       return {
         success: true,
         settingsState: 'stored',
-        data: { ...HOURS, ...(options.anchors ?? { homeLat: 39.9, homeLng: 116.4 }) },
+        data: {
+          ...HOURS,
+          ...(options.anchors ?? { homeLat: 39.9, homeLng: 116.4 }),
+          ...(options.refreshIntervalSec === undefined ? {} : { refreshIntervalSec: options.refreshIntervalSec }),
+        },
+        ...effective,
       }
     }],
     [/\/api\/transit\/commute-chains\?/, () => answered(options.chains, [chain()], [])],
@@ -162,17 +186,19 @@ function row(host: MountedHost, href: string): { href: string, text: string } {
   return found
 }
 
-describe('设置索引是一张四行的清单，每行是一个整行的链接', () => {
-  it('四行按域的顺序指向四个子页面，摘要文本在链接里面', async () => {
+describe('设置索引是一张五行的清单，每行是一个整行的链接', () => {
+  it('五行按域的顺序指向五个子页面，摘要文本在链接里面', async () => {
     const host = await mountIndex()
 
     // 整行是一个链接：不是脚本跳转，所以「在新标签页打开」、键盘与语义都是浏览器原生的。
-    // 顺序即层次：关注线路之后紧接通勤链路（链路是建在关注之上的），再是通勤时段与位置锚点。
+    // 顺序即层次：关注线路之后紧接通勤链路（链路是建在关注之上的），再是通勤时段与位置锚点，
+    // 实时刷新间隔在最后（它是整屏共用的节拍，不属于任何一域）。
     expect(rows(host).map(item => item.href)).toEqual([
       '/settings/lines',
       '/settings/chains',
       '/settings/schedule',
       '/settings/anchors',
+      '/settings/refresh-interval',
     ])
     // 该行的状态写在链接内部 —— 行与它的摘要不能各说一半。
     expect(row(host, '/settings/lines').text).toContain('关注线路')
@@ -180,15 +206,16 @@ describe('设置索引是一张四行的清单，每行是一个整行的链接'
     expect(row(host, '/settings/schedule').text).toContain('通勤时段')
     expect(row(host, '/settings/anchors').text).toContain('位置锚点')
     expect(row(host, '/settings/chains').text).toContain('通勤链路')
+    expect(row(host, '/settings/refresh-interval').text).toContain('实时刷新间隔')
     host.unmount()
   })
 
-  it('索引是一个列表：四个 li，每行一个链接，摘要不在链接之外', async () => {
+  it('索引是一个列表：五个 li，每行一个链接，摘要不在链接之外', async () => {
     const host = await mountIndex()
 
     expect(host.node(item => item.tag === 'ul', 'the index list').tag).toBe('ul')
     const items = host.nodes(item => item.tag === 'li')
-    expect(items).toHaveLength(4)
+    expect(items).toHaveLength(5)
     for (const item of items) {
       const links = host.nodes(node => node.tag === 'a' && isInside(item, node))
       expect(links, 'each row is one link').toHaveLength(1)
@@ -202,7 +229,7 @@ describe('设置索引是一张四行的清单，每行是一个整行的链接'
     host.unmount()
   })
 
-  it('索引自己有真正的 h2（四个子页面各有自己的 h2，那条在 settings-pages.test.ts 里）', async () => {
+  it('索引自己有真正的 h2（五个子页面各有自己的 h2，那条在 settings-pages.test.ts 里）', async () => {
     const host = await mountIndex()
 
     const heading = host.node(item => item.tag === 'h2', 'the index heading')
@@ -277,8 +304,8 @@ describe('每行的摘要只陈述该域现在的事实', () => {
   it('摘要里没有动作词：怎么去由链接承担，摘要只说事实', async () => {
     const host = await mountIndex()
 
-    // 对空集的筛选会白通过：四行，或本规则没有评判任何行。
-    expect(rows(host)).toHaveLength(4)
+    // 对空集的筛选会白通过：五行，或本规则没有评判任何行。
+    expect(rows(host)).toHaveLength(5)
     for (const item of rows(host)) {
       for (const action of ['去配置', '去设置', '点击', '请设置']) {
         expect(item.text, `${item.href} words its state as an action`).not.toContain(action)
@@ -290,9 +317,37 @@ describe('每行的摘要只陈述该域现在的事实', () => {
   it('三种状态各有话说：读中、未读到、读到 —— 没有一种渲染成 undefined', async () => {
     const host = await mountIndex()
 
-    expect(rows(host), 'the index renders its four rows, or this rule judged no row').toHaveLength(4)
+    expect(rows(host), 'the index renders its five rows, or this rule judged no row').toHaveLength(5)
     expect(host.text()).not.toContain('undefined')
     host.unmount()
+  })
+
+  it('实时刷新间隔行说此刻生效的秒数或所选秒数，读不到就说读不到', async () => {
+    // 四项事实互不相同：没选过（按此刻生效的节拍跑着）、选过（每 N 秒）、读不到、
+    // 连生效值都没读到（只说未设置，绝不拿 18 顶上）。
+    const unchosen = await mountIndex()
+    expect(row(unchosen, '/settings/refresh-interval').text).toContain('未设置（默认每 18 秒）')
+    unchosen.unmount()
+
+    // 运维改过 TRANSIT_POLL_INTERVAL_SEC 的服务端：没选过时那行说的必须是**在跑的那个数**。
+    const envDriven = await mountIndex({ effectiveRefreshIntervalSec: 30 })
+    expect(row(envDriven, '/settings/refresh-interval').text).toContain('未设置（默认每 30 秒）')
+    envDriven.unmount()
+
+    const chosen = await mountIndex({ refreshIntervalSec: 30 })
+    expect(row(chosen, '/settings/refresh-interval').text).toContain('每 30 秒')
+    expect(row(chosen, '/settings/refresh-interval').text).not.toContain('未设置')
+    chosen.unmount()
+
+    const unknownEffective = await mountIndex({ effectiveRefreshIntervalSec: 'absent' })
+    expect(row(unknownEffective, '/settings/refresh-interval').text).toContain('未设置')
+    expect(row(unknownEffective, '/settings/refresh-interval').text).not.toContain('18 秒')
+    unknownEffective.unmount()
+
+    const failed = await mountIndex({ settings: 'fail' })
+    expect(row(failed, '/settings/refresh-interval').text).toContain('未读到')
+    expect(row(failed, '/settings/refresh-interval').text).not.toContain('18 秒')
+    failed.unmount()
   })
 })
 

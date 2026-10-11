@@ -16,3 +16,9 @@ ALTER TABLE user_favorite_lines
   ADD COLUMN IF NOT EXISTS followed_station_order_0 INTEGER,
   ADD COLUMN IF NOT EXISTS followed_station_name_1 TEXT,
   ADD COLUMN IF NOT EXISTS followed_station_order_1 INTEGER;
+
+-- migrate:down
+-- 回滚不删列（加法列，013 与 014 的先例）：只去掉这张表的产物，本段实际无操作 ——
+-- 忘了哪条线路、哪一站是使用者的选择，回滚不得把它抹掉。
+-- 可重复执行：ADD COLUMN IF NOT EXISTS 对已有的列是空操作。
+SELECT 1;

@@ -116,6 +116,32 @@ export function normalizePollIntervalSec(value: unknown): number {
 }
 
 /**
+ * 实时节拍从哪个来源取：**设置页的选择（DB）> 环境变量 > 启动参数 > 默认 18s**。
+ *
+ * 顺序反了会表现为「启动日志说 10s、实际跑 18s」—— 环境变量盖掉了使用者的选择，
+ * 而两个来源各自的读法都没错。这条链因此只在这里实现一次，`buildApp` 只负责把三个来源喂进来。
+ *
+ * 「没给值」是 undefined / null / 空串 / 读不出有限数的字符串（DB 那一个的 NULL 表示「没选过」，
+ * 不是「选了 0」）。返回值**不做钳制**：取值范围由 `normalizePollIntervalSec` 一处管，
+ * 这条链只回答「听谁的」。
+ */
+export function resolvePollIntervalSec(sources: {
+  /** 设置页存下来的值（`user_settings.refresh_interval_sec`，NULL = 没选过）。 */
+  stored?: number | null
+  /** 环境变量 `TRANSIT_POLL_INTERVAL_SEC` 的原文（未解析的字符串也算）。 */
+  fromEnv?: string | number | null
+  /** 调用方显式传进来的启动参数，优先级最低。 */
+  explicit?: number | null
+}): number | undefined {
+  const usable = (value: string | number | null | undefined): number | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    const n = typeof value === 'string' ? Number(value) : value
+    return typeof n === 'number' && Number.isFinite(n) ? n : undefined
+  }
+  return usable(sources.stored) ?? usable(sources.fromEnv) ?? usable(sources.explicit)
+}
+
+/**
  * 距下次允许刷新还有多少秒：每个分支都从 `nextAllowedAt` 推出来，它是唯一真源。
  */
 function secondsUntil(nextAllowedAt: number, now: number): number {
@@ -1341,7 +1367,7 @@ export class TransitService {
     await Promise.all(tasks)
   }
 
-  private async pollOneLine(sub: { lineId: string, direction: number, cityCode?: string, clients: Set<any> }): Promise<void> {
+  private async pollOneLine(sub: { lineId: string, direction: number, cityCode?: string, clients: Set<WebSocket> }): Promise<void> {
     // 先清缓存再拉：上游慢时（fetch 耗时接近间隔），缓存的过期时刻会从
     // fetch 完成时起算，导致轮询拿到未过期的旧数据，实际节拍翻倍。
     // 手动刷新（refreshLive）同样先 invalidate，这里对齐。

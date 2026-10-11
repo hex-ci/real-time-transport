@@ -418,6 +418,18 @@ describeEachStore('F10 通勤链路', (store) => {
 
   const upstreamUrls = () => api.upstream.mock.calls.map(call => String(call[0]))
   const liveReads = () => upstreamUrls().filter(href => href.includes('targetOrder='))
+
+  /**
+   * 链路读过哪几个站序。
+   *
+   * 一次实时读在 adapter 层可能展开成两次 HTTP：轻量读，以及轻量载荷形态不对时的全量回退 ——
+   * 两者都带 `targetOrder`，而一次腿的两次定向读数是**并发**发出的，故两次回退会与另一次轻量读
+   * 交错。本用例问的是「链路读了哪几个站序」，故只数轻量读（回退那条由 adapter 自己的
+   * `busdetail-refresh.test.ts` 钉）。
+   */
+  const readOrders = (): string[] => upstreamUrls()
+    .filter(href => href.includes('encryptedBusDetail') && href.includes('targetOrder='))
+    .map(href => new URL(href).searchParams.get('targetOrder')!)
   const etaCalls = (route: 'walking' | 'bicycling') =>
     upstreamUrls().filter(href => href.includes(`/direction/${route}`)).length
 
@@ -467,7 +479,7 @@ describeEachStore('F10 通勤链路', (store) => {
     })
 
     // 两次定向读数用的正是存下来的那两个站序：一段的分钟来自两次请求。
-    expect(liveReads().map(href => new URL(href).searchParams.get('targetOrder'))).toEqual(['2', '3'])
+    expect(readOrders()).toEqual(['2', '3'])
   })
 
   it('没存过起点 → anchor-unset，一次读数都不花', async () => {
@@ -609,7 +621,7 @@ describeEachStore('F10 通勤链路', (store) => {
       reason: 'no-shared-vehicle',
       leg: { seq: 0, lineId: LINE_A, lineName: '甲线' },
     })
-    expect(liveReads().map(href => new URL(href).searchParams.get('targetOrder'))).toEqual(['2', '3'])
+    expect(readOrders()).toEqual(['2', '3'])
   })
 
   it('接驳走完之后车都过去了 → no-vehicle-after-connection，且等待从接驳结束起算', async () => {

@@ -7,8 +7,9 @@
  * 上游（车来了 H5 是非公开接口，刷太快有被限流封 IP 的风险），上限 120 秒避免
  * 数据 stale 到失去意义。保存后服务端即时生效，不用重启。
  *
- * null 即"没选过"，读侧回退 18s：表单在未保存过时明确说出起点是 18 秒，
- * 而不是把 18 印成用户自己的选择。
+ * null 即"没选过"：那时在跑的是服务端此刻生效的节拍（环境变量/启动参数决定的那个数），
+ * 故「当前」说的是它、编辑器的起点也取它；18 只是连它都读不到时的起点，
+ * 绝不把 18 印成用户自己的选择。
  */
 import { computed, onMounted, shallowRef } from 'vue'
 import { runWithFeedback } from '@/action-feedback'
@@ -17,28 +18,36 @@ import { BackToSettings } from './components'
 const PRESETS = [10, 15, 18, 30, 60] as const
 const DEFAULT_SEC = 18
 
-const selected = shallowRef<number | null>(null)
+/** 编辑器里选中的档位。没保存过时它只是起点（见上面的说明），不代表任何人的选择。 */
+const selected = shallowRef<number>(DEFAULT_SEC)
 const everSaved = shallowRef<boolean | null>(null)
+/** 服务端此刻生效的节拍（秒），或 null（答案里没这个数）。 */
+const effective = shallowRef<number | null>(null)
 const saving = shallowRef(false)
 
-const summary = computed(() =>
-  everSaved.value === false
-    ? `当前：未设置（默认每 ${DEFAULT_SEC} 秒）`
-    : `当前：每 ${selected.value ?? DEFAULT_SEC} 秒`,
-)
+const summary = computed(() => {
+  if (everSaved.value === null) return '当前：未读到设置'
+  if (everSaved.value === true) return `当前：每 ${selected.value} 秒`
+  return effective.value === null ? '当前：未设置' : `当前：未设置（默认每 ${effective.value} 秒）`
+})
 
 onMounted(async () => {
   try {
     const res = await fetch('/api/transit/settings')
     const json = await res.json()
+    // 答了但没成功，与从未作答是同一种「一无所知」：两种都交给下面那个 catch，
+    // 于是这句话是「未读到」，而不是把 18 说成在使用中的默认值。
+    if (json?.success !== true) throw new Error('settings read failed')
+    const eff = json?.effectiveRefreshIntervalSec
+    effective.value = typeof eff === 'number' && Number.isFinite(eff) ? eff : null
     const v = json?.data?.refreshIntervalSec
     if (typeof v === 'number' && Number.isFinite(v)) {
       selected.value = v
       everSaved.value = true
     }
     else {
-      // 没存过：18 秒只是编辑器的起点，不是用户的选择（见上面的说明）。
-      selected.value = DEFAULT_SEC
+      // 没存过：起点取此刻在跑的那个数 —— 它就是使用者看到的行为。
+      selected.value = effective.value ?? DEFAULT_SEC
       everSaved.value = false
     }
   }
@@ -48,7 +57,7 @@ onMounted(async () => {
 })
 
 async function save(): Promise<void> {
-  if (selected.value === null || saving.value) return
+  if (saving.value) return
   saving.value = true
   try {
     await runWithFeedback('refresh-interval-save', async () => {
@@ -91,7 +100,7 @@ async function save(): Promise<void> {
         间隔越短越实时，但上游是非公开接口，10 秒是保护下限。
       </p>
       <p v-if="everSaved === false" class="mt-2 text-xs text-amber-400/90 lg:text-base">
-        尚未保存过：下面选中的 {{ DEFAULT_SEC }} 秒只是起点，保存之后才会成为你的设置
+        尚未保存过：下面选中的 {{ selected }} 秒只是起点，保存之后才会成为你的设置
       </p>
 
       <div class="mt-4 flex flex-wrap gap-2">

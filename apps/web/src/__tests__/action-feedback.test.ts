@@ -216,8 +216,9 @@ describe('文案表是唯一来源', () => {
       // 位置锚点（保存）与通勤时段（保存）各一个写操作。
       'views/settings/anchor-detail.vue': 1,
       'views/settings/components/commute-hours-form.vue': 1,
-      // 首页的置顶状态由操作栏与列表重排自己说，线路页只推上车点。
-      'views/overview/index.vue': 0,
+      // 首页的置顶状态由操作栏与列表重排自己说；它自己的写操作只有「设关注站」那一次
+      // （面板里保存与清除都走同一个出口，合成一句话）。
+      'views/overview/index.vue': 1,
       'views/line-detail/index.vue': 0,
       // 五个结局（取到、不支持、被拒、取不到、开发模拟下取到）都在 store 里说。
       'stores/location.store.ts': 5,

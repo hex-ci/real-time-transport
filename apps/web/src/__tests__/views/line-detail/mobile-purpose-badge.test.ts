@@ -50,6 +50,7 @@ const DOWN = '010-52-1'
  */
 const DETAIL_DOWN = {
   lineId: DOWN,
+  lineName: '52',
   direction: 1,
   directionName: '开往 潘道庙',
   otherDirectionLineId: UP,
@@ -64,6 +65,7 @@ const DETAIL_DOWN = {
 /** 上游方向 0 的那条线（收藏行编号里的方向 1）。 */
 const DETAIL_UP = {
   lineId: UP,
+  lineName: '52',
   direction: 0,
   directionName: '开往 靛厂新村',
   otherDirectionLineId: DOWN,

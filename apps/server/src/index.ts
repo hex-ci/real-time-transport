@@ -4,13 +4,10 @@ const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '0.0.0.0'
 
 async function main() {
-  // TRANSIT_POLL_INTERVAL_SEC 之前只在 .env.example 里存在，buildApp() 根本没接：
-  // index.ts 不传 options，app.ts 里恒为 undefined，实际轮询间隔永远是硬编码 18s。
-  // 这里把环境变量接上，无效值回退默认 18s。
-  const pollIntervalSec = Number(process.env.TRANSIT_POLL_INTERVAL_SEC)
-  const app = await buildApp(
-    Number.isFinite(pollIntervalSec) && pollIntervalSec > 0 ? { pollIntervalSec } : {},
-  )
+  // 实时节拍的来源与优先级只有一处实现（`resolvePollIntervalSec`，在 buildApp 里调用）：
+  // 设置页的选择 > 环境变量 > 这里的启动参数 > 默认 18s。故 index.ts 不再自己解析环境变量 ——
+  // 它曾经各写一份，两边对「无效值」的判法还不一样。
+  const app = await buildApp()
   try {
     await app.listen({ port, host })
     app.log.info(`Server listening at http://${host}:${port}`)

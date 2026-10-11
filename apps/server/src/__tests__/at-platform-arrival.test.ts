@@ -6,7 +6,7 @@ import { TransitService } from '../services/transit.service.js'
 /**
  * 服务端的 F-A：上游给的 0 被路由到「正在本站」这个状态。
  *
- * 那个状态本来就在（`isAtStation`、「车辆正在本站」文案、±35 m 窗口），但窗口是按米量的，
+ * 那个状态本来就在（`isAtStation`、「车辆正在本站」文案、±20 m 窗口），但窗口是按米量的，
  * 而上游对车辆自己的陈述不是：上游的 0 必须落在「正在本站」那一行上，且那一行不渲染分钟。
  * 会把它误定价的位置/停站推算分支已被整个移除（见 `no-estimated-arrival-minute.test.ts`），
  * 所以下面第二个测试讲的是行可能处的另一种状态：车还在路上，而它的读数没有发布到达时刻。
@@ -87,7 +87,7 @@ async function rowsFor(service: TransitService) {
 describe('F-A: an upstream travelTime of 0 is the vehicle being at the platform', () => {
   it('routes it to the at-platform row, which states no minute', async () => {
     freezeAt('2026-09-25T16:10:00')
-    // 距站线 60 m：在 ±35 m 窗口之外，所以这一行靠上游自己的 0 落到这里，
+    // 距站线 60 m：在 ±20 m 窗口之外，所以这一行靠上游自己的 0 落到这里，
     // 而不是靠按米的判断。
     const service = serviceFor(busDetail(), liveStatus([
       vehicle({ travelTimeSec: 0, distanceToWaitStn: 0, distanceFromStart: 2940, speed: 0 }),

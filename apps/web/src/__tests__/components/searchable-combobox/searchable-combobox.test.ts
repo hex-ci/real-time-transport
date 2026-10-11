@@ -30,10 +30,11 @@ const OPTIONS: ComboboxOption[] = [
 
 /**
  * 一次按键，按浏览器投递 keydown 的方式：每个处理器都跑（Vue 把同一事件上的多个处理器存成一个数组），
- * 并记下这次按键是否被本组件消费。
+ * 并记下这次按键被本组件怎么处置 —— 是改了默认行为，还是挡住了冒泡。
  */
-function keydown(element: HostElement, key: string): boolean {
+function keydown(element: HostElement, key: string): { prevented: boolean, stopped: boolean } {
   let prevented = false
+  let stopped = false
   const handler = element.props.onKeydown
   const handlers = Array.isArray(handler) ? handler : [handler]
   const event = {
@@ -43,10 +44,10 @@ function keydown(element: HostElement, key: string): boolean {
     currentTarget: element,
     preventDefault: () => { prevented = true },
     get defaultPrevented() { return prevented },
-    stopPropagation: () => {},
+    stopPropagation: () => { stopped = true },
   }
   for (const each of handlers) each?.(event)
-  return prevented
+  return { prevented, stopped }
 }
 
 function triggerOf(host: MountedHost): HostElement {
@@ -78,12 +79,17 @@ function optionOf(host: MountedHost, text: string): HostElement {
   )
 }
 
-/** 键盘高亮的那一项：自己那一档的 token，与静态类里 `data-[highlighted]:` 那一档分得开。 */
-function activeTextsOf(host: MountedHost): string[] {
-  return optionsOf(host)
-    .filter(item => String(item.props.class ?? '').split(/\s+/).includes('bg-cyan-500/15'))
-    .map(item => host.textOf(item))
+/**
+ * 高亮的出处：reka 用 `data-highlighted` 属性标出当前高亮项，样式由类里 `data-[highlighted]:`
+ * 那一档给。组件自己算高亮（`activeIndex` + 一个字面量类）是上一版的写法 —— 留着它会让
+ * 「谁在控制高亮」有两个答案。
+ */
+function highlightTokensOf(host: MountedHost): string[][] {
+  return optionsOf(host).map(item => String(item.props.class ?? '').split(/\s+/))
 }
+
+/** 本组件自己算高亮时会写出的那个类名（整串 token，不带 `data-[…]:` 前缀）。 */
+const OWN_HIGHLIGHT_TOKEN = 'bg-cyan-500/15'
 
 /** 某个节点自己或它子树里是否有元素带着这个类。 */
 function carriesClass(node: HostElement, token: string): boolean {
@@ -208,78 +214,65 @@ describe('搜索框会缩列表', () => {
   })
 })
 
-describe('键盘：开 / 关 / 上下移动 / 回车选', () => {
-  it('关着时下键就是开，开时上/下移动高亮', async () => {
+/**
+ * 键盘：按键由 reka 承担，本组件不抢。
+ *
+ * 2026-10 的改写把组件换成 reka-ui 的 Combobox：面板的打开是浏览器对触发器的**原生激活**
+ * （Enter / Space），打开之后的上/下移动高亮、回车选中与 Escape 关闭都在面板（`role=listbox`）
+ * 那一层由 reka 处理。
+ *
+ * 本仓的宿主只把事件交给被点/被按的那个节点**自己**的处理器，不冒泡、也不跑浏览器的默认动作，
+ * 所以上面那些行为在这里量不到 —— 它们在 `tests/e2e/scenarios/platform.mjs` 的真浏览器键盘场景里钉。
+ * 这一节钉的是组件自己那一半：不抢键、不把按键冒泡出去、高亮只有一个出处。
+ */
+describe('键盘：按键交给 reka，本组件不抢', () => {
+  it('触发器上没有本组件的按键处理：打开面板走浏览器对按钮的原生激活', async () => {
     const { host } = await mountControl()
     expect(searchBoxOf(host), '没按任何键面板就开着').toBeNull()
 
-    expect(keydown(triggerOf(host), 'ArrowDown')).toBe(true)
-    await host.flush()
-    expect(optionsOf(host)).toHaveLength(3)
+    expect(triggerOf(host).props.onKeydown, '触发器又自己处理按键了').toBeUndefined()
 
-    // 打开时高亮落在已选的那一项上；下键往后、上键往前，一次一格。
-    expect(activeTextsOf(host)).toEqual(['团结湖 第3站'])
-    keydown(triggerOf(host), 'ArrowDown')
-    await host.flush()
-    expect(activeTextsOf(host)).toEqual(['东大桥 第4站'])
-
-    keydown(triggerOf(host), 'ArrowUp')
-    await host.flush()
-    expect(activeTextsOf(host)).toEqual(['团结湖 第3站'])
-    host.unmount()
-  })
-
-  it('回车选中高亮的那一项：值写回、面板关上', async () => {
-    const { host, recorded } = await mountControl()
-    await press(host, triggerOf(host))
-
-    keydown(triggerOf(host), 'ArrowDown')
-    await host.flush()
-    expect(activeTextsOf(host)).toEqual(['东大桥 第4站'])
-
-    expect(keydown(triggerOf(host), 'Enter')).toBe(true)
-    await host.flush()
-
-    expect(recorded.written).toEqual(['4_东大桥'])
-    expect(recorded.selected).toEqual(['4_东大桥'])
-    expect(searchBoxOf(host), '选中后面板没关').toBeNull()
-    host.unmount()
-  })
-
-  it('Escape 关掉面板，且不动值', async () => {
-    const { host, recorded } = await mountControl()
+    // 面板照旧开得了：这是键盘用户在真浏览器里按 Enter / Space 走的那条路。
     await press(host, triggerOf(host))
     expect(optionsOf(host)).toHaveLength(3)
-
-    keydown(triggerOf(host), 'Escape')
-    await host.flush()
-
-    expect(searchBoxOf(host)).toBeNull()
-    expect(recorded.written).toEqual([])
     host.unmount()
   })
 
-  it('搜索框里也能用同三个键：焦点不需要落进面板里再往回走', async () => {
-    const { host, recorded } = await mountControl()
+  it('搜索框上的三个导航键原样放行：既不改默认行为，也不挡住冒泡', async () => {
+    const { host } = await mountControl()
     await press(host, triggerOf(host))
-    await type(host, searchBoxOf(host)!, '大桥')
-    expect(textsOf(host)).toEqual(['东大桥 第1站', '东大桥 第4站'])
 
-    // 过滤文字改了，高亮回到第一个候选。
-    expect(activeTextsOf(host)).toEqual(['东大桥 第1站'])
+    for (const key of ['ArrowDown', 'ArrowUp', 'Escape']) {
+      const handled = keydown(searchBoxOf(host)!, key)
+      expect(handled.prevented, `${key} 被本组件改了默认行为`).toBe(false)
+      expect(handled.stopped, `${key} 在本组件里被挡住冒泡`).toBe(false)
+    }
+    host.unmount()
+  })
 
-    keydown(searchBoxOf(host)!, 'ArrowDown')
-    await host.flush()
-    expect(activeTextsOf(host)).toEqual(['东大桥 第4站'])
-
-    expect(keydown(searchBoxOf(host)!, 'Enter')).toBe(true)
-    await host.flush()
-    expect(recorded.selected).toEqual(['4_东大桥'])
-
+  it('其余键只挡冒泡：输入照旧，按键不漏到页面上的其它监听器', async () => {
+    const { host } = await mountControl()
     await press(host, triggerOf(host))
-    keydown(searchBoxOf(host)!, 'Escape')
-    await host.flush()
-    expect(searchBoxOf(host)).toBeNull()
+
+    // Enter 也在这条规则里：实测真浏览器里搜索框回车仍能选中 —— reka 的选中路径不经过被挡住的那一段。
+    for (const key of ['Enter', 'a', 'Backspace']) {
+      const handled = keydown(searchBoxOf(host)!, key)
+      expect(handled.prevented, `${key} 被本组件改了默认行为`).toBe(false)
+      expect(handled.stopped, `${key} 的按键漏到了页面上`).toBe(true)
+    }
+    host.unmount()
+  })
+
+  it('高亮由 reka 的 `data-highlighted` 表达，组件里没有第二套高亮', async () => {
+    const { host } = await mountControl()
+    await press(host, triggerOf(host))
+
+    const tokens = highlightTokensOf(host)
+    expect(tokens).toHaveLength(3)
+    for (const each of tokens) {
+      expect(each.some(token => token.startsWith('data-[highlighted]:')), '选项上没有 reka 的高亮档').toBe(true)
+      expect(each, '选项上又出现了本组件自己算的高亮类').not.toContain(OWN_HIGHLIGHT_TOKEN)
+    }
     host.unmount()
   })
 })
@@ -300,30 +293,18 @@ describe('不带搜索框的那种：`searchable: false`', () => {
     host.unmount()
   })
 
-  it('键盘照旧：下键开、上下移动高亮、回车选中所高亮的那一项、Escape 关上且不动值', async () => {
-    const { host, recorded } = await mountControl({ searchable: false })
+  it('键盘交给 reka：触发器上没有本组件的按键处理，高亮只有一个出处', async () => {
+    const { host } = await mountControl({ searchable: false })
 
-    expect(keydown(triggerOf(host), 'ArrowDown')).toBe(true)
-    await host.flush()
+    expect(triggerOf(host).props.onKeydown, '触发器又自己处理按键了').toBeUndefined()
+    await press(host, triggerOf(host))
     expect(textsOf(host)).toHaveLength(3)
-    // 打开时高亮落在已选的那一项上，下键往后一格——与带搜索框时同一个行为。
-    expect(activeTextsOf(host)).toEqual(['团结湖 第3站'])
-    keydown(triggerOf(host), 'ArrowDown')
-    await host.flush()
-    expect(activeTextsOf(host)).toEqual(['东大桥 第4站'])
-
-    expect(keydown(triggerOf(host), 'Enter')).toBe(true)
-    await host.flush()
-    expect(recorded.written).toEqual(['4_东大桥'])
-    expect(optionsOf(host), '选中后面板没关').toEqual([])
-
-    keydown(triggerOf(host), 'ArrowDown')
-    await host.flush()
-    keydown(triggerOf(host), 'Escape')
-    await host.flush()
-    expect(optionsOf(host)).toEqual([])
-    // Escape 关面板，不动值：写过的还是那一次回车。
-    expect(recorded.written).toEqual(['4_东大桥'])
+    // 没有搜索框，就没有「搜索框上放行哪几个键」这件事；高亮同样只由 reka 表达。
+    expect(searchBoxOf(host)).toBeNull()
+    for (const each of highlightTokensOf(host)) {
+      expect(each.some(token => token.startsWith('data-[highlighted]:'))).toBe(true)
+      expect(each).not.toContain(OWN_HIGHLIGHT_TOKEN)
+    }
     host.unmount()
   })
 })

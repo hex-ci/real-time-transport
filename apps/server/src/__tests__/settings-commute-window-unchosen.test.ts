@@ -238,7 +238,11 @@ describe('(d) 时刻未配置时，引擎自己的跨度照旧到达消费方', 
   function stubBusLine(): void {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       const href = String(url)
-      if (!href.includes('encryptedLineDetail')) throw new Error(`unexpected upstream call: ${href}`)
+      // 车来了的两类取数接口都作答：全量（站表/几何）与轻量（车辆）。本套件问的是「有没有多花调用」，
+      // 载荷形状由 adapter 自己的用例管，故这里两者给同一个信封。
+      if (!href.includes('encryptedLineDetail') && !href.includes('encryptedBusDetail')) {
+        throw new Error(`unexpected upstream call: ${href}`)
+      }
       return {
         ok: true,
         status: 200,
@@ -278,8 +282,10 @@ describe('(d) 时刻未配置时，引擎自己的跨度照旧到达消费方', 
       const data = JSON.parse(res.body).data
 
       expect(data.reference).toEqual({ status: 'anchor-unset', anchor: 'home' })
-      // 这是关于存储行的一句话，不花任何上游请求。
-      expect(vi.mocked(fetch).mock.calls.filter(c => !String(c[0]).includes('encryptedLineDetail'))).toHaveLength(0)
+      // 这是关于存储行的一句话，不花步行请求、也没有别的上游调用：取数只有车来了那两类接口。
+      expect(vi.mocked(fetch).mock.calls.filter(
+        c => !String(c[0]).includes('encryptedLineDetail') && !String(c[0]).includes('encryptedBusDetail'),
+      )).toHaveLength(0)
       expectNoBuiltInHours(res.body, 'the arrivals answer')
     }
     finally {

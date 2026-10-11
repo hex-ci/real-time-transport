@@ -49,9 +49,9 @@ export function unreadableText(): string {
 /**
  * 实时刷新间隔的读取与措辞。
  *
- * 值语义：number 即用户选过的秒数；null 即从未选过，读侧回退默认 18s ——
- * 「未设置」在这里不是缺数据，而是"用默认值跑着"，故措辞把默认值说出来，
- * 而不是留一个似有似无的空。
+ * 值语义：number 即用户选过的秒数；null 即从未选过 —— 那时实际在跑的不是 18，
+ * 而是服务端此刻生效的节拍（见 `effectiveRefreshIntervalOf`）。故 null 的措辞
+ * 由那个数决定：说出「正在跑几秒」，而不是留一个似有似无的空，也不是写死 18。
  */
 export function refreshIntervalReadOf(body: unknown): SummaryValue<number | null> {
   const answer = body as { success?: unknown, settingsState?: unknown, data?: unknown } | null | undefined
@@ -64,10 +64,23 @@ export function refreshIntervalReadOf(body: unknown): SummaryValue<number | null
   return { state: 'unreadable' }
 }
 
-export function refreshIntervalText(value: SummaryValue<number | null>): string {
+/**
+ * 服务端此刻生效的实时节拍（秒）；答案里没有这个数时为 null。
+ *
+ * 与存储行里的值分开读：没选过时它不是 18，而由环境变量/启动参数决定 ——
+ * 运维改过 `TRANSIT_POLL_INTERVAL_SEC` 之后，「默认 18 秒」这句话就是假的。
+ */
+export function effectiveRefreshIntervalOf(body: unknown): number | null {
+  const v = (body as { effectiveRefreshIntervalSec?: unknown } | null | undefined)?.effectiveRefreshIntervalSec
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+export function refreshIntervalText(value: SummaryValue<number | null>, effectiveSec: number | null): string {
   if (value.state === 'reading') return reading()
   if (value.state === 'unreadable') return unreadableText()
-  return value.value === null ? '未设置（默认 18 秒）' : `每 ${value.value} 秒`
+  if (value.value !== null) return `每 ${value.value} 秒`
+  // 没选过时的「默认」是此刻在跑的那个数；连它都没读到就只说没设置，绝不拿 18 顶上。
+  return effectiveSec === null ? '未设置' : `未设置（默认每 ${effectiveSec} 秒）`
 }
 
 /** 当前城市关注了多少条线路。 */

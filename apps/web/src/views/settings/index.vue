@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * 设置 的**索引**：四行，每行一个域，各自把该域的**当前状态**作为事实陈述。
+ * 设置 的**索引**：五行，每行一个域，各自把该域的**当前状态**作为事实陈述。
  *
- * 本页是什么。四个域曾挤在一个 841 行的屏幕上；现在是四个页面，而这里是通往它们的地图。
+ * 本页是什么。诸域曾挤在一个 841 行的屏幕上；现在是五个页面，而这里是通往它们的地图。
  * 一行是整行 `<RouterLink>` 而非脚本化的 `router.push`：这样这一行自带语义、键盘可达性
  * 与浏览器已经会给链接的「在新标签页打开」。
  *
@@ -15,7 +15,7 @@
  */
 import { computed, onMounted, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ChevronRight, Clock, MapPin, Search, Waypoints } from '@lucide/vue'
+import { ChevronRight, Clock, MapPin, RefreshCw, Search, Waypoints } from '@lucide/vue'
 import { useCityStore } from '@/stores/city.store'
 import { useTransitStore } from '@/stores/transit.store'
 import type { StoredAnchors } from './anchors'
@@ -24,6 +24,8 @@ import {
   chainsText,
   followedLinesText,
   hoursText,
+  refreshIntervalReadOf,
+  refreshIntervalText,
   settingsReadOf,
   type SettingsSummaryValue,
   type SummaryValue,
@@ -47,9 +49,10 @@ const followedLines = shallowRef<SummaryValue<number>>({ state: 'reading' })
 const savedHours = shallowRef<SettingsSummaryValue<UserSettings>>({ state: 'reading' })
 const anchors = shallowRef<SummaryValue<StoredAnchors>>({ state: 'reading' })
 const chains = shallowRef<SummaryValue<number>>({ state: 'reading' })
+const refreshInterval = shallowRef<SummaryValue<number | null>>({ state: 'reading' })
 
 /**
- * 各行，按四个域的既定次序：关注线路、通勤时段、位置锚点、通勤链路。
+ * 各行，按各域的既定次序：关注线路、通勤时段、位置锚点、通勤链路、实时刷新间隔。
  *
  * 其中三个在此读取，而非取自子页面：本页可能是会话渲染的第一屏，
  * 故它陈述的每个事实都必须来自自己的读取。
@@ -59,6 +62,7 @@ const rows = computed(() => [
   { to: '/settings/chains', label: '通勤链路', icon: Waypoints, summary: chainsText(chains.value) },
   { to: '/settings/schedule', label: '通勤时段', icon: Clock, summary: hoursText(savedHours.value) },
   { to: '/settings/anchors', label: '位置锚点', icon: MapPin, summary: anchorsText(anchors.value) },
+  { to: '/settings/refresh-interval', label: '实时刷新间隔', icon: RefreshCw, summary: refreshIntervalText(refreshInterval.value) },
 ])
 
 onMounted(() => {
@@ -106,12 +110,14 @@ async function readSettings(): Promise<void> {
     const read = settingsReadOf(json)
     savedHours.value = read.hours
     anchors.value = read.anchors
+    refreshInterval.value = refreshIntervalReadOf(json)
   }
   catch {
     // 请求从未作答，或答案无法解析：关于已存记录一无所知。
     // 「未设置」会是对它的断言，而默认值会看起来像用户自己的时段。
     savedHours.value = { state: 'unreadable' }
     anchors.value = { state: 'unreadable' }
+    refreshInterval.value = { state: 'unreadable' }
   }
 }
 </script>

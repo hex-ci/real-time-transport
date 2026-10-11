@@ -66,12 +66,12 @@ describe('012：接驳方式入库（每段乘车段一份，未选过就是 NUL
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步之前那一步：013 在它之后，是它让出了这个位置', () => {
-    // 013 给设置行加了锚点的地点名与来源，故「按文件名排最后」这一行 012 不再持有。
-    // 钉住的是**谁在它之后**，而不是它自己永远垫底。
+  it('是当前最新的一步之前两步：013 与 014 在它之后，是它们让出了这个位置', () => {
+    // 013 给设置行加了锚点的地点名与来源，014 又加实时刷新间隔，
+    // 故「按文件名排最后」这一行 012 不再持有。钉住的是**谁在它之后**，而不是它自己永远垫底。
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
     const after = files.slice(files.indexOf(FILE) + 1)
-    expect(after).toEqual(['013_user-settings-anchor-place.sql'])
+    expect(after).toEqual(['013_user-settings-anchor-place.sql', '014_user-settings-refresh-interval.sql'])
   })
 
   it('前向段给乘车段加上可空、无默认值的 connection_mode', () => {

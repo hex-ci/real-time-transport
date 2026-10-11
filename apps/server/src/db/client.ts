@@ -36,6 +36,8 @@ export interface StoredUserSettings {
   workPlaceName: string | null
   homeAnchorSource: AnchorSource | null
   workAnchorSource: AnchorSource | null
+  /** 实时数据刷新间隔（秒），null 即没选过，读侧回退 18s。 */
+  refreshIntervalSec: number | null
 }
 
 /**
@@ -57,6 +59,7 @@ const EMPTY_USER_SETTINGS: StoredUserSettings = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 }
 
 /**
@@ -326,8 +329,12 @@ export class Database {
       }
     }
     catch (err: any) {
-      console.warn('PostgreSQL connection skipped (using memory store):', err.message)
-      this.pool = null
+      // DATABASE_URL 配了但连不上：直接报错退出，不静默回退内存存储。
+      // 内存数据重启即丢，会让用户误以为数据丢失；没 DB 就该像普通网站一样起不来。
+      throw new Error(
+        `PostgreSQL 连接失败，服务无法启动: ${err.message}。请确认数据库容器已启动 (docker compose up -d)。`,
+        { cause: err },
+      )
     }
   }
 
@@ -356,6 +363,10 @@ export class Database {
           eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
           morningDirection: row.morning_direction ?? null,
           eveningDirection: row.evening_direction ?? null,
+          followedStopName0: row.followed_station_name_0 ?? undefined,
+          followedStopOrder0: row.followed_station_order_0 ?? undefined,
+          followedStopName1: row.followed_station_name_1 ?? undefined,
+          followedStopOrder1: row.followed_station_order_1 ?? undefined,
           displayOrder: row.display_order ?? 0,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
           isPinned: row.is_pinned ?? false,
@@ -457,6 +468,10 @@ export class Database {
           eveningStopOrder: row.reverse_pinned_station_order ?? undefined,
           morningDirection: row.morning_direction ?? null,
           eveningDirection: row.evening_direction ?? null,
+          followedStopName0: row.followed_station_name_0 ?? undefined,
+          followedStopOrder0: row.followed_station_order_0 ?? undefined,
+          followedStopName1: row.followed_station_name_1 ?? undefined,
+          followedStopOrder1: row.followed_station_order_1 ?? undefined,
           displayOrder: row.display_order ?? 0,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
           // 置顶是显式的单目标动作（见 setPinned）：会违反「每用户一个置顶」索引的
@@ -613,6 +628,10 @@ export class Database {
     eveningStopOrder?: number | null
     morningDirection?: number | null
     eveningDirection?: number | null
+    followedStopName0?: string | null
+    followedStopOrder0?: number | null
+    followedStopName1?: string | null
+    followedStopOrder1?: number | null
   }): Promise<boolean> {
     const sets: string[] = []
     const values: (string | number | null)[] = [id]
@@ -627,6 +646,10 @@ export class Database {
     push('reverse_pinned_station_order', stops.eveningStopOrder)
     push('morning_direction', stops.morningDirection)
     push('evening_direction', stops.eveningDirection)
+    push('followed_station_name_0', stops.followedStopName0)
+    push('followed_station_order_0', stops.followedStopOrder0)
+    push('followed_station_name_1', stops.followedStopName1)
+    push('followed_station_order_1', stops.followedStopOrder1)
 
     if (sets.length === 0) return false
 
@@ -653,6 +676,10 @@ export class Database {
       if (stops.eveningStopOrder !== undefined) rec.eveningStopOrder = stops.eveningStopOrder ?? undefined
       if (stops.morningDirection !== undefined) rec.morningDirection = stops.morningDirection
       if (stops.eveningDirection !== undefined) rec.eveningDirection = stops.eveningDirection
+      if (stops.followedStopName0 !== undefined) rec.followedStopName0 = stops.followedStopName0 ?? undefined
+      if (stops.followedStopOrder0 !== undefined) rec.followedStopOrder0 = stops.followedStopOrder0 ?? undefined
+      if (stops.followedStopName1 !== undefined) rec.followedStopName1 = stops.followedStopName1 ?? undefined
+      if (stops.followedStopOrder1 !== undefined) rec.followedStopOrder1 = stops.followedStopOrder1 ?? undefined
       return true
     }
     return false
@@ -687,7 +714,8 @@ export class Database {
         const res = await this.pool.query(
           `SELECT morning_start, morning_end, evening_start, evening_end,
                   home_lat, home_lng, work_lat, work_lng,
-                  home_place_name, work_place_name, home_anchor_source, work_anchor_source
+                  home_place_name, work_place_name, home_anchor_source, work_anchor_source,
+                  refresh_interval_sec
              FROM user_settings WHERE user_id = $1`,
           [userId],
         )
@@ -710,6 +738,7 @@ export class Database {
           workPlaceName: storedPlaceName(row.work_place_name),
           homeAnchorSource: storedAnchorSource(row.home_anchor_source),
           workAnchorSource: storedAnchorSource(row.work_anchor_source),
+          refreshIntervalSec: typeof row.refresh_interval_sec === 'number' ? row.refresh_interval_sec : null,
         }
       }
       catch {
@@ -737,8 +766,9 @@ export class Database {
         `INSERT INTO user_settings
            (user_id, morning_start, morning_end, evening_start, evening_end,
             home_lat, home_lng, work_lat, work_lng,
-            home_place_name, work_place_name, home_anchor_source, work_anchor_source, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+            home_place_name, work_place_name, home_anchor_source, work_anchor_source,
+            refresh_interval_sec, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
          ON CONFLICT (user_id) DO UPDATE SET
            morning_start = EXCLUDED.morning_start,
            morning_end = EXCLUDED.morning_end,
@@ -752,6 +782,7 @@ export class Database {
            work_place_name = EXCLUDED.work_place_name,
            home_anchor_source = EXCLUDED.home_anchor_source,
            work_anchor_source = EXCLUDED.work_anchor_source,
+           refresh_interval_sec = EXCLUDED.refresh_interval_sec,
            updated_at = NOW()`,
         [
           userId,
@@ -767,6 +798,7 @@ export class Database {
           merged.workPlaceName,
           merged.homeAnchorSource,
           merged.workAnchorSource,
+          merged.refreshIntervalSec,
         ],
       )
     }

@@ -24,11 +24,13 @@ import { useEventListener, useIntervalFn } from '@vueuse/core'
 import {
   refreshFreshnessOf,
   useTransitStore,
+  type RefreshReading,
 } from '@/stores/transit.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { RefreshControl } from '@/components/refresh-control'
 import { useGis } from '@/composables/use-gis'
+import { useCommutePurpose } from '@/composables/use-commute-purpose'
 import {
   DesktopActionBar,
   LineHero,
@@ -42,6 +44,7 @@ import type { DirectionOption } from './types'
 import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@real-time-transport/shared'
 import { effectiveCommuteDirection, favoriteDirectionOfLine } from '@real-time-transport/shared/line-group'
 import { statedArrivalMinutes, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { NEARBY_RADIUS_M, haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
@@ -171,8 +174,24 @@ const refreshTargets = computed<RefreshLiveTarget[]>(() => [{
    */
 const refreshing = computed(() => refreshInFlight.value || isRefreshingLive.value)
 
-/** 本页唯一留在屏幕上的刷新字句：上一次按下取到的读数。 */
-const refreshFreshness = computed(() => refreshFreshnessOf(refreshReading.value))
+/**
+ * 右上角新鲜度字句：取所有来源中最新的读数。
+ *
+ * 原来只认手动按下的读数（refreshReading），于是初次加载与 WS 每 18 秒推来的
+ * 新数据在这里是隐形的——角落永远显示"尚未获取到数据"，直到用户亲手按一次刷新。
+ * 数据就是数据，不分手动自动：取最新的那个，界面才诚实。
+ * （store 里的 refreshReading 本身不动：冷却倒计时仍只认手动按下。）
+ */
+const freshestReading = computed<RefreshReading | null>(() => {
+  const manual = refreshReading.value
+  const live = currentLiveStatus.value
+  const auto: RefreshReading | null = live?.updatedAt
+    ? { at: live.updatedAt, dataSource: live.dataSource, isDegraded: live.isDegraded }
+    : null
+  if (manual && auto) return manual.at >= auto.at ? manual : auto
+  return manual ?? auto
+})
+const refreshFreshness = computed(() => refreshFreshnessOf(freshestReading.value))
 
 /**
  * F11 在本页的两处入口共用这一份参数：桌面动作行与移动端抽屉各挂一个实例，词都由本页算好，
@@ -249,7 +268,11 @@ const directionOptions = computed<DirectionOption[]>(() => {
   const stops = d.stops
   const first = stops[0]?.name || ''
   const last = stops[stops.length - 1]?.name || ''
-  const isLoop = first !== '' && first === last
+  // 环线判定：首末站同名，或线路名带内/外后缀（如 300内/300外）。
+  // 后者覆盖"同一环线系统但本站首末站名不同"的情况（如 300外 首站十里河桥北、
+  // 末站十里河桥西）——两页的页签展示必须一致，不能一个用线路名、一个用开往。
+  const isLoop = (first !== '' && first === last)
+    || d.lineName.includes('内') || d.lineName.includes('外')
 
   // `detail.direction` 是引擎侧的事实（它不回显查询参数），故它是已加载数据描述哪个方向的可靠锚点。
   const curDir = d.direction
@@ -259,9 +282,21 @@ const directionOptions = computed<DirectionOption[]>(() => {
     (direction === curDir ? d.lineId : opp)
 
   const labelFor = (direction: number): string => {
-    if (isLoop) return direction === 0 ? '上行' : '下行'
-    // 已加载的方向有权威标签；反向的那个由它的终点（本方向的首站）导出——反向的详情从不读取，因为页签只需要这一个字符串。
+    // 环线没有"开往 X"的概念 —— 起点终点是同一个站。方向由线路名本身区分
+    // （300内/300外：内顺时针、外逆时针），页签直接显示线路名。
+    if (isLoop) {
+      if (direction === curDir) return d.lineName || (direction === 0 ? '上行' : '下行')
+      // 反向详情未加载：按内/外互换推测展示名，点过去后以真实数据为准。
+      const swapped = d.lineName.includes('内')
+        ? d.lineName.replace('内', '外')
+        : d.lineName.includes('外')
+          ? d.lineName.replace('外', '内')
+          : ''
+      return swapped || (direction === 0 ? '上行' : '下行')
+    }
+    // 已加载的方向有权威标签，优先用 —— 不能被环线启发式跳过。
     if (direction === curDir && d.directionName) return d.directionName
+    // 反向的那个由它的终点（本方向的首站）导出——反向的详情从不读取，因为页签只需要这一个字符串。
     const terminal = direction === curDir ? last : first
     return terminal ? `开往 ${terminal}` : (direction === 0 ? '上行' : '下行')
   }
@@ -425,16 +460,53 @@ const activePurpose = computed<'morning' | 'evening' | null>(() => {
   return null
 })
 
+const { currentPurpose } = useCommutePurpose()
+
+/**
+ * 通勤聚焦站：报站板初始镜头的目标。
+ *
+ * 上班时段看上班方向时聚焦到上班上车站，下班时段看下班方向时聚焦到下班上车站 ——
+ * 打开就是"我要等车的地方"，不用手动找。只在同时满足时生效：
+ * 1. 现在处于某个通勤时段（按设置页的四个时刻，否则按默认窗口启发式）；
+ * 2. 这条线路被关注过（上车点只对已关注的线路有意义）；
+ * 3. 这个目的的上车点属于屏幕上这个方向 —— 方向对不上说明要等的车不在本屏，
+ *    此时不聚焦，退回原来的逻辑（选中 > 最近；都不具备就不聚焦）。
+ * 报站板里优先级：手动选中的站 > 通勤聚焦站 > 最近站；都不具备就不聚焦。
+ */
+const commuteFocusStationId = computed<string | null>(() => {
+  const purpose = currentPurpose.value
+  const fav = matchingFavorite.value
+  const detail = currentLineDetail.value
+  if (!purpose || !fav || !detail) return null
+
+  const dir = favoriteDirection.value
+  const stopDir = purpose === 'morning' ? morningStopDirection.value : eveningStopDirection.value
+  if (stopDir !== null && dir !== null && stopDir !== dir) return null
+
+  const name = purpose === 'morning' ? fav.morningStopName : fav.eveningStopName
+  const order = purpose === 'morning' ? fav.morningStopOrder : fav.eveningStopOrder
+  if (!name) return null
+  const stop = detail.stops.find(s => s.name === name && (order == null || s.order === order))
+  return stop?.id ?? null
+})
+
 async function computeWalkDecision(): Promise<void> {
   const coords = locationStore.userCoords
-  if (!coords || !selectedStation.value) return
+  const st = selectedStation.value
+  if (!coords || !st) return
+  // 定位与所选城市脱钩时（如北京定位看天津的线），算一条跨城步行路线是荒谬的：
+  // 只给 3km 内（NEARBY_RADIUS_M）的站算步行建议。
+  const lat = statedCoordinate(st.lat)
+  const lng = statedCoordinate(st.lng)
+  if (lat === undefined || lng === undefined) return
+  if (haversineMeters(coords.lat, coords.lng, lat, lng) > NEARBY_RADIUS_M) return
   await fetchWalkDecision({
     originLng: coords.lng,
     originLat: coords.lat,
     lineId: lineId.value,
     // 与到站同理：匹配屏幕上真正显示的方向。
     direction: activeDirection.value,
-    stationName: selectedStation.value.name,
+    stationName: st.name,
     cityCode: currentCityCode.value,
   })
 }
@@ -445,6 +517,26 @@ async function computeWalkDecision(): Promise<void> {
  * 文本与标记刻意由同一个分支决定——陈述分钟的线路必须带上它陈述的那个分钟的来源，陈述营运事实的
  * 线路不带，因为没有数字可分类。把两者分开正是算出来的分钟看起来像一次读取的原因。
  */
+
+/**
+ * 车辆是否正在目标站台（20 米内）。标准与服务端 isAtStation 一致。
+ *
+ * 不能用离散的 order 判：b.order 是"刚经过的站"，车开到半路时 order 还停在
+ * 本站，会误判为"在本站"。必须用连续里程。
+ */
+function isBusAtPlatform(b: { travelTimeSec?: number, distanceFromStart?: number, nextOrder?: number }, targetOrder: number): boolean {
+  // 上游明确说在站上（travelTime 0）
+  if (b.travelTimeSec === 0) return true
+  // 里程在站台 20 米内
+  const sd = currentLineDetail.value?.stationDistances
+  const targetDist = sd?.[targetOrder - 1]
+  if (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number') {
+    return Math.abs(b.distanceFromStart - targetDist) <= 20
+  }
+  // 无里程数据时降级：只有正开往本站才算（order 是"刚经过"，不能算）
+  return b.nextOrder === targetOrder
+}
+
 const selectedStationEta = computed<{ text: string, mark: string | null }>(() => {
   if (!selectedStation.value) return { text: '等待发车', mark: null }
   const targetOrder = selectedStation.value.order
@@ -501,7 +593,10 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next > targetOrder
     })
-    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    // 「在本站」必须用连续里程判（35 米内），不能用离散 order：
+    // b.order 是"刚经过的站"，车开到半路时 order 还停在本站，会误判。
+    // 标准与服务端 isAtStation 一致。
+    const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
       return { text: AT_PLATFORM_ETA_TEXT, mark: null }
@@ -529,7 +624,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next > targetOrder
     })
-    const servingNow = allBuses.some(b => b.nextOrder === targetOrder || b.order === targetOrder)
+    const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
       return { text: AT_PLATFORM_ETA_TEXT, mark: null }
@@ -673,6 +768,7 @@ onUnmounted(() => {
         :evening-stop-name="matchingFavorite?.eveningStopName ?? null"
         :evening-stop-order="matchingFavorite?.eveningStopOrder ?? null"
         :evening-stop-direction="eveningStopDirection"
+        :commute-focus-station-id="commuteFocusStationId"
         @select-station="onSelectStation"
         @close-station="onCloseStationPopover"
         @station-anchor-change="onStationAnchorChange"
@@ -702,6 +798,7 @@ onUnmounted(() => {
       <DialogOverlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 md:hidden" />
       <DialogContent
         v-if="currentLineDetail"
+        aria-describedby
         class="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col space-y-4 overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 px-5 pt-5 pb-safe-offset-5 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full md:hidden"
       >
         <!-- 头部 -->
@@ -808,6 +905,22 @@ onUnmounted(() => {
             <span class="flex items-center gap-1.5">
               <span class="h-2.5 w-2.5 rounded-full border-2 border-cyan-400 inline-block"></span>
               选中站点
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="text-sm font-bold leading-none text-sky-200">›</span>
+              行驶方向
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 inline-block"></span>
+              上班上车站
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-violet-400 inline-block"></span>
+              下班上车站
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-slate-100 inline-block"></span>
+              首末站
             </span>
           </div>
         </div>

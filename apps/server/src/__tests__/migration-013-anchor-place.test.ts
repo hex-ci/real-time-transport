@@ -77,9 +77,12 @@ describe('013：锚点的地点名与来源入库（「这个坐标是怎么来�
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步：按文件名排，它排在已有的每一条之后', () => {
+  it('是当前最新的一步之前那一步：014 在它之后，是它让出了这个位置', () => {
+    // 014 给设置行加了实时刷新间隔，故「按文件名排最后」这一行 013 不再持有。
+    // 钉住的是**谁在它之后**，而不是它自己永远垫底。
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
-    expect(files[files.length - 1]).toBe(FILE)
+    const after = files.slice(files.indexOf(FILE) + 1)
+    expect(after).toEqual(['014_user-settings-refresh-interval.sql'])
   })
 
   it('前向段加两个地点名列，可空、无默认值', () => {

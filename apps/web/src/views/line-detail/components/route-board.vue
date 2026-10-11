@@ -42,12 +42,19 @@ const {
   shownDirection = null,
   morningStopDirection = null,
   eveningStopDirection = null,
+  commuteFocusStationId = null,
 } = defineProps<{
   lineDetail: LineDetail
   buses: LiveBus[]
   nearestStation?: Station | null
   /** 当前选中的站，用高亮环画出。 */
   selectedStation?: Station | null
+  /**
+   * 通勤聚焦站 id：上班时段的上班上车站 / 下班时段的下班上车站。
+   * 初始镜头优先对准它（低于手动选中的站，高于最近站）；用户一旦拖动/缩放过画布，
+   * 就不再自动抢镜头。null 表示当前没有可聚焦的通勤站，走原来的逻辑。
+   */
+  commuteFocusStationId?: string | null
   /** 可选的初始排布模式（'folded' 或 'linear'）。默认取持久化的偏好，否则 'folded'。 */
   initialLayoutMode?: RouteLayoutMode
   /** 通勤上车点的站名，出现在这个方向上时在图上标出。 */
@@ -116,7 +123,6 @@ const containerRef = useTemplateRef('containerEl')
  * 高度留出内缩；桌面端这些元素是 display: none，量得零尺寸——一次测量同时覆盖两种情况，
  * 无需可能与 `md:` 可见性类漂开的断点判断。
  */
-const mobileModePillRef = useTemplateRef('mobileModePillEl')
 /**
  * 只有 FAB 触发按钮，不含它的容器：工具列表展开时容器会长大，按那个临时的堆叠内缩会把报站板
  * 往下推。
@@ -181,8 +187,6 @@ let lastPinchCenter: { x: number, y: number } | null = null
 let currentLayout: RouteLayoutResult | null = null
 let selectionRing: Konva.Circle | null = null
 let nearestAuraCircle: Konva.Circle | null = null
-let rippleCircle1: Konva.Circle | null = null
-let rippleCircle2: Konva.Circle | null = null
 
 interface AnimatedVehicle {
   id: string
@@ -200,6 +204,14 @@ interface AnimatedVehicle {
   mode: 'cruise' | 'catchup' | 'hold'
   /** 'catchup' 模式收敛到的目标。 */
   convergeTo: number
+  /** 'hold' 模式下冻住到期的 Konva 帧时间（ms）；到期前速度为 0，到期后转低速爬行。
+    到期时间按"数据时间线追上冻住位置"的时刻计算，但受 FREEZE_MAX_MS 封顶，
+    不等下一次数据到来。 */
+  frozenUntil: number
+  /** 巡游速度系数：正常为 1；冻住超时后转 0.3 低速爬行，直到新数据证明不再超调才恢复。 */
+  speedFactor: number
+  /** 上游报的下一站站序（1-based）：巡航外推的上限钳在该站站台；缺失时退回定位点钳制。 */
+  nextOrder: number | undefined
   /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
   speedMs: number | undefined
   /** 停靠站台（引擎报约 0 速度）：不做航位推算。 */
@@ -226,8 +238,9 @@ const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
 const DWELL_SETTLE_MS = 2.0
-const FREERUN_CRUISE_MS = 8000 // 满速巡游 8 秒
-const MAX_FREERUN_MS = 20000 // 之后 20 秒内平滑衰减到 0
+const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
+const FREEZE_MAX_MS = 5000 // 冻住时长上限：超时后转低速爬行，不死等
+const RECOVER_SPEED_FACTOR = 0.3 // 冻住超时后的爬行速度系数
 const MAX_SEGMENTS_PER_SEC = 1.2
 const FADE_SEC = 0.6
 
@@ -297,6 +310,28 @@ function nearestPlatformDist(dist: number): number | null {
   return best
 }
 
+/**
+ * 巡航外推的上限距离（防超站核心）。
+ *
+ * 没新数据时车允许一直往前开，但上限是**下一站站台**：开到站就停在站上等，
+ * 永不冲过站台。图标已过站台（动画外推超过）时，退回上一定位点钳制——
+ * 不按里程放开，因为上游离散的 order/nextOrder 更新比里程慢，放开会导致
+ * 动画与弹窗（用 order 判"在本站"）不一致。下一站未知时同样退回定位点。
+ * 返回 null 表示无从钳制（此时仅靠 [0, L] 兜底）。
+ */
+function cruiseCapDist(v: AnimatedVehicle): number | null {
+  const sd = effectiveStationDistances.value
+  const order = v.nextOrder
+  if (
+    typeof order === 'number' && Number.isFinite(order) && order >= 1
+    && sd.length >= 2 && order - 1 < sd.length
+  ) {
+    const stationDist = sd[order - 1]!
+    if (v.displayedDist <= stationDist) return stationDist
+  }
+  return v.fixDist
+}
+
 function initStage(): void {
   if (!containerRef.value) return
 
@@ -362,7 +397,7 @@ function initStage(): void {
     focusKeyStation(false)
   }
   else if (currentLayout && currentLayout.points.length > 0) {
-    fitWidth()
+    focusInitialFolded()
   }
 
   // 舞台初始化完成时可能已经有站被选中（定位与线路详情一到就会选出最近站）。选中的 watcher
@@ -494,17 +529,11 @@ function initAnimation(): void {
     const dt = (frame.timeDiff || 16.6) / 1000
     const time = frame.time || 0
 
-    if (nearestAuraCircle && rippleCircle1 && rippleCircle2) {
-      const scale = 1 + 0.12 * Math.sin(time / 350)
+    // 最近站只留一圈静态弱光晕：之前两圈扩散涟漪的动画太抢眼，
+    // 会把视线从通勤上车站（真正重要的）上吸走。
+    if (nearestAuraCircle) {
+      const scale = 1 + 0.06 * Math.sin(time / 600)
       nearestAuraCircle.scale({ x: scale, y: scale })
-
-      const phase1 = (time % 1800) / 1800
-      rippleCircle1.radius(6 + 18 * phase1)
-      rippleCircle1.opacity(Math.max(0, 0.6 * (1 - phase1)))
-
-      const phase2 = ((time + 900) % 1800) / 1800
-      rippleCircle2.radius(6 + 18 * phase2)
-      rippleCircle2.opacity(Math.max(0, 0.6 * (1 - phase2)))
     }
 
     const L = routeLength()
@@ -546,34 +575,39 @@ function initAnimation(): void {
           if (delta > 0) {
             v.mode = 'catchup'
             v.convergeTo = v.fixDist
+            v.speedFactor = 1
           }
-          else if (delta < -15) {
+          else if (delta < -OVERSHOOT_EPS_M) {
+            // 外推出超前：就地冻住，不跳回去。冻住时长按"数据时间线追上
+            // 冻住位置"的时刻计算，受 FREEZE_MAX_MS 封顶——不等下一次数据，
+            // 到期后转低速爬行；下次数据若还超调则再冻，循环。
+            // 用 base 速度（含 DEFAULT_SPEED_MS 兜底），与动画实际速度一致。
+            // base 为 0（车在站上）时算不出时长，直接冻到新数据来重新判定。
             v.mode = 'hold'
             v.convergeTo = v.fixDist
+            const overshoot = -delta
+            v.frozenUntil = base > 0
+              ? time + Math.min((overshoot / base) * 1000, FREEZE_MAX_MS)
+              : Number.POSITIVE_INFINITY
+            v.speedFactor = RECOVER_SPEED_FACTOR
           }
           else {
             v.mode = 'cruise'
             v.convergeTo = v.fixDist
+            v.speedFactor = 1
           }
         }
       }
 
-      const sinceLastFix = time - v.lastFixAt
-      // 平滑外推衰减：0 ~ 8 秒满速；8 ~ 20 秒线性衰减到 0（模拟接近路口/信号）；之后保持位置，直到新的实时定位到来。
-      let extrapolationFactor = 0
-      if (sinceLastFix < FREERUN_CRUISE_MS) {
-        extrapolationFactor = 1.0
-      }
-      else if (sinceLastFix < MAX_FREERUN_MS) {
-        extrapolationFactor = Math.max(0, 1.0 - (sinceLastFix - FREERUN_CRUISE_MS) / (MAX_FREERUN_MS - FREERUN_CRUISE_MS))
-      }
+      // 无衰减外推：没新数据时按最后已知速度一直走，直到下一站钳制。
+      // 不再 20 秒归零——车宁可在站上等，不冻在半路。
 
       let effectiveSpeed: number
       if (v.mode === 'catchup') {
         const remaining = v.convergeTo - v.displayedDist
         if (remaining <= 0.5) {
           v.mode = 'cruise'
-          effectiveSpeed = base * extrapolationFactor
+          effectiveSpeed = base
         }
         else {
           // 有界的平滑追赶：3.5 秒内温和合上差距，且严格受物理速度上限封顶。
@@ -582,17 +616,18 @@ function initAnimation(): void {
         }
       }
       else if (v.mode === 'hold') {
-        // 真车在路口或站被拦住时，以 0 速度温和等待，直到真实位置前进。
-        if (v.fixDist !== null && v.displayedDist <= v.fixDist + 0.5) {
+        // 外推出超前时的冻住：到期转低速爬行，不等下一次数据。
+        // 若期间来了新数据且位置已追上，上面 fixPending 分支会切走 hold。
+        if (time >= v.frozenUntil) {
           v.mode = 'cruise'
-          effectiveSpeed = base * extrapolationFactor
+          effectiveSpeed = base * v.speedFactor
         }
         else {
           effectiveSpeed = 0
         }
       }
       else {
-        effectiveSpeed = base * extrapolationFactor
+        effectiveSpeed = base * v.speedFactor
       }
 
       if (effectiveSpeed > 0 && dt > 0) {
@@ -614,16 +649,48 @@ function initAnimation(): void {
       const prevDist = v.displayedDist
       let nextDist = prevDist + effectiveSpeed * dt
 
+      // 巡航钳制：外推可以超过上一定位点，但永不超过下一站站台。
+      // 没新数据时车会一直开到下一站然后停在站上等；新数据若显示还没到站，
+      // 车就停在站上不动——永远不倒退，也永远不冲过站台。
+      if (v.mode === 'cruise') {
+        const cap = cruiseCapDist(v)
+        if (cap !== null && nextDist > cap) nextDist = cap
+      }
+
       if (v.dwell) {
         const plat = nearestPlatformDist(nextDist)
-        // 只向前停靠：只有从后方接近站台时才滑入，绝不往回拉。
-        if (plat !== null && plat > nextDist && (plat - nextDist) < DWELL_SNAP_M) {
+        // 停靠吸附（双向）：车在站上时把图标轻轻拉向站台圆心。
+        // 从后方接近时与原来一样指数滑入；若历史原因已超调一点，也允许拉回——
+        // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
+        if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
 
-      // 铁律：严格单调不减（永不向后运动）。
-      v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
+      // 单调性：行驶中严格不后退；停靠时允许向站台做小幅位置修正（见上）。
+      v.displayedDist = v.dwell
+        ? Math.max(0, Math.min(L, nextDist))
+        : Math.max(prevDist, Math.min(L, nextDist))
+
+      // 速度标签跟动画实际速度走：冻住/钳住时图标没动，标签渐隐；
+      // 动起来时渐显。用实际位移（钳制后）算，不用 effectiveSpeed——
+      // 被钳住时位移为 0，标签隐藏而不是显示"想走"的速度。
+      // 只在取整值变化时更新文本；透明度每帧向目标插值，平滑过渡。
+      if (v.label) {
+        const actualSpeed = dt > 0 ? (v.displayedDist - prevDist) / dt : 0
+        const kmh = Math.round(Math.max(0, actualSpeed) * 3.6)
+        const targetOp = kmh > 0 ? 1 : 0
+        if (kmh > 0) {
+          const text = `${kmh}km/h`
+          if (v.label.text() !== text) v.label.text(text)
+        }
+        const curOp = v.label.opacity()
+        if (curOp !== targetOp) {
+          const nextOp = curOp + (targetOp - curOp) * Math.min(1, dt * 6)
+          // 接近目标时直接贴合，避免永远差一点点
+          v.label.opacity(Math.abs(nextOp - targetOp) < 0.02 ? targetOp : nextOp)
+        }
+      }
 
       const pos = layoutPosition(v.displayedDist)
       v.container.position({ x: pos.x, y: pos.y })
@@ -713,6 +780,13 @@ function renderStaticBoard(): void {
   })
   currentLayout = layout
 
+  // 始发站 / 终点站：环线（首末同名）不标，方向用上行/下行表达。
+  const isLoopLine = stops.length > 1 && stops[0]!.name === stops[stops.length - 1]!.name
+  const firstStationId = !isLoopLine && layout.points.length > 0 ? layout.points[0]!.station.id : null
+  const lastStationId = !isLoopLine && layout.points.length > 0
+    ? layout.points[layout.points.length - 1]!.station.id
+    : null
+
   for (let r = 0; r < layout.totalRows; r++) {
     const rowPoints = layout.points.filter(p => p.row === r)
     if (rowPoints.length < 2) continue
@@ -734,6 +808,31 @@ function renderStaticBoard(): void {
       opacity: 0.7,
       lineCap: 'round',
     }))
+
+    // 行驶方向箭头：每段站间中点放一个细线条 chevron，一眼看出这条线往哪开。
+    // 细、不填色、比站点图标小 —— 方向是辅助信息，不能抢站点的戏。
+    // 跟画布一起缩放（不做反向补偿），行为和站点一致。
+    for (let i = 0; i < rowPoints.length - 1; i++) {
+      const a = rowPoints[i]!
+      const b = rowPoints[i + 1]!
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len = Math.hypot(dx, dy)
+      // 太短的段不放：箭头会糊住两端的站点圆点。
+      if (len < 56) continue
+      trackLayer.add(new Konva.Line({
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
+        points: [-2, -3, 3.5, 0, -2, 3],
+        stroke: '#e0f2fe',
+        strokeWidth: 1.6,
+        lineCap: 'round',
+        lineJoin: 'round',
+        opacity: 0.4,
+        rotation: Math.atan2(dy, dx) * 180 / Math.PI,
+        listening: false,
+      }))
+    }
   }
 
   for (const arc of layout.arcs) {
@@ -759,6 +858,24 @@ function renderStaticBoard(): void {
     }))
   }
 
+  // 折返圆弧上的方向箭头：圆弧中点（最外侧那点），切线方向恒为向下（往下一行走），
+  // 与圆弧的几何一致（两侧皆然）。没有它，换行处方向会断。
+  // 在圆弧轨道之后画，否则会被轨道盖住。
+  for (const arc of layout.arcs) {
+    trackLayer.add(new Konva.Line({
+      x: arc.centerX + (arc.isRightSide ? arc.radius : -arc.radius),
+      y: arc.centerY,
+      points: [-2, -3, 3.5, 0, -2, 3],
+      stroke: '#e0f2fe',
+      strokeWidth: 1.6,
+      lineCap: 'round',
+      lineJoin: 'round',
+      opacity: 0.4,
+      rotation: 90,
+      listening: false,
+    }))
+  }
+
   for (const pt of layout.points) {
     const isNearest = nearestStation && nearestStation.id === pt.station.id
     const isInterchange = pt.station.interchanges && pt.station.interchanges.length > 0
@@ -775,13 +892,19 @@ function renderStaticBoard(): void {
       }))
     }
 
+    // 首末站：不再用文字角标，改用白色大圆点——任何设备渲染一致，无字体问题。
+    // 始/终的方向区分由行驶 chevron 与标题方向名承担。环线不标。
+    const isTerminal = firstStationId !== null
+      && (pt.station.id === firstStationId || pt.station.id === lastStationId)
+
     // 纯视觉节点：listening: false 把所有命中交给 hit 圆。
+    // 优先级：最近站（琥珀）> 选中站（青）> 首末站（白大圆点）> 普通站。
     const circle = new Konva.Circle({
       id: `station-visual-${pt.station.id}`,
       x: pt.x,
       y: pt.y,
-      radius: m.stationRadius,
-      fill: isNearest ? '#facc15' : isSelected ? '#22d3ee' : '#cbd5e1',
+      radius: isTerminal && !isNearest && !isSelected ? m.stationRadius + 1.5 : m.stationRadius,
+      fill: isNearest ? '#facc15' : isSelected ? '#22d3ee' : isTerminal ? '#f8fafc' : '#cbd5e1',
       stroke: '#0f172a',
       strokeWidth: 2,
       listening: false,
@@ -860,37 +983,25 @@ function renderStaticBoard(): void {
       listening: false,
     }))
 
-    // 通勤上车点角标。单独一个节点，而不是给站名前缀：站名在最窄的移动端列里已经要折到四行，
+    // 通勤上车点：只保留目的色外环。上/下文字徽章已删——小圆圈里的汉字在不同设备
+    // 字体下永远调不齐垂直居中，且 8px 圆塞 10px 字先天过满；外环本身就是完整编码，
+    // 图例解释颜色含义。单独的节点而不给站名前缀：站名在最窄的移动端列里已经要折到四行，
     // 加宽标签会撑破行高预算。两个上车点各自只标在它自己那个方向上（`onShownDirection`），
-    // 而按站序推断方向的那套推导 005 已删，不能再拿它当角标的依据。
-    const boardStop = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
-      ? { text: '上', fill: '#34d399' }
+    // 而按站序推断方向的那套推导 005 已删，不能再拿它当依据。
+    const boardStopColor = onShownDirection(morningStopDirection) && storedStopAt(pt.station, morningStopName, morningStopOrder)
+      ? '#34d399'
       : onShownDirection(eveningStopDirection) && storedStopAt(pt.station, eveningStopName, eveningStopOrder)
-        ? { text: '下', fill: '#c084fc' }
+        ? '#c084fc'
         : null
-    if (boardStop) {
-      const badgeR = m.stationRadius + 5
+    if (boardStopColor) {
       stationLayer.add(new Konva.Circle({
-        id: `board-stop-badge-${pt.station.id}`,
-        x: pt.x + badgeR + 1,
-        y: pt.y - badgeR + 1,
-        radius: 6,
-        fill: boardStop.fill,
-        stroke: '#020617',
-        strokeWidth: 1.5,
-        listening: false,
-      }))
-      stationLayer.add(new Konva.Text({
-        id: `board-stop-badge-text-${pt.station.id}`,
-        x: pt.x + badgeR - 4,
-        y: pt.y - badgeR - 4,
-        text: boardStop.text,
-        fontSize: 8,
-        fontFamily: 'system-ui, sans-serif',
-        fontStyle: 'bold',
-        fill: '#020617',
-        width: 10,
-        align: 'center',
+        id: `board-stop-ring-${pt.station.id}`,
+        x: pt.x,
+        y: pt.y,
+        radius: m.stationRadius + 4.5,
+        stroke: boardStopColor,
+        strokeWidth: 3,
+        opacity: 0.9,
         listening: false,
       }))
     }
@@ -923,8 +1034,6 @@ function renderDynamicElements(): void {
   vehicleMap.clear()
   rippleGroup = null
   nearestAuraCircle = null
-  rippleCircle1 = null
-  rippleCircle2 = null
 
   const stops = lineDetail?.stops || []
   if (stops.length === 0) return
@@ -942,39 +1051,20 @@ function renderRipple(): void {
   rippleGroup = new Konva.Group({ listening: false })
   dynamicLayer.add(rippleGroup)
   nearestAuraCircle = null
-  rippleCircle1 = null
-  rippleCircle2 = null
 
   if (nearestStation) {
     const pt = currentLayout.points.find(p => p.station.id === nearestStation?.id)
     if (pt) {
-      rippleCircle1 = new Konva.Circle({
-        x: pt.x,
-        y: pt.y,
-        radius: 6,
-        stroke: '#facc15',
-        strokeWidth: 1.5,
-        opacity: 0.6,
-      })
-      rippleCircle2 = new Konva.Circle({
-        x: pt.x,
-        y: pt.y,
-        radius: 6,
-        stroke: '#facc15',
-        strokeWidth: 1,
-        opacity: 0.4,
-      })
+      // 静态弱光晕：标出"你在这里"，但不抢戏。
       nearestAuraCircle = new Konva.Circle({
         x: pt.x,
         y: pt.y,
         radius: 12,
         fill: '#facc15',
-        opacity: 0.2,
+        opacity: 0.12,
       })
 
       rippleGroup.add(nearestAuraCircle)
-      rippleGroup.add(rippleCircle1)
-      rippleGroup.add(rippleCircle2)
     }
   }
 }
@@ -1064,6 +1154,9 @@ function syncVehicles(): void {
         lastFixUpdatedAt: fixUpdatedAt,
         mode: 'cruise',
         convergeTo: initialDist,
+        frozenUntil: 0,
+        speedFactor: 1,
+        nextOrder: bus.nextOrder,
         speedMs,
         dwell,
         removing: false,
@@ -1083,17 +1176,9 @@ function syncVehicles(): void {
       v.fixDist = fixDist
       v.fixPending = true
       v.fixUpdatedAt = fixUpdatedAt
+      v.nextOrder = bus.nextOrder
       v.speedMs = speedMs
       v.dwell = dwell
-    }
-
-    if (v.label) {
-      if (typeof bus.speed === 'number' && Number.isFinite(bus.speed)) {
-        v.label.text(`${Math.round(bus.speed * 3.6)}km/h`)
-      }
-      else {
-        v.label.text('')
-      }
     }
   }
 
@@ -1106,28 +1191,61 @@ function syncVehicles(): void {
   dynamicLayer.batchDraw()
 }
 
-/** 把镜头对准关键站（选中 > 最近 > 第一辆车 > 首站）。 */
+/**
+ * 把镜头对准关键站（选中 > 通勤聚焦 > 最近）。
+ * 通勤聚焦站与最近站是"邻里缩放"目标：镜头放大到视口宽度内约 focusGapsAcross()
+ * 个站间距的级别（折返约半行）、目标站落在纵向黄金分割偏上处，点进来一眼看清
+ * 站点附近有没有车；手动选中的站同样锚定该位置但不缩放。
+ * 条件都不具备（无选中、无通勤目标、无最近站）时不聚焦、不替用户假设目标，
+ * 镜头保持原位。
+ */
 function focusKeyStation(smooth = false): void {
   if (!stage || !currentLayout || currentLayout.points.length === 0) return
 
-  let targetId = selectedStation?.id ?? nearestStation?.id
-  if (!targetId && buses.length > 0) {
-    const b = buses[0]!
-    const targetOrder = b.nextOrder ?? b.order
-    const found = lineDetail?.stops.find(s => s.order === targetOrder)
-    if (found) targetId = found.id
+  let targetId: string | null = selectedStation?.id ?? null
+  let zoomToNeighborhood = false
+  if (!targetId && commuteFocusStationId) {
+    targetId = commuteFocusStationId
+    zoomToNeighborhood = true
   }
-  if (!targetId && lineDetail?.stops.length) {
-    targetId = lineDetail.stops[0]!.id
+  if (!targetId && nearestStation) {
+    targetId = nearestStation.id
+    zoomToNeighborhood = true
   }
+  // 不拿第一辆车/首站兜底：条件不具备就不聚焦。
+  if (!targetId) return
 
-  const targetPt = currentLayout.points.find(p => p.station.id === targetId) ?? currentLayout.points[0]!
   const viewW = stage.width()
   const viewH = stage.height()
+
+  if (zoomToNeighborhood) {
+    const view = neighborhoodView(targetId)
+    if (view) {
+      if (smooth) {
+        stage.to({
+          x: view.x,
+          y: view.y,
+          scaleX: view.scale,
+          scaleY: view.scale,
+          duration: 0.28,
+          easing: Konva.Easings.EaseInOut,
+        })
+      }
+      else {
+        stage.scale({ x: view.scale, y: view.scale })
+        stage.position({ x: view.x, y: view.y })
+        stage.batchDraw()
+      }
+      return
+    }
+  }
+
+  const targetPt = currentLayout.points.find(p => p.station.id === targetId)
+  if (!targetPt) return // 目标站不在当前排布里：不动镜头
   const scale = clampScale(viewW < 640 ? 1.0 : 1.0)
 
   const targetX = (viewW / 2) - targetPt.x * scale
-  const targetY = (viewH / 2) - targetPt.y * scale
+  const targetY = viewH * FOCUS_ANCHOR_Y - targetPt.y * scale
 
   if (smooth) {
     stage.to({
@@ -1146,6 +1264,94 @@ function focusKeyStation(smooth = false): void {
   }
 }
 
+/**
+ * 折返模式的初始聚焦：先按宽度撑开（总览），再把通勤聚焦站 / 最近站做邻里缩放。
+ * 只用于初次排布 —— 用户拖动/缩放过（userHasTransformed）或手动选中了站之后不再抢镜头。
+ * 无通勤/最近目标时保持总览，不做任何聚焦。
+ */
+function focusInitialFolded(): void {
+  fitWidth()
+  if (!stage || !currentLayout || selectedStation || userHasTransformed) return
+  const targetId = commuteFocusStationId ?? nearestStation?.id
+  if (!targetId) return
+  const view = neighborhoodView(targetId)
+  if (!view) return
+  stage.scale({ x: view.scale, y: view.scale })
+  stage.position({ x: view.x, y: view.y })
+  stage.batchDraw()
+}
+
+/** 折返模式按宽度适应的比例（只计算，不移动镜头）。 */
+function fitWidthScale(): number {
+  if (!stage || !trackLayer || !stationLayer || !currentLayout) return 1
+  if (currentLayout.points.length === 0) return 1
+  const box = contentBounds()
+  if (!box) return 1
+  const viewW = Math.max(1, stage.width())
+  const m = boardMetrics()
+  return clampScale((viewW - m.fitPadding * 2) / box.w)
+}
+
+/** 邻里聚焦目标站间距数的兜底值（focusGapsAcross 拿不到 stage 时用，正常走不到）。 */
+const FOCUS_GAPS_ACROSS = 4.5
+/** 邻里聚焦的最大放大倍数：防超密线路缩到荒谬。 */
+const MAX_FOCUS_SCALE = 2.5
+/**
+ * 聚焦时目标站的纵向锚点：黄金分割偏上（0.382），而非绝对垂直居中。
+ * 横向保持绝对居中。绝对居中会让视觉重心下沉，偏上更符合观看习惯，
+ * 上方也给浮动工具留出呼吸空间。
+ */
+const FOCUS_ANCHOR_Y = 0.382
+
+/**
+ * 邻里聚焦的目标站间距数（响应式）。
+ *
+ * 固定 4.5 在移动端会失效：响应式折返布局在窄屏下每行只有 4~5 站，
+ * 按宽度适应的默认视图本来就只放下约 4.5 个站间距，`max(defaultScale, fit)`
+ * 取了原值，手机上肉眼无感（桌面端每行 8~16 站才有放大）。
+ * 改为相对目标——折返取半行、直线取视口内可见站数的一半，
+ * 任何屏幕下都有确定的放大。
+ */
+function focusGapsAcross(): number {
+  if (layoutMode.value === 'folded' && currentLayout) {
+    return Math.max(2, currentLayout.stopsPerRow / 2)
+  }
+  if (stage) {
+    const visibleGaps = Math.max(1, stage.width() / boardMetrics().linearStepX)
+    return Math.max(2, visibleGaps / 2)
+  }
+  return FOCUS_GAPS_ACROSS
+}
+
+/**
+ * 邻里视图：镜头缩放到"视口宽度内约 focusGapsAcross() 个站间距"的级别，目标站横向居中、
+ * 纵向落在黄金分割偏上处（FOCUS_ANCHOR_Y）。
+ * 只放大不缩小——不低于该模式默认比例（直线 1.0 / 折返按宽度适应），封顶 MAX_FOCUS_SCALE。
+ * 倍数按平均站间距定，而非包围盒 fit：折返模式下一行的宽度≈整条内容宽，
+ * 行内窗口的包围盒 fit 几乎无缩放，站间距倍数才能在任何布局下给出确定的放大。
+ */
+function neighborhoodView(targetStationId: string): { scale: number, x: number, y: number } | null {
+  if (!stage || !currentLayout || currentLayout.points.length === 0) return null
+  const pts = currentLayout.points
+  const target = pts.find(p => p.station.id === targetStationId)
+  if (!target) return null
+
+  let gapSum = 0
+  for (let i = 1; i < pts.length; i++) {
+    gapSum += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y)
+  }
+  const avgGap = pts.length > 1 ? gapSum / (pts.length - 1) : 0
+  if (avgGap <= 0) return null
+
+  const viewW = Math.max(1, stage.width())
+  const viewH = Math.max(1, stage.height())
+  const pad = 28 // 屏幕像素边距
+  const fit = (viewW - pad * 2) / (avgGap * focusGapsAcross())
+  const defaultScale = layoutMode.value === 'linear' ? 1.0 : fitWidthScale()
+  const scale = clampScale(Math.min(MAX_FOCUS_SCALE, Math.max(defaultScale, fit)))
+  return { scale, x: viewW / 2 - target.x * scale, y: viewH * FOCUS_ANCHOR_Y - target.y * scale }
+}
+
 /** 按画布**宽度**适应报站板（顶对齐，折返模式的默认）。 */
 function fitWidth(): void {
   if (!stage || !trackLayer || !stationLayer || !currentLayout) return
@@ -1161,7 +1367,8 @@ function fitWidth(): void {
 
   const viewW = Math.max(1, stage.width())
   const m = boardMetrics()
-  const scale = clampScale((viewW - m.fitPadding * 2) / box.w)
+  // 按宽度适应的比例见 fitWidthScale()；本函数只负责摆位置。
+  const scale = fitWidthScale()
 
   // 把第一行推到浮动工具栏之下。max() 使桌面端（控件隐藏、量为 0）不会缩小该内缩；本函数只用于折返模式。
   const topInset = Math.max(m.fitTopMargin, toolbarInsetTop())
@@ -1228,17 +1435,13 @@ function contentBounds(): { minX: number, minY: number, w: number, h: number } |
  * 故内缩不会与 `md:` 可见性类漂开。
  */
 function toolbarInsetTop(): number {
-  const els = [mobileModePillRef.value, mobileFabTriggerRef.value].filter(Boolean) as HTMLElement[]
-  if (els.length === 0) return 0
+  const el = mobileFabTriggerRef.value
+  if (!el) return 0
   const containerTop = containerRef.value?.getBoundingClientRect().top ?? 0
-  let inset = 0
-  for (const el of els) {
-    const rect = el.getBoundingClientRect()
-    if (rect.height <= 0) continue // 桌面端为 display:none
-    // 从画布顶到这个覆盖层下沿的距离。
-    inset = Math.max(inset, rect.bottom - containerTop)
-  }
-  return inset > 0 ? inset + TOOLBAR_GAP : 0
+  const rect = el.getBoundingClientRect()
+  if (rect.height <= 0) return 0 // 桌面端为 display:none
+  // 从画布顶到这个覆盖层下沿的距离。
+  return rect.bottom - containerTop + TOOLBAR_GAP
 }
 
 function handleFitWidth(): void {
@@ -1294,7 +1497,7 @@ function setLayoutMode(mode: RouteLayoutMode): void {
     focusKeyStation(false)
   }
   else {
-    fitWidth()
+    focusInitialFolded()
   }
 
   emit('layout-change', mode)
@@ -1407,12 +1610,16 @@ watch(
       focusKeyStation(false)
     }
     else {
-      fitWidth()
+      // 折返模式：先按宽度撑开做总览，再把通勤/最近站做邻里缩放（若有）。
+      focusInitialFolded()
     }
     // 站可以在报站板排布之前就被选中。现在 currentLayout 存在了，再发一次；否则弹窗锚点永远是 null，弹窗不会打开。
     if (selectedStation) notifyAnchorChange()
   },
 )
+
+// 聚焦只在进页面时做：定位/设置的晚到不再触发自动聚焦 ——
+// 条件不具备就不聚焦，镜头不替用户假设目标。
 
 watch(
   () => selectedStation?.id,
@@ -1499,6 +1706,22 @@ function handleResize(): void {
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
           当前定位
         </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="text-sm font-bold leading-none text-sky-200">›</span>
+          行驶方向
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+          上班上车
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
+          下班上车
+        </span>
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-100"></span>
+          首末站
+        </span>
         <div class="ml-2 flex items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5">
           <button
             type="button"
@@ -1522,7 +1745,7 @@ function handleResize(): void {
       </div>
 
       <div class="flex items-center gap-2">
-        <Tooltip :content="layoutMode === 'linear' ? '聚焦当前关注站' : '按画布宽度撑开，纵向拖动查看'">
+        <Tooltip :content="layoutMode === 'linear' ? '回到关键站点' : '按画布宽度撑开，纵向拖动查看'">
           <button
             class="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-slate-200 transition hover:border-cyan-500/50 hover:bg-slate-700 active:scale-95"
             @click="handleFitWidth"
@@ -1561,26 +1784,8 @@ function handleResize(): void {
       </div>
     </div>
 
-    <!-- 移动端浮动控件（md 以下） -->
-    <!-- 模式药丸：移动端点一下即切换排布 -->
-    <div
-      ref="mobileModePillEl"
-      class="md:hidden absolute left-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/85 px-2.5 py-1 text-xs text-slate-300 backdrop-blur-md shadow-md"
-    >
-      <button
-        type="button"
-        class="flex items-center gap-1 text-slate-300 active:scale-95"
-        @click="toggleLayoutMode"
-      >
-        <component :is="layoutMode === 'folded' ? WrapText : GitCommitHorizontal" class="h-3.5 w-3.5 text-cyan-400" />
-        <span class="font-medium text-slate-200">{{ layoutMode === 'folded' ? '折返' : '直线' }}</span>
-      </button>
-      <span class="text-slate-500">|</span>
-      <span class="flex items-center gap-1 text-slate-300">
-        <span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
-        定位
-      </span>
-    </div>
+    <!-- 移动端浮动控件（md 以下）：收拢在右上 FAB 里，左上不再放 pill ——
+         排布切换已在工具列表首位，定位图例在抽屉里，画布上方保持干净。 -->
 
     <!-- 移动端右侧 FAB 操作按钮：可折叠以省下可视面积（默认折叠） -->
     <div class="md:hidden absolute right-2.5 top-2.5 z-10 flex flex-col items-end gap-1.5">
@@ -1620,8 +1825,8 @@ function handleResize(): void {
           </button>
           <button
             class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900/90 text-xs text-slate-200 shadow-lg backdrop-blur-md active:scale-95"
-            :title="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
-            :aria-label="layoutMode === 'linear' ? '聚焦当前站' : '适应宽度'"
+            :title="layoutMode === 'linear' ? '回到关键站点' : '适应宽度'"
+            :aria-label="layoutMode === 'linear' ? '回到关键站点' : '适应宽度'"
             @click="handleFitWidth"
           >
             <MoveHorizontal class="h-4 w-4" />

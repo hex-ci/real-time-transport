@@ -1,6 +1,6 @@
 import type { LineDetail } from './schemas/transit.js'
 import type { LineSummary } from './schemas/api.js'
-import { haversineMeters } from './geo.js'
+import { haversineMeters, NEARBY_RADIUS_M } from './geo.js'
 
 /** 某条线路的一个方向，按搜索命中的解析结果。 */
 export interface RouteDirectionEntry {
@@ -40,8 +40,37 @@ function toEntry(s: LineSummary): RouteDirectionEntry {
 }
 
 /**
+ * 环线名前缀归一化：300内/300外 → 300，300内环/300外环 → 300。
+ * 只剥离末尾的内外/内外环后缀，基名为空则返回原名。
+ */
+function normalizeGroupName(name: string): string {
+  const stripped = name.replace(/(内环|外环|内|外)$/, '').trim()
+  return stripped || name
+}
+
+/**
+ * 判断两个线路名是否构成环线对（300内/300外）：归一化后基名相同，
+ * 且后缀恰为内/外（或内环/外环）的一对。避免单个"X内"（无"X外"配对）
+ * 被误并入"X"—— 必须双向确认才合并。
+ */
+function isLoopPair(a: string, b: string): boolean {
+  if (a === b) return false
+  const baseA = normalizeGroupName(a)
+  const baseB = normalizeGroupName(b)
+  if (baseA !== baseB || baseA === a) return false
+  const suffixA = a.slice(baseA.length)
+  const suffixB = b.slice(baseB.length)
+  const pairs: Array<[string, string]> = [['内', '外'], ['内环', '外环']]
+  return pairs.some(([x, y]) =>
+    (suffixA === x && suffixB === y) || (suffixA === y && suffixB === x),
+  )
+}
+
+/**
  * 把逐方向的平铺搜索命中并成每条线路一个结果。
- * 分组规则：同一城市内 lineName 相同的条目算一条线路。
+ * 分组规则：同一城市内 lineName 相同的条目算一条线路；环线对（300内/300外）
+ * 按基名合并 —— 但必须双向确认（结果里同时出现内/外两个版本）才并，
+ * 单个"X内"无配对时保持独立，避免误伤。
  * 方向只从真实的上游命中填充，绝不合成 —— 只报了一个方向的线路，
  * 另一个方向保持 null，UI 对它隐藏切换，而不是造一个解析不了的 lineId。
  */
@@ -49,19 +78,28 @@ export function groupLineSummaries(summaries: LineSummary[]): LineGroup[] {
   const byName = new Map<string, LineGroup>()
   const groups: LineGroup[] = []
 
+  // 先按原名分组，收集所有出现过的名字供环线对确认用。
+  const seenNames = new Set<string>()
+  for (const s of summaries) {
+    if (s.lineId) seenNames.add((s.lineName || '').trim())
+  }
+
   for (const s of summaries) {
     if (!s.lineId) continue
 
     const name = (s.lineName || '').trim()
     const city = s.cityCode || '027'
-    const key = `${city}::${name}`
+    // 环线对才用基名分组：结果里必须同时有内/外两个版本。
+    const loopPeer = [...seenNames].find(n => isLoopPair(name, n))
+    const groupName = loopPeer ? normalizeGroupName(name) : name
+    const key = `${city}::${groupName}`
     const entry = toEntry(s)
 
     let group = byName.get(key)
     if (!group) {
       group = {
         groupKey: s.lineId,
-        lineName: name || s.lineId,
+        lineName: groupName || s.lineId,
         cityCode: city,
         up: null,
         down: null,
@@ -273,6 +311,28 @@ export function placeBoardStop(
 }
 
 /**
+ * 某方向的关注站，以它本来的身份：站名「与」站序。
+ * 关注站是时间无关的常规站点关注（对标车来了的站点关注）：非通勤时段、异地查线时，
+ * 附近模式卡片锚点链为 GPS最近站(≤3km) → 关注站[方向] → 早/晚通勤上车站。
+ * 缺省表示未设置 —— 回退链跳过它。
+ */
+export function resolveFollowedStopRef(
+  fav: {
+    followedStopName0?: string | null
+    followedStopOrder0?: number | null
+    followedStopName1?: string | null
+    followedStopOrder1?: number | null
+  },
+  direction: 0 | 1,
+): BoardStopRef | null {
+  const name = direction === 0 ? fav.followedStopName0 : fav.followedStopName1
+  if (!name) return null
+  const raw = direction === 0 ? fav.followedStopOrder0 : fav.followedStopOrder1
+  const order = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : null
+  return { name, order }
+}
+
+/**
  * 推导某线路的每个通勤用途由哪个方向服务。
  *
  * 运行时**已不再使用**：方向是存在收藏上的显式用户选择（`morningDirection` / `eveningDirection`），
@@ -410,6 +470,9 @@ export function resolveNearbyStop(
     coords,
   )
   if (!candidate) return null
+  // 「最近」先要「够近」：超限即无。定位城市与所选城市脱钩时（如北京定位看天津的线），
+  // 几十公里外的站不能叫「附近站」，否则首页卡片会打出「8万多米」这种无意义的距离。
+  if (candidate.distanceMeters > NEARBY_RADIUS_M) return null
 
   const orderIn = (
     stops: Array<{ name: string, order: number }> | undefined,

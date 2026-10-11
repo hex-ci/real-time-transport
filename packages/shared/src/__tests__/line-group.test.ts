@@ -10,6 +10,8 @@ import {
   groupLineSummaries,
   isBidirectional,
   resolveFavoriteLineId,
+  resolveFollowedStopRef,
+  resolveNearbyStop,
   resolveRouteTarget,
 } from '../line-group.js'
 
@@ -301,5 +303,51 @@ describe('reading a stored stop back', () => {
     )
     expect(lineGroup, 'a name-only "is it served" helper is back, and it cannot tell WHICH stop')
       .not.toContain('stopServedByDirection')
+  })
+})
+
+describe('resolveNearbyStop honors the nearness radius', () => {
+  it('returns null when the nearest stop is beyond NEARBY_RADIUS_M', () => {
+    // 定位在北京（39.9, 116.4），站约 3.4km 外：够不着的「最近」不是最近，
+    // 首页卡片不应打出「8万多米」这种无意义的距离。
+    const got = resolveNearbyStop(
+      { 0: [{ name: '甲站', order: 1, lat: 39.9, lng: 116.44 }] },
+      { lat: 39.9, lng: 116.4 },
+    )
+    expect(got).toBeNull()
+  })
+
+  it('still resolves the stop when it is inside the radius', () => {
+    const got = resolveNearbyStop(
+      { 0: [{ name: '甲站', order: 1, lat: 39.9, lng: 116.41 }] },
+      { lat: 39.9, lng: 116.4 },
+    )
+    expect(got?.name).toBe('甲站')
+    expect(got?.distanceMeters).toBeGreaterThan(800)
+    expect(got?.distanceMeters).toBeLessThan(3000)
+  })
+})
+
+describe('resolveFollowedStopRef reads the per-direction followed station', () => {
+  it('returns the (name, order) pair for the requested direction', () => {
+    const fav = {
+      followedStopName0: '路口东',
+      followedStopOrder0: 3,
+      followedStopName1: '路口西',
+      followedStopOrder1: 5,
+    }
+    expect(resolveFollowedStopRef(fav, 0)).toEqual({ name: '路口东', order: 3 })
+    expect(resolveFollowedStopRef(fav, 1)).toEqual({ name: '路口西', order: 5 })
+  })
+
+  it('returns null when that direction has no followed station', () => {
+    const fav = { followedStopName0: '路口东', followedStopOrder0: 3 }
+    expect(resolveFollowedStopRef(fav, 1)).toBeNull()
+    expect(resolveFollowedStopRef({}, 0)).toBeNull()
+  })
+
+  it('drops a non-integer order to null (identity stays name-only)', () => {
+    const fav = { followedStopName0: '路口东', followedStopOrder0: -1 }
+    expect(resolveFollowedStopRef(fav, 0)).toEqual({ name: '路口东', order: null })
   })
 })

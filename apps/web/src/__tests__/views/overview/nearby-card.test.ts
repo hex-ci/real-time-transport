@@ -155,7 +155,7 @@ describe('the card renders the cause it was given, not a cause it guessed', () =
     const text = await renderNearbyCard('fix')
     // 用户已授权定位且应用有定位：此处点名「开启定位」正是本缺陷的断言，
     // 而它由浏览器会用的同一个表达式渲染。
-    expect(text).toContain('已定位，但附近没有该线路的站台')
+    expect(text).toContain('附近没有该线路的站台，可为它设一个关注站')
     expect(text).not.toContain('开启定位')
   })
 
@@ -190,7 +190,7 @@ describe('the card renders the cause it was given, not a cause it guessed', () =
     await nextTick()
 
     const text = textOf(container)
-    expect(text, 'a card with a platform still showed an empty state').not.toContain('已定位，但附近没有该线路的站台')
+    expect(text, 'a card with a platform still showed an empty state').not.toContain('附近没有该线路的站台，可为它设一个关注站')
     expect(text).toContain('乙站')
   })
 })

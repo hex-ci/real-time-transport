@@ -14,7 +14,8 @@ export interface TransitCity {
   hot: boolean
 }
 
-export { CITY_DICTIONARY } from './cities.generated.js'
+import { CITY_DICTIONARY } from './cities.generated.js'
+export { CITY_DICTIONARY }
 
 /** 热门城市用于 amap GIS 调用的额外元数据。 */
 export interface CityGisMeta {
@@ -28,10 +29,10 @@ export interface CityGisMeta {
 export const HOT_CITY_META: CityGisMeta[] = [
   // 一线城市与直辖市
   { code: '027', name: '北京', adcode: '110000', pinyin: 'beijing' },
-  { code: 'amap_120000', name: '天津', adcode: '120000', pinyin: 'tianjin' },
+  { code: '006', name: '天津', adcode: '120000', pinyin: 'tianjin' },
   { code: '034', name: '上海', adcode: '310000', pinyin: 'shanghai' },
-  { code: 'amap_440100', name: '广州', adcode: '440100', pinyin: 'guangzhou' },
-  { code: 'amap_440300', name: '深圳', adcode: '440300', pinyin: 'shenzhen' },
+  { code: '040', name: '广州', adcode: '440100', pinyin: 'guangzhou' },
+  { code: '014', name: '深圳', adcode: '440300', pinyin: 'shenzhen' },
   // 主要区域中心城市
   { code: '004', name: '杭州', adcode: '330100', pinyin: 'hangzhou' },
   { code: '007', name: '成都', adcode: '510100', pinyin: 'chengdu' },
@@ -56,8 +57,8 @@ export const HOT_CITY_META: CityGisMeta[] = [
   { code: '020', name: '太原', adcode: '140100', pinyin: 'taiyuan' },
   { code: '001', name: '乌鲁木齐', adcode: '650100', pinyin: 'wulumuqi' },
   { code: '046', name: '南宁', adcode: '450100', pinyin: 'nanning' },
-  { code: 'amap_350200', name: '厦门', adcode: '350200', pinyin: 'xiamen' },
-  { code: 'amap_620100', name: '兰州', adcode: '620100', pinyin: 'lanzhou' },
+  { code: '036', name: '厦门', adcode: '350200', pinyin: 'xiamen' },
+  { code: '017', name: '兰州', adcode: '620100', pinyin: 'lanzhou' },
 ]
 
 const AD_CODE_MAP: Record<string, string> = Object.fromEntries(
@@ -68,12 +69,37 @@ const CODE_NAME_MAP: Record<string, string> = Object.fromEntries(
   HOT_CITY_META.map(c => [c.code, c.name]),
 )
 
-/** 城市码对应的 amap adcode；未知城市回落到城市码本身。 */
+/**
+ * 历史遗留的 amap_ 占位码 → 真实车来了 cityId。
+ * 2026-10 之前字典里天津/广州/深圳/厦门/兰州用占位码，老的地铁 lineId
+ *（如 `subway_amap_120000_1号线`）可能还嵌着它们，解析名字/adcode 时归一化。
+ */
+const LEGACY_CODE_ALIASES: Record<string, string> = {
+  amap_120000: '006', // 天津
+  amap_440100: '040', // 广州
+  amap_440300: '014', // 深圳
+  amap_350200: '036', // 厦门
+  amap_620100: '017', // 兰州
+}
+
+/** 归一化城市码：历史占位码映射到真实码。 */
+export function normalizeCityCode(cityCode: string): string {
+  return LEGACY_CODE_ALIASES[cityCode] || cityCode
+}
+
+/**
+ * 给高德的城市限定参数：热门城市用精确的 adcode，其余用城市名
+ * （高德 city 参数中文名/adcode 都认）。不再回落到车来了 cityId ——
+ * 高德不认那个（如东莞的 '008'）。
+ */
 export function getCityAdcode(cityCode: string): string {
-  return AD_CODE_MAP[cityCode] || cityCode
+  const code = normalizeCityCode(cityCode)
+  return AD_CODE_MAP[code]
+    || CITY_DICTIONARY.find(c => c.code === code)?.name
+    || cityCode
 }
 
 /** 城市码的人工维护显示名；非热门城市为 undefined。 */
 export function getCuratedCityName(cityCode: string): string | undefined {
-  return CODE_NAME_MAP[cityCode]
+  return CODE_NAME_MAP[normalizeCityCode(cityCode)]
 }

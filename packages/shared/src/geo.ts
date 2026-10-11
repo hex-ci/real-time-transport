@@ -4,6 +4,16 @@
 
 const EARTH_RADIUS_M = 6371000
 
+/**
+ * 定位相关半径（米）：「附近」只在这个距离内成立。
+ *
+ * 业界「附近」都是有半径上限的概念（车来了附近站约 2km、高德 nearby 默认 3km）：
+ * 定位城市与所选城市脱钩时（如北京定位看天津的线），最近站可能在几十公里外，
+ * 那种「最近」对通勤决策是误导，不如没有。3km 给步行（1~2km）加骑行/接驳留余量；
+ * 跨城（>100km）必被拦，同城远郊 5km+ 也不再谎称附近。阈值集中在此一处，要调只改这里。
+ */
+export const NEARBY_RADIUS_M = 3000
+
 /** 两点间的大圆距离（米）；入参为 WGS-84 坐标。 */
 export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const rad = Math.PI / 180

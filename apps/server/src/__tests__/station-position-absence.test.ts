@@ -36,6 +36,7 @@ const SETTINGS: StoredUserSettings = {
   workPlaceName: null,
   homeAnchorSource: null,
   workAnchorSource: null,
+  refreshIntervalSec: null,
 }
 
 const LEG_A: StoredCommuteChainLeg = {

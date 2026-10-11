@@ -33,6 +33,11 @@ const props = defineProps<{
   /** 到那个站的 GPS 距离，米 —— 仅附近模式。 */
   stopDistanceMeters: number | null
   /**
+   * 头部站名的来源：GPS 测距、用户设的关注站、通勤上车站回退。
+   * GPS 时右侧显示距离；后两者显示来源徽标。通勤模式不用它。
+   */
+  anchorSource?: 'gps' | 'followed' | 'commute' | null
+  /**
    * 调用方从关注行自己的上车点与方向建立起来的这一段通勤 —— 附近视图没有通勤段时为 null，
    * 所选方向的站表尚未加载时也是 null。
    *
@@ -73,6 +78,8 @@ defineEmits<{
   (e: 'switch-direction', direction: 0 | 1): void
   /** 用户点了置顶控件：钉住这张卡片，或在它已被钉住时取消钉住。 */
   (e: 'toggle-pin'): void
+  /** 用户要点设关注站：打开按方向选站的底部弹窗。 */
+  (e: 'edit-followed'): void
 }>()
 
 /**
@@ -232,6 +239,17 @@ function noMinutesText(state: ReadState, operating: string): string {
   if (state === 'reading') return readingText('到站数据')
   return operating
 }
+
+/**
+   * 首行是占位行：该方向在线路组里存在（故可切换），但当前没有锚点
+   * （无 GPS、无关注站、无通勤站）。此时不显示到站，转而引导用户设关注站。
+   */
+const isPrimaryPlaceholder = computed(() =>
+  props.mode === 'nearby' && primaryRow.value !== null && primaryRow.value.stopOrder === null)
+
+/** 次行是占位行：不说「正在读取」（根本没在读），说暂无站点。 */
+const isSecondaryPlaceholder = computed(() =>
+  props.mode === 'nearby' && secondaryRow.value !== null && secondaryRow.value.stopOrder === null)
 
 /**
    * 另一个方向，紧凑显示。即使它没有到站数据也留着，使用户仍能看见（并切换到）对侧路缘。
@@ -402,6 +420,11 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
         <div v-else-if="legNotice" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
           {{ legNotice }}
         </div>
+        <!-- 占位行：该方向可切换但无锚点。卡片主体是详情页链接，动作只放底部操作栏，
+             这里只陈述状态，不放按钮。 -->
+        <div v-else-if="isPrimaryPlaceholder" class="mt-3.5 flex grow items-center justify-center rounded-xl bg-slate-950/80 px-3 py-2.5 text-xs text-slate-400 text-center lg:px-3.5 lg:py-3 lg:text-base">
+          {{ primaryRow?.directionName }}暂无站点可显示，可在底部操作栏设关注站
+        </div>
 
         <!-- 这一块也必须吃掉余下高度：同一行里内容少的卡片会被拉高，富余空间若落在面板外
              就露出浅色底 —— 卡片深浅两块的比例随行内邻居而变，那是同一屏里同一张卡两种样子。 -->
@@ -410,10 +433,16 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
           <div class="flex items-center justify-between text-xs lg:text-base">
             <span class="min-w-0 truncate text-slate-300">
               {{ stopName }}<span v-if="primaryRow?.stopOrder" class="ml-1.5 text-slate-400">第 {{ primaryRow.stopOrder }} 站</span>
+              <!-- 回退锚点说出它的来源：GPS 时右侧是距离，不用徽标。
+                   inline-flex + 固定行高：inline 徽标在移动端小字号下底部边框会被行盒裁掉。 -->
+              <span v-if="anchorSource === 'followed'" class="ml-1.5 inline-flex items-center rounded border border-cyan-500/40 bg-cyan-500/10 px-1 text-[10px] font-medium leading-4 text-cyan-300">关注站</span>
+              <span v-else-if="anchorSource === 'commute'" class="ml-1.5 inline-flex items-center rounded border border-slate-600 bg-slate-800 px-1 text-[10px] font-medium leading-4 text-slate-400">通勤站</span>
             </span>
-            <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->
-            <span v-if="stopDistanceMeters !== null" class="shrink-0 font-mono text-slate-400">
-              {{ stopDistanceMeters }}m
+            <span class="flex shrink-0 items-center gap-1.5">
+              <!-- 附近模式加上 GPS 距离；通勤模式已经在标题下点了这一段，所以右侧留空。 -->
+              <span v-if="stopDistanceMeters !== null" class="font-mono text-slate-400">
+                {{ stopDistanceMeters }}m
+              </span>
             </span>
           </div>
 
@@ -455,9 +484,10 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
             v-if="secondaryRow"
             class="flex w-full items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-left text-xs lg:gap-2.5 lg:pt-2.5 lg:text-base"
           >
-            <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}</span>
+            <span class="min-w-0 truncate text-slate-400">{{ secondaryRow.directionName }}<template v-if="secondaryRow.rowStopName && secondaryRow.rowStopName !== stopName"> · {{ secondaryRow.rowStopName }}</template></span>
             <span class="flex shrink-0 items-baseline gap-1.5">
-              <template v-if="secondaryHasArrivals">
+              <span v-if="isSecondaryPlaceholder" class="text-slate-500">暂无站点</span>
+              <template v-else-if="secondaryHasArrivals">
                 <template v-if="minutesOf(secondaryArrivals) !== null">
                   <span class="font-mono font-bold" :class="accent.etaText">
                     {{ minutesOf(secondaryArrivals) }}分
@@ -547,6 +577,19 @@ const referenceLine = computed(() => referenceLineOf(reference.value))
       >
         <ArrowLeftRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>切换方向</span>
+      </button>
+
+      <!-- 设关注站只在附近模式：它是附近模式锚点链的一环（GPS→关注站→通勤站）；
+           上班/下班模式锚点恒为通勤站，这里不摆。放在操作栏 —— 卡片主体是去详情页的链接，
+           动作按钮不进链接，与置顶/切换方向同一规则。 -->
+      <button
+        v-if="mode === 'nearby'"
+        type="button"
+        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 border-r border-slate-800/60 text-xs text-slate-300 transition hover:bg-slate-800/50 hover:text-slate-100 lg:gap-2 lg:text-base"
+        aria-label="为这条线路设置关注站"
+        @click="$emit('edit-followed')"
+      >
+        <span>设关注站</span>
       </button>
 
       <RouterLink

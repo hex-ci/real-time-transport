@@ -28,7 +28,11 @@ afterEach(() => {
 function stubChelaileLine(payload: Record<string, unknown>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
-    if (!href.includes('encryptedLineDetail')) throw new Error(`unexpected upstream call: ${href}`)
+    // getLiveStatus 走轻量接口 encryptedBusDetail 优先（无 stations 站表是正常的）；
+    // getLineDetail 仍走全量 encryptedLineDetail。两者都用同一个载荷作答。
+    if (!href.includes('encryptedLineDetail') && !href.includes('encryptedBusDetail')) {
+      throw new Error(`unexpected upstream call: ${href}`)
+    }
     return {
       ok: true,
       status: 200,

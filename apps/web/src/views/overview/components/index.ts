@@ -1,3 +1,4 @@
 export { default as CardGrid } from './card-grid.vue'
 export { default as EmptyState } from './empty-state.vue'
+export { default as FollowedStationSheet } from './followed-station-sheet.vue'
 export { default as LineMiniCard } from './line-mini-card.vue'

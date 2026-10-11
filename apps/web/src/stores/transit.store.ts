@@ -820,6 +820,43 @@ export const useTransitStore = defineStore('transit', () => {
   }
 
   /**
+ * 设置或清除某方向的关注站（时间无关的常规站点关注）。
+ *
+ * 与 `setBoardStop` 同一形状：站名与站序成对，清除时两半一起送 null。
+ * 同名多站时拒绝只给站名 —— 服务端也会拒绝，不如在界面就说明原因。
+ */
+  async function setFollowedStation(
+    favoriteId: string,
+    direction: 0 | 1,
+    stop: { name: string, order: number | null } | null,
+  ): Promise<void> {
+    const target = favorites.value.find(f => f.id === favoriteId)
+    if (!target) return
+    if (stop !== null && stop.order === null) {
+      throw new Error('该站名在本方向有多个同名站，无法确定是哪一站，请选择一个具体的站点')
+    }
+
+    const nameKey = direction === 0 ? 'followedStopName0' : 'followedStopName1'
+    const orderKey = direction === 0 ? 'followedStopOrder0' : 'followedStopOrder1'
+    const body: Record<string, string | number | null> = {
+      [nameKey]: stop === null ? null : stop.name,
+      [orderKey]: stop === null ? null : stop.order,
+    }
+
+    const res = await fetch(`/api/transit/favorites/${encodeURIComponent(favoriteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (!json.success || !json.data) {
+      throw new Error(json.error || '关注站保存失败')
+    }
+    const saved: UserFavoriteLine = json.data
+    favorites.value = favorites.value.map(f => (f.id === saved.id ? saved : f))
+  }
+
+  /**
  * 把一条线路钉到首页列表顶部，或取消钉住 —— 首页的入口、标记与取消控件都搭在这一个动作上。
  *
  * 先请求、回来再写：PATCH 落定之前列表不动，落定之后只做**唯一一次**写入。
@@ -1115,6 +1152,7 @@ export const useTransitStore = defineStore('transit', () => {
     addFavorite,
     moveFavorite,
     setBoardStop,
+    setFollowedStation,
     togglePin,
     updateCommuteSlot,
     removeFavorite,

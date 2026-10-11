@@ -132,7 +132,7 @@ onMounted(() => {
                   type="search"
                   enterkeyhint="search"
                   placeholder="搜索城市 / 拼音，如 上海、hangzhou"
-                  class="min-h-[38px] w-full rounded-xl border border-slate-700 bg-slate-950 pl-8 pr-8 text-xs text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 lg:pl-9 lg:pr-9 lg:text-base"
+                  class="min-h-[38px] w-full rounded-xl border border-slate-700 bg-slate-950 pl-8 pr-8 text-base text-white placeholder:text-slate-400 outline-none focus:border-cyan-500 lg:pl-9 lg:pr-9"
                 >
                 <button
                   v-if="keyword"
@@ -216,6 +216,7 @@ onMounted(() => {
         <DialogPortal>
           <DialogOverlay class="fixed inset-0 z-[90] bg-slate-950/75 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0" />
           <DialogContent
+            aria-describedby
             class="fixed inset-x-0 bottom-0 z-[100] flex h-[82vh] max-h-[85dvh] flex-col rounded-t-3xl border-t border-slate-700/80 bg-slate-900 shadow-2xl focus:outline-none transition-transform duration-250 ease-out data-[state=open]:translate-y-0 data-[state=closed]:translate-y-full"
           >
             <!-- 拖拽指示条 -->

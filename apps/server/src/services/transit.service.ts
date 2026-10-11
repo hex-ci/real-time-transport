@@ -897,7 +897,7 @@ export class TransitService {
       const sourceSaysAtPlatform = b.travelTimeSec === 0
       const isAtPlatform = sourceSaysAtPlatform
         || (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number'
-          && Math.abs(b.distanceFromStart - targetDist) <= 35)
+          && Math.abs(b.distanceFromStart - targetDist) <= 20)
 
       if (isAtPlatform) {
         rows.push({

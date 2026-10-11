@@ -519,7 +519,7 @@ async function computeWalkDecision(): Promise<void> {
  */
 
 /**
- * 车辆是否正在目标站台（35 米内）。标准与服务端 isAtStation 一致。
+ * 车辆是否正在目标站台（20 米内）。标准与服务端 isAtStation 一致。
  *
  * 不能用离散的 order 判：b.order 是"刚经过的站"，车开到半路时 order 还停在
  * 本站，会误判为"在本站"。必须用连续里程。
@@ -527,11 +527,11 @@ async function computeWalkDecision(): Promise<void> {
 function isBusAtPlatform(b: { travelTimeSec?: number, distanceFromStart?: number, nextOrder?: number }, targetOrder: number): boolean {
   // 上游明确说在站上（travelTime 0）
   if (b.travelTimeSec === 0) return true
-  // 里程在站台 35 米内
+  // 里程在站台 20 米内
   const sd = currentLineDetail.value?.stationDistances
   const targetDist = sd?.[targetOrder - 1]
   if (typeof targetDist === 'number' && typeof b.distanceFromStart === 'number') {
-    return Math.abs(b.distanceFromStart - targetDist) <= 35
+    return Math.abs(b.distanceFromStart - targetDist) <= 20
   }
   // 无里程数据时降级：只有正开往本站才算（order 是"刚经过"，不能算）
   return b.nextOrder === targetOrder

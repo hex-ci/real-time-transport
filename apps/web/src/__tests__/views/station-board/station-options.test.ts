@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NEARBY_RADIUS_M } from '@real-time-transport/shared/geo'
 import {
   mergeStationSources,
+  movedEnough,
   originMarkOf,
   outOfNearbyNoteOf,
   sortByDistance,
@@ -34,6 +35,35 @@ function stationOf(
 function eastOfMe(name: string, meters: number): StationOption {
   return stationOf(name, ME.lat, ME.lng + (meters / 854) * 0.01)
 }
+
+/** 在参考点东边约 `meters` 米的**一个位置**（不是站）。 */
+function positionEastOf(meters: number): { lat: number, lng: number } {
+  return { lat: ME.lat, lng: ME.lng + (meters / 854) * 0.01 }
+}
+
+describe('走开多远才算换了地方：抖动不重排', () => {
+  it('还没取过快照时算换了地方 —— 那时没有可留住的东西', () => {
+    expect(movedEnough(null, ME, 50)).toBe(true)
+  })
+
+  it('站着不动时 GPS 在几十米里打转：不算换地方，列表不许重排', () => {
+    // 实测：六次 20~40 米的抖动，按每一下重排会让顺序六次全变（站台彼此常只差几十米）。
+    for (const drift of [12, 20, 33, 41, 49]) {
+      expect(movedEnough(positionEastOf(drift), ME, 50), `挪 ${drift} 米`).toBe(false)
+    }
+  })
+
+  it('真的走开了就重排：超过门槛即算', () => {
+    expect(movedEnough(positionEastOf(51), ME, 50)).toBe(true)
+    expect(movedEnough(positionEastOf(400), ME, 50)).toBe(true)
+  })
+
+  it('门槛可以被精度抬高：承认自己有 ±100 米误差的定位，80 米不算走开', () => {
+    // 分不出相隔几十米的两站谁更近，按它重排只会让顺序来回跳。
+    expect(movedEnough(positionEastOf(80), ME, 100)).toBe(false)
+    expect(movedEnough(positionEastOf(120), ME, 100)).toBe(true)
+  })
+})
 
 describe('最近的在前', () => {
   it('按直线距离升序，最近的排第一', () => {

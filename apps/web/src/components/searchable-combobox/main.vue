@@ -80,6 +80,11 @@ const {
 
 const emit = defineEmits<{
   (e: 'select', option: ComboboxOption): void
+  /**
+   * 面板开合。调用方需要它：候选正被读着的时候把列表换掉（顺序变了），比数字旧几秒糟得多，
+   * 故调用方据此把「换列表」推迟到关上之后。
+   */
+  (e: 'update:open', open: boolean): void
 }>()
 
 /** 选中的那一个的 key；什么都没选为 null。标准 v-model 双向绑定。 */
@@ -115,6 +120,7 @@ const filtered = computed(() => {
 })
 
 watch(open, (isOpen) => {
+  emit('update:open', isOpen)
   if (!isOpen) {
     query.value = ''
   }

@@ -122,6 +122,24 @@ export function sortByDistance(list: StationOption[]): StationOption[] {
 }
 
 /**
+ * 走开多远才算**换了地方** —— 列表要不要重排这件事的判据。
+ *
+ * 定位是每一下都在动的：站着不动，GPS 也会在几十米里打转，而这一页的站台彼此常只差几十米，
+ * 按每一下读数重排就会出现「谁先来」在手指底下跳（实测：六次 20~40 米的抖动，顺序六次全变）。
+ * 故比较的是「离**上一次取快照**的地方走了多远」，没走够就不动 —— 抖动不算换地方。
+ *
+ * 上一次为空（还没取过快照）时算换了地方：那时没有可留住的东西。
+ */
+export function movedEnough(
+  previous: { lat: number, lng: number } | null,
+  next: { lat: number, lng: number },
+  thresholdM: number,
+): boolean {
+  if (!previous) return true
+  return haversineMeters(previous.lat, previous.lng, next.lat, next.lng) > thresholdM
+}
+
+/**
  * 最近的站台也在 3 公里外时那句话 —— 这时「按远近排」仍然成立，但这一屏没有一个站算附近。
  * 说出来，比让使用者自己从列表里发现要诚实；都没有距离可说时返回空串。
  */

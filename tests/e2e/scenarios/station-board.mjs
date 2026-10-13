@@ -333,5 +333,6 @@ export async function run({ check, note }) {
     (marked ?? []).some(text => !text.includes('附近')),
     JSON.stringify((marked ?? []).slice(0, 6)),
   )
+
   await cli(['press', 'Escape'])
 }

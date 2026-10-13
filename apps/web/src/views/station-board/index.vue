@@ -16,13 +16,14 @@ import { useIntervalFn } from '@vueuse/core'
 import { LocateFixed } from '@lucide/vue'
 import type { NearbyStop, StationBoard } from '@real-time-transport/shared'
 import { favoriteDirections } from '@real-time-transport/shared'
-import { haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
+import { statedCoordinate } from '@real-time-transport/shared/geo'
 import { SearchableCombobox, type ComboboxOption, type SelectedText } from '@/components/searchable-combobox'
 import { RefreshControl } from '@/components/refresh-control'
 import { congestionChipClass, congestionLabel } from '@/congestion-copy'
 import { distanceTextOf } from '@/distance-copy'
 import {
   mergeStationSources,
+  movedEnough,
   outOfNearbyNoteOf,
   sortByDistance,
   stationSecondaryTextOf,
@@ -53,8 +54,13 @@ const options = shallowRef<StationOption[]>([])
 const followedOptions = shallowRef<StationOption[]>([])
 /** 我附近的站台（数据源给的那一份）。 */
 const nearbyOptions = shallowRef<StationOption[]>([])
-/** 上一次问附近站台时的坐标：用来判断「人是不是真的走开了」。 */
-let nearbyFetchedAt: { lat: number, lng: number } | null = null
+/**
+ * 上一次取这张列表快照时站的位置：用来判断「人是不是真的走开了」。
+ *
+ * 有它，列表才是**一次快照**而不是一个跟着定位连续重排的东西 —— 后者会让下拉开着的时候
+ * 顺序在手指底下跳（见 `station-options.ts` 的 `movedEnough`）。
+ */
+let listBuiltAt: { lat: number, lng: number } | null = null
 /**
  * 当前站台的 id —— 而不是一个选项对象。
  *
@@ -75,6 +81,10 @@ const busy = shallowRef(false)
 /** 一次手动刷新正在跑（含它之后的那次回读）。 */
 const refreshing = shallowRef(false)
 const detecting = shallowRef(false)
+/** 站台下拉此刻开着没有：开着时不重排列表（见那个 watcher）。 */
+const panelOpen = shallowRef(false)
+/** 开着期间攒下的重排：等面板关上再补。 */
+const rebuildPending = shallowRef(false)
 const landmarkHint = shallowRef('')
 
 /** 「最近的站台也在 3 公里外」那句话：规则在 `station-options.ts`，这一页只渲染它。 */
@@ -176,17 +186,22 @@ async function loadNearbyStops(): Promise<void> {
       distanceMeters: null,
       origin: 'nearby' as const,
     }))
-    nearbyFetchedAt = { lat: coords.lat, lng: coords.lng }
   }
   catch {
     // 附近站台读不到：列表退回关注线路的站表，不报错也不编。
   }
 }
 
-/** 两个来源合并后量距离、按远近排、取最近的 30 个。 */
+/**
+ * 两个来源合并后量距离、按远近排、取最近的 30 个。
+ *
+ * 成员、顺序与每行的距离**一起**在这一刻定下：只更新距离而留住旧顺序，屏上就会出现
+ * 「298 米」排在「278 米」上面，那条「最近的在前」当场作废。
+ */
 function refreshOptions(): void {
   const merged = mergeStationSources(followedOptions.value, nearbyOptions.value)
   options.value = sortByDistance(withDistances(merged, locationStore.userCoords)).slice(0, 30)
+  listBuiltAt = locationStore.userCoords
 }
 
 /**
@@ -208,12 +223,30 @@ async function loadStationOptions(): Promise<void> {
   }
 }
 
-/** 定位抖动不算「换了地方」：走出去 50 米以上才值得再问一次附近站台。 */
-const NEARBY_REFETCH_METERS = 50
+/** 抖动不算「换了地方」时的那条底线：走出去 50 米以上才重取、重排一次。 */
+const LIST_REBUILD_MIN_METERS = 50
 
-function movedSinceNearbyFetch(coords: { lat: number, lng: number }): boolean {
-  if (!nearbyFetchedAt) return true
-  return haversineMeters(nearbyFetchedAt.lat, nearbyFetchedAt.lng, coords.lat, coords.lng) > NEARBY_REFETCH_METERS
+/**
+ * 这一次重排的门槛（米）。
+ *
+ * 取两者之大者：固定底线，与**设备自己声明的精度** —— 一个承认自己有 ±N 米误差的定位，
+ * 分不出相隔几十米的两站谁更近，按它重排只会让顺序来回跳。精度缺省（模拟定位、部分设备）
+ * 时只剩底线。
+ */
+function rebuildThresholdM(): number {
+  return Math.max(LIST_REBUILD_MIN_METERS, locationStore.accuracyM ?? 0)
+}
+
+/**
+ * 真的走开了才重建：先重取附近的站台（**成员**可能变了），再合成一张（顺序与每行的距离）。
+ *
+ * 同一次快照之内什么都不动 —— 这是下拉不再跳的全部原因。
+ */
+async function rebuildListIfMoved(fix: { lat: number, lng: number } | null): Promise<void> {
+  if (!fix) return
+  if (!movedEnough(listBuiltAt, fix, rebuildThresholdM())) return
+  if (followedOptions.value.length > 0) await loadNearbyStops()
+  if (options.value.length > 0 || followedOptions.value.length > 0) refreshOptions()
 }
 
 /**
@@ -350,7 +383,7 @@ watch(() => cityStore.currentCode, async () => {
   options.value = []
   followedOptions.value = []
   nearbyOptions.value = []
-  nearbyFetchedAt = null
+  listBuiltAt = null
   currentStationId.value = ''
   rows.value = []
   readAt.value = null
@@ -362,17 +395,30 @@ watch(() => cityStore.currentCode, async () => {
 })
 
 /**
- * 定位到达或改变后：**离我多远**必须重算（否则列表会按上一次的位置排序），而人真的走开一段之后
- * 「我附近有哪些站」也变了，故再问一次附近站台再合成 —— 只挪几米不值得再打一次数据源。
+ * 定位到达或改变后：只有**真的走开了一段**才重建列表（重取附近站台 + 重排，见
+ * `rebuildListIfMoved`）—— 定位每一下都在动，按每一下重排就是「顺序在手指底下跳」。
+ *
+ * 量的是两次原始定位之间的距离：与取快照时记下的那一份同一个坐标系（换算后的定位拿去比，
+ * 同一个位置的差就有 500 米，每次定位都会重排）。
+ *
+ * 下拉正开着时不重排，只记下该重排：列表正被人读着，顺序在手指底下换掉比距离旧几秒糟得多。
  */
-// 走开多远才值得再问一次，量的是两次原始定位之间的距离 —— 与 `nearbyFetchedAt` 记下的那一份
-// 同一个坐标系（换算后的定位拿去比，同一位置的差就有 500 米，每次定位都会重问）。
-watch(() => locationStore.deviceFix, async (coords) => {
-  if (coords && followedOptions.value.length > 0 && movedSinceNearbyFetch(coords)) {
-    await loadNearbyStops()
+watch(() => locationStore.deviceFix, async (fix) => {
+  if (!fix) return
+  if (panelOpen.value) {
+    rebuildPending.value = true
+    return
   }
-  if (options.value.length > 0 || followedOptions.value.length > 0) refreshOptions()
+  await rebuildListIfMoved(fix)
 })
+
+/** 下拉开合：关上的那一刻把开着期间攒下的重排补上。 */
+async function onPanelOpenChange(isOpen: boolean): Promise<void> {
+  panelOpen.value = isOpen
+  if (isOpen || !rebuildPending.value) return
+  rebuildPending.value = false
+  await rebuildListIfMoved(locationStore.deviceFix)
+}
 
 /** 这一行的车辆标签（如「无障碍」）：数据源挂了才说。 */
 function tagsTextOf(row: BoardRow): string | null {
@@ -431,6 +477,7 @@ function onSelectOption(option: ComboboxOption): void {
             empty-text="未找到匹配站台"
             class="min-w-0 flex-1 md:w-60 md:flex-none lg:w-64"
             @select="onSelectOption"
+            @update:open="onPanelOpenChange"
           />
           <button
             class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 transition hover:bg-cyan-500/20 active:scale-95"

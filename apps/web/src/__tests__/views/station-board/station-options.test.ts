@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { NEARBY_RADIUS_M } from '@real-time-transport/shared/geo'
 import {
+  ANCHOR_ROLE_LABELS,
+  applyAnchors,
+  arrangeOptions,
   mergeStationSources,
   movedEnough,
   originMarkOf,
   outOfNearbyNoteOf,
   sortByDistance,
+  stationSecondaryTextOf,
   withDistances,
   type StationOption,
 } from '../../../views/station-board/station-options'
@@ -36,10 +40,107 @@ function eastOfMe(name: string, meters: number): StationOption {
   return stationOf(name, ME.lat, ME.lng + (meters / 854) * 0.01)
 }
 
+/** 钉过的站台：一条选项外加身份。 */
+function anchorOf(name: string, role: StationOption['anchor'], meters: number): StationOption {
+  return { ...eastOfMe(name, meters), stationId: `010-${name}-钉`, anchor: role }
+}
+
 /** 在参考点东边约 `meters` 米的**一个位置**（不是站）。 */
 function positionEastOf(meters: number): { lat: number, lng: number } {
   return { lat: ME.lat, lng: ME.lng + (meters / 854) * 0.01 }
 }
+
+describe('钉过的站台排在最前，且不占最近 30 个名额', () => {
+  it('钉过的站按远近也无所谓：它们就在最前', () => {
+    const arranged = arrangeOptions(withDistances([
+      eastOfMe('近处站', 100),
+      anchorOf('远处钉过的站', 'followed', 20000),
+      eastOfMe('中距站', 900),
+    ], ME), 30)
+
+    expect(arranged.map(option => option.name)).toEqual(['远处钉过的站', '近处站', '中距站'])
+  })
+
+  it('名额是给「我附近有哪些站」留的：31 个候选 + 2 个钉过的 → 2 + 30', () => {
+    const candidates = Array.from({ length: 31 }, (_, index) => eastOfMe(`站${index + 1}`, 100 + index * 10))
+    const arranged = arrangeOptions(withDistances([
+      anchorOf('钉过的甲', 'morning', 30000),
+      anchorOf('钉过的乙', 'evening', 31000),
+      ...candidates,
+    ], ME), 30)
+
+    expect(arranged).toHaveLength(32)
+    expect(arranged.slice(0, 2).map(option => option.name)).toEqual(['钉过的甲', '钉过的乙'])
+    // 被挤掉的是**第 31 近**的候选，不是钉过的那个。
+    expect(arranged.map(option => option.name)).not.toContain('站31')
+  })
+
+  it('盖身份：同名项换成用户钉的那一个的站 id 与坐标', () => {
+    // 同名多站是真实存在的（马路两侧各一个站 id），而列表按站名去重 —— 不盖这一下，
+    // 钉了东侧站台的人会被读到西侧那个。
+    const pinned = anchorOf('同一个名字', 'followed', 5000)
+    const identified = applyAnchors([
+      stationOf('同一个名字', ME.lat, ME.lng + 0.01),
+      stationOf('别的站', ME.lat, ME.lng),
+    ], [pinned])
+
+    const merged = identified.find(option => option.name === '同一个名字')!
+    expect(merged.stationId).toBe('010-同一个名字-钉')
+    expect(merged.lng).toBe(pinned.lng)
+    expect(merged.anchor).toBe('followed')
+  })
+
+  it('没钉过任何站：一条都不变', () => {
+    const list = [eastOfMe('甲站', 400), eastOfMe('乙站', 100)]
+
+    expect(applyAnchors(list, [])).toEqual(list)
+  })
+})
+
+describe('次级文字：钉过的站台说自己的身份', () => {
+  it('三种身份各说各的，照旧带距离', () => {
+    expect(stationSecondaryTextOf({ ...anchorOf('甲', 'morning', 300), distanceMeters: 300 }))
+      .toBe(`${ANCHOR_ROLE_LABELS.morning} · 300 米`)
+    expect(stationSecondaryTextOf({ ...anchorOf('乙', 'evening', 12000), distanceMeters: 12000 }))
+      .toBe(`${ANCHOR_ROLE_LABELS.evening} · 12.0 公里`)
+    expect(stationSecondaryTextOf({ ...anchorOf('丙', 'followed', 24000), distanceMeters: 24000 }))
+      .toBe(`${ANCHOR_ROLE_LABELS.followed} · 24.0 公里`)
+  })
+
+  it('钉过的站同时也在附近：说身份（那是它排在最前的理由），也照说距离', () => {
+    const text = stationSecondaryTextOf({ ...anchorOf('甲', 'morning', 28), origin: 'nearby', distanceMeters: 28 })
+
+    expect(text).toBe(`${ANCHOR_ROLE_LABELS.morning} · 28 米`)
+  })
+
+  it('没钉过时照旧只标例外：附近才写「附近」', () => {
+    expect(stationSecondaryTextOf({ ...stationOf('甲', ME.lat, ME.lng, 'nearby'), distanceMeters: 193 }))
+      .toBe('附近 · 193 米')
+    expect(stationSecondaryTextOf({ ...stationOf('乙', ME.lat, ME.lng), distanceMeters: 300 }))
+      .toBe('300 米')
+  })
+})
+
+describe('「最近的站台也在 3 公里外」不算钉过的那些', () => {
+  it('钉过的在 20 公里外、附近的站就在旁边：这句话不出现', () => {
+    const list = withDistances([anchorOf('钉过的', 'followed', 20000), eastOfMe('旁边的站', 300)], ME)
+
+    expect(outOfNearbyNoteOf(list)).toBe('')
+  })
+
+  it('一个附近的站都没有：也不出现（没有可说的对象）', () => {
+    const list = withDistances([anchorOf('钉过的', 'followed', 20000)], ME)
+
+    expect(outOfNearbyNoteOf(list)).toBe('')
+  })
+
+  it('附近的站确实都超过 3 公里：说出来', () => {
+    const list = withDistances([anchorOf('钉过的', 'followed', 20000), eastOfMe('远处的站', 4000)], ME)
+
+    // 说的是**最近那个**的米数，不是某个固定阈值：这句话要能被核对。
+    expect(outOfNearbyNoteOf(list)).toBe('最近的站台也在 4.0 公里外')
+  })
+})
 
 describe('走开多远才算换了地方：抖动不重排', () => {
   it('还没取过快照时算换了地方 —— 那时没有可留住的东西', () => {

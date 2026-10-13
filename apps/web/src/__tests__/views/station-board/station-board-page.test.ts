@@ -53,8 +53,8 @@ function favourite(): Record<string, unknown> {
   }
 }
 
-/** 线路详情：站表里的**站 id** 是这页拿去读站台的凭据。 */
-function lineDetail(stops: Array<{ id: string, name: string }>): Record<string, unknown> {
+/** 线路详情：站表里的**站 id** 是这页拿去读站台的凭据，站序是钉过的站台的身份。 */
+function lineDetail(stops: Array<{ id: string, name: string, order?: number, lat?: number, lng?: number }>): Record<string, unknown> {
   return {
     success: true,
     data: {
@@ -62,7 +62,7 @@ function lineDetail(stops: Array<{ id: string, name: string }>): Record<string, 
       lineName: '101路',
       direction: 0,
       directionName: '开往 NN终点站',
-      stops: stops.map((stop, index) => ({ ...stop, order: index + 1 })),
+      stops: stops.map((stop, index) => ({ ...stop, order: stop.order ?? index + 1 })),
     },
   }
 }
@@ -122,6 +122,8 @@ function boardAnswer(): Record<string, unknown> {
 interface Answers {
   board?: Record<string, unknown> | 'fail'
   favorites?: Record<string, unknown>[]
+  /** 覆盖那条关注线路的站表（站 id + 站名 + 站序），用来造「钉过的站台」。 */
+  stops?: Array<{ id: string, name: string, order?: number, lat?: number, lng?: number }>
   /** 附近站台那一次的答复；`'fail'` 表示读不到。 */
   nearby?: Record<string, unknown> | 'fail'
   /** 刷新答复挂住不答：由测试自己放行，用来量「重读还没有答案」那一刻的屏幕。 */
@@ -143,7 +145,7 @@ function routes(answers: Answers = {}): Route[] {
   return [
     [/\/api\/transit\/favorites$/, () => ({ success: true, data: answers.favorites ?? [favourite()] })],
     [/\/api\/transit\/cities/, () => ({ success: true, data: [{ code: CITY, name: '北京市', hasMetro: true, hot: true, pinyin: 'beijing' }] })],
-    [/\/api\/transit\/lines\//, () => lineDetail([{ id: '010-00001', name: 'NN站' }])],
+    [/\/api\/transit\/lines\//, () => lineDetail(answers.stops ?? [{ id: '010-00001', name: 'NN站' }])],
     // 附近站台：坐标 + 城市 → 站 id（列表的第二个来源）。
     [/\/api\/transit\/stations\/nearby/, () => (answers.nearby === 'fail'
       ? { success: false, error: '读不到' }
@@ -262,6 +264,47 @@ describe('记住上次看的那个站台', () => {
 
     expect(selectedText(host)).toContain('NN站')
     expect(host.storage.getItem(REMEMBERED_KEY)).toBeNull()
+    host.unmount()
+  })
+})
+
+describe('我钉过的站台：排在最前，且不受最近 30 个名额挤压', () => {
+  it('上班上车点在下拉最前，一进来读的就是它的站牌', async () => {
+    const host = await mountBoard({
+      stops: [
+        { id: '010-00001', name: 'NN站' },
+        { id: '010-00009', name: 'NN上车点', order: 9, lat: 39.8745, lng: 116.6715 },
+      ],
+      favorites: [{
+        ...favourite(),
+        morningStopName: 'NN上车点',
+        morningStopOrder: 9,
+        morningDirection: 0,
+      }],
+    })
+
+    const options = host.nodes(item => item.props['data-stub'] === 'option').map(node => host.textOf(node).trim())
+    expect(options[0]).toContain('NN上车点')
+    expect(options[0]).toContain('上班')
+    // 它是首选，故这一屏读的站牌就是它的 —— 而不是按距离排在最前的那个。
+    expect(host.server.seen(/\/api\/transit\/stations\/010-00009\/board/).length).toBeGreaterThan(0)
+    host.unmount()
+  })
+
+  it('钉过的站名在本方向对不上（站序变了或不在本方向停靠）：不出现，也不谎报', async () => {
+    const host = await mountBoard({
+      stops: [{ id: '010-00001', name: 'NN站' }],
+      favorites: [{
+        ...favourite(),
+        morningStopName: 'NN上车点',
+        morningStopOrder: 9,
+        morningDirection: 0,
+      }],
+    })
+
+    // 看候选行本身：整页文本里「上班」可能来自别处，那一句就证不到这一条。
+    const options = host.nodes(item => item.props['data-stub'] === 'option').map(node => host.textOf(node).trim())
+    expect(options.some(text => text.includes('上班'))).toBe(false)
     host.unmount()
   })
 })

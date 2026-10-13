@@ -12,6 +12,25 @@ import { distanceTextOf } from '@/distance-copy'
 /** 这个选项凭什么出现在列表里：数据源说它在我附近，或只是关注线路的站表里有它。 */
 export type StationOrigin = 'nearby' | 'followed'
 
+/**
+ * 我钉过的站台（F1）：两个通勤上车点，或某个方向的关注站。
+ *
+ * 它们是这一页里唯一**不按距离排列、也不受最近 30 个名额挤压**的站 —— 人走远之后，想看的站
+ * 不该从下拉里消失（实测：钉过的站在 20 公里外，而列表被最近的 30 个占满，一个都找不到）。
+ */
+export type AnchorRole = 'morning' | 'evening' | 'followed'
+
+/**
+ * 角色的说法，**下拉里的那个短词**：下拉是给人扫的，一行里既有站名又有距离，
+ * 身份只需说清「这条是我钉的哪一类」。设置页与首页角标说全「上班上车点 / 关注站」，
+ * 它们那里有地方摆。
+ */
+export const ANCHOR_ROLE_LABELS: Record<AnchorRole, string> = {
+  morning: '上班',
+  evening: '下班',
+  followed: '关注',
+}
+
 export interface StationOption {
   name: string
   stationId: string
@@ -22,6 +41,8 @@ export interface StationOption {
   distanceMeters: number | null
   /** 来源：数据源的附近站台，还是只有关注线路的站表里有它。 */
   origin: StationOrigin
+  /** 它是用户钉过的站台时的身份；未钉过则缺省。 */
+  anchor?: AnchorRole
 }
 
 /**
@@ -68,9 +89,10 @@ export function mergeStationSources(
 /**
  * 这一行为什么在这儿：**只标例外** —— 数据源的附近站台里有它，就说「附近」；其余不标。
  *
- * 不标「关注」有两个理由：这份列表的默认本来就是「关注线路经过的站」，标默认等于没标；
- * 而且「关注」在本仓已被 F1 的「关注站」（按方向钉一个站，设置里配的）占着，同形异义会打架。
- * 于是「哪些站是关注线路经过的」读作：**没有带「附近」那些**。
+ * 不标「关注线路经过的站」有两个理由：这份列表的默认本来就是那些站，标默认等于没标；
+ * 而「关注」这个词在这个下拉里已经属于 F1 的「关注站」（上面那些带身份的钉过的站台），
+ * 再拿它标「关注线路的站表里有它」会把两件不同的事说成一件。
+ * 于是「哪些站是关注线路经过的」读作：**没有带任何标记那些**。
  */
 export function originMarkOf(option: StationOption): string | null {
   return option.origin === 'nearby' ? '附近' : null
@@ -83,7 +105,9 @@ export function originMarkOf(option: StationOption): string | null {
  * 它们是两回事。没有距离时只说来源（不知道远近就不说远近）。
  */
 export function stationSecondaryTextOf(option: StationOption): string | null {
-  return [originMarkOf(option), distanceTextOf(option.distanceMeters)].filter(Boolean).join(' · ') || null
+  // 一个站只带一种说法：钉过的站台说它是什么（那是它排在最前的理由），其余按来源标「附近」。
+  const mark = option.anchor ? ANCHOR_ROLE_LABELS[option.anchor] : originMarkOf(option)
+  return [mark, distanceTextOf(option.distanceMeters)].filter(Boolean).join(' · ') || null
 }
 
 /**
@@ -122,6 +146,42 @@ export function sortByDistance(list: StationOption[]): StationOption[] {
 }
 
 /**
+ * 把钉过的站台的身份盖到列表上：同一个站名用**用户钉的那一个**（id 与坐标都换过来）。
+ *
+ * 站表里同名多站是真实存在的（马路两侧各一个站 id），而列表按站名去重 —— 不盖这一下，
+ * 钉了东侧站台的人会被读到西侧那个，距离与到站都是另一个站台的。
+ *
+ * 钉过的站台不会因为这一下而多出来：它本来就在关注线路的站表里，故这里只管换身份。
+ */
+export function applyAnchors(list: StationOption[], anchors: StationOption[]): StationOption[] {
+  if (anchors.length === 0) return list
+  const byName = new Map(anchors.map(anchor => [anchor.name, anchor]))
+  return list.map((option) => {
+    const anchor = byName.get(option.name)
+    if (!anchor) return option
+    return {
+      ...option,
+      stationId: anchor.stationId,
+      lat: anchor.lat,
+      lng: anchor.lng,
+      anchor: anchor.anchor,
+    }
+  })
+}
+
+/**
+ * 下拉里的排列：**钉过的站台在最前**（按钉的顺序），其余按远近取最近的 `cap` 个。
+ *
+ * 锚点不占那些名额：它们最多几个，而名额是给「我附近有哪些站」这件事留的 ——
+ * 让 20 公里外的一个钉过的站挤掉一个 300 米内的站，这一页就答错了它要答的问题。
+ */
+export function arrangeOptions(list: StationOption[], cap: number): StationOption[] {
+  const anchors = list.filter(option => option.anchor)
+  const rest = sortByDistance(list.filter(option => !option.anchor)).slice(0, cap)
+  return [...anchors, ...rest]
+}
+
+/**
  * 走开多远才算**换了地方** —— 列表要不要重排这件事的判据。
  *
  * 定位是每一下都在动的：站着不动，GPS 也会在几十米里打转，而这一页的站台彼此常只差几十米，
@@ -142,9 +202,12 @@ export function movedEnough(
 /**
  * 最近的站台也在 3 公里外时那句话 —— 这时「按远近排」仍然成立，但这一屏没有一个站算附近。
  * 说出来，比让使用者自己从列表里发现要诚实；都没有距离可说时返回空串。
+ *
+ * **钉过的站台不参与这一句**：它们排在最前靠的是「我钉过它」，不是因为它在旁边；
+ * 拿一个 20 公里外的钉过的站去说「最近的也在 3 公里外」，说的是另一件事。
  */
 export function outOfNearbyNoteOf(list: StationOption[]): string {
-  const nearest = list.find(option => option.distanceMeters !== null)
+  const nearest = list.filter(option => !option.anchor).find(option => option.distanceMeters !== null)
   if (!nearest || nearest.distanceMeters === null || nearest.distanceMeters <= NEARBY_RADIUS_M) return ''
   return `最近的站台也在 ${distanceTextOf(nearest.distanceMeters)}外`
 }

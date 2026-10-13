@@ -7,14 +7,15 @@
  *  - 「到站时刻」与「发车间隔预报」分开说：前者是车什么时候到，后者是多久一班，两者绝不互填；
  *  - 不做「给路人看的展示大屏」这个形态与受众：没有翻牌、跑马灯，读法与其余页面一致。
  *
- * 站台本身仍只来自**已关注线路的站表**：站的身份是数据源的站 id，而这页只拿得到关注线路
- * 交出来的那些（任意未关注站台的取数路径未验证，见 F5 的范围外）。
+ * 站台有三个来源：**已关注线路的站表**、**我附近的站台**（数据源的附近站台接口），以及
+ * **我钉过的站台**（上下班上车点与关注站，F1）。前两个按远近排、取最近的 30 个；钉过的那些
+ * **排在最前且不占那 30 个名额** —— 人走远之后，想看的站不该从下拉里消失。
  */
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useIntervalFn } from '@vueuse/core'
 import { LocateFixed } from '@lucide/vue'
-import type { NearbyStop, StationBoard } from '@real-time-transport/shared'
+import type { LineDetail, NearbyStop, StationBoard } from '@real-time-transport/shared'
 import { favoriteDirections } from '@real-time-transport/shared'
 import { statedCoordinate } from '@real-time-transport/shared/geo'
 import { SearchableCombobox, type ComboboxOption, type SelectedText } from '@/components/searchable-combobox'
@@ -22,14 +23,16 @@ import { RefreshControl } from '@/components/refresh-control'
 import { congestionChipClass, congestionLabel } from '@/congestion-copy'
 import { distanceTextOf } from '@/distance-copy'
 import {
+  applyAnchors,
+  arrangeOptions,
   mergeStationSources,
   movedEnough,
   outOfNearbyNoteOf,
-  sortByDistance,
   stationSecondaryTextOf,
   withDistances,
   type StationOption,
 } from './station-options'
+import { anchorStationsOf, type FavoriteDetails } from './anchor-options'
 import { useCityStore } from '@/stores/city.store'
 import { useLocationStore } from '@/stores/location.store'
 import { useTransitStore } from '@/stores/transit.store'
@@ -54,6 +57,8 @@ const options = shallowRef<StationOption[]>([])
 const followedOptions = shallowRef<StationOption[]>([])
 /** 我附近的站台（数据源给的那一份）。 */
 const nearbyOptions = shallowRef<StationOption[]>([])
+/** 我钉过的站台（上下班上车点、关注站）：排在最前，且不占那 30 个名额。 */
+const anchorOptions = shallowRef<StationOption[]>([])
 /**
  * 上一次取这张列表快照时站的位置：用来判断「人是不是真的走开了」。
  *
@@ -121,40 +126,53 @@ const freshnessText = computed(() =>
   (readAt.value !== null ? `最后更新 ${clockTimeOf(readAt.value)}` : null),
 )
 
-/** 站台的第一个来源：**已关注线路的站表**里出现过的站名。 */
-async function collectFollowedStations(): Promise<StationOption[]> {
+/**
+ * 关注线路两个方向的站表，每条线路读一次。
+ *
+ * 候选与「钉过的站台」都从这一份来：同一个站要在两处解析成同一个实体，读两份就会漂。
+ */
+async function loadFollowedDetails(): Promise<FavoriteDetails[]> {
   const cityFavorites = favorites.value.filter(f => f.cityCode === cityStore.currentCode)
-  const found = new Map<string, StationOption>()
 
-  const tasks = cityFavorites.map(async (favorite) => {
+  return await Promise.all(cityFavorites.map(async (favorite) => {
+    const details: { 0: LineDetail | null, 1: LineDetail | null } = { 0: null, 1: null }
     for (const { direction, lineId } of favoriteDirections(favorite)) {
       try {
         const qs = new URLSearchParams({ direction: String(direction), cityCode: cityStore.currentCode })
         const res = await fetch(`/api/transit/lines/${encodeURIComponent(lineId)}?${qs.toString()}`)
         const json = await res.json()
-        if (!json?.success || !json?.data) continue
-        for (const stop of (json.data.stops ?? []) as Array<{ id?: string, name?: string, lat?: number, lng?: number }>) {
-          const name = stop.name
-          const stationId = stop.id
-          if (!name || !stationId) continue
-          if (!found.has(name)) {
-            found.set(name, {
-              name,
-              stationId,
-              lat: statedCoordinate(stop.lat) ?? null,
-              lng: statedCoordinate(stop.lng) ?? null,
-              distanceMeters: null,
-              origin: 'followed',
-            })
-          }
-        }
+        if (json?.success && json?.data) details[direction] = json.data as LineDetail
       }
       catch {
         // 单条线路读不到：它不贡献选项，其余照旧 —— 一条线读失败不该清空整个选择器。
       }
     }
-  })
-  await Promise.allSettled(tasks)
+    return { favorite, details }
+  }))
+}
+
+/** 站表的第一个来源：**已关注线路的站表**里出现过的站名。 */
+function stopsOf(entries: FavoriteDetails[]): StationOption[] {
+  const found = new Map<string, StationOption>()
+
+  for (const { details } of entries) {
+    for (const detail of [details[0], details[1]]) {
+      for (const stop of detail?.stops ?? []) {
+        const name = stop.name
+        const stationId = stop.id
+        if (!name || !stationId) continue
+        if (found.has(name)) continue
+        found.set(name, {
+          name,
+          stationId,
+          lat: statedCoordinate(stop.lat) ?? null,
+          lng: statedCoordinate(stop.lng) ?? null,
+          distanceMeters: null,
+          origin: 'followed',
+        })
+      }
+    }
+  }
   return [...found.values()]
 }
 
@@ -200,7 +218,9 @@ async function loadNearbyStops(): Promise<void> {
  */
 function refreshOptions(): void {
   const merged = mergeStationSources(followedOptions.value, nearbyOptions.value)
-  options.value = sortByDistance(withDistances(merged, locationStore.userCoords)).slice(0, 30)
+  // 钉过的站台先用它自己解析出来的身份（id 与坐标）盖住同名项：它才是用户钉的那一个。
+  const identified = applyAnchors(merged, anchorOptions.value)
+  options.value = arrangeOptions(withDistances(identified, locationStore.userCoords), 30)
   listBuiltAt = locationStore.userCoords
 }
 
@@ -212,7 +232,9 @@ function refreshOptions(): void {
  * 它早已不在附近、或那条关注线路被取关之后，屏上会出现一个下拉里点不到的站台。
  */
 async function loadStationOptions(): Promise<void> {
-  followedOptions.value = await collectFollowedStations()
+  const entries = await loadFollowedDetails()
+  followedOptions.value = stopsOf(entries)
+  anchorOptions.value = anchorStationsOf(entries)
   await loadNearbyStops()
   refreshOptions()
 
@@ -383,6 +405,7 @@ watch(() => cityStore.currentCode, async () => {
   options.value = []
   followedOptions.value = []
   nearbyOptions.value = []
+  anchorOptions.value = []
   listBuiltAt = null
   currentStationId.value = ''
   rows.value = []

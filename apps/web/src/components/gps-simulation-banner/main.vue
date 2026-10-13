@@ -4,10 +4,11 @@ import { storeToRefs } from 'pinia'
 import { MapPin } from '@lucide/vue'
 import { useLocationStore } from '@/stores/location.store'
 
-const { isSimulated, userCoords } = storeToRefs(useLocationStore())
+// 横幅说的是浏览器报告的那个位置本身，故显示原始定位 —— 换算成 GCJ 的那一份是给测距用的。
+const { isSimulated, deviceFix } = storeToRefs(useLocationStore())
 
 const coordsLabel = computed(() => {
-  const c = userCoords.value
+  const c = deviceFix.value
   if (!c) return ''
   return `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`
 })

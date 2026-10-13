@@ -3,6 +3,8 @@ import type {
   LineDetail,
   LineSummary,
   LiveLineStatus,
+  NearbyStop,
+  StationBoardLine,
 } from '@real-time-transport/shared'
 
 /**
@@ -21,5 +23,20 @@ export interface ITransitProvider {
   searchLines(keyword: string, cityCode?: string): Promise<LineSummary[]>
   getLineDetail(lineId: string, direction?: number, cityCode?: string): Promise<LineDetail | null>
   getLiveStatus(lineId: string, direction?: number, cityCode?: string, options?: { targetOrder?: number }): Promise<LiveLineStatus | null>
+  /**
+   * 按**站台**读取到站：一个站台上全部经过线路的到站时刻（含没被关注的线路）。
+   *
+   * 可选能力：只有能按站台作答的 provider 实现它。没实现的 provider 让这条能力为空，
+   * 服务端据此如实说「这座城市读不了站台」，而不是拿别处的数字拼一个出来。
+   */
+  /**
+   * 我附近的站台（按坐标问数据源要的那一份，站 id 由数据源给出）。
+   *
+   * 与 `getStationBoard` 一样是可选的：没有这项能力的数据源，站牌列表就只列关注线路的站表。
+   * 读不到时答 null（「这座城市没有这项能力」与「这附近确实没有站台」是两件事）。
+   */
+  getNearbyStops?(cityCode: string, lng: number, lat: number): Promise<NearbyStop[] | null>
+
+  getStationBoard?(stationId: string, cityCode?: string): Promise<StationBoardLine[] | null>
   isAvailable(): Promise<boolean>
 }

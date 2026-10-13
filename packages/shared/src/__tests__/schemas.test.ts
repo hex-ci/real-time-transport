@@ -4,7 +4,6 @@ import {
   CommuteChainSchema,
   CongestionLevelSchema,
   LiveBusSchema,
-  NearbyStationSchema,
   StationSchema,
   UpdateCommuteChainSchema,
   UpdateFavoriteSchema,
@@ -222,37 +221,6 @@ describe('Home/work anchor contract', () => {
     const parsed = UpdateSettingsSchema.parse({ workLng: 116.3974 })
     expect(parsed.workLng).toBe(116.3974)
     expect(parsed.workLat).toBeUndefined()
-  })
-})
-
-describe('Nearby-radar distance contract', () => {
-  /** 一条雷达返回的 POI，去掉当前用例所针对的字段。 */
-  const poi = (over: Record<string, unknown> = {}) => ({
-    name: '甲路(公交站)',
-    type: 'bus',
-    lat: 39.9,
-    lng: 116.4,
-    ...over,
-  })
-
-  it('accepts a POI whose distance the radar never stated, and states none for it either', () => {
-    const parsed = NearbyStationSchema.parse(poi())
-    // 缺省是 schema 自己的答案：该字段可选且无默认值。`distanceMeters: 0` 会声称用户就站在站台上 ——
-    // 一个没人测过的真实距离。
-    expect(parsed.distanceMeters).toBeUndefined()
-  })
-
-  it('keeps a distance the radar does state, a zero included', () => {
-    // 另一半：0 米是合法读数（POI 就在测点上），不是「字段缺失」的另一种写法；
-    // 丢掉已声明的 0 会抹掉一次真实测量。
-    expect(NearbyStationSchema.parse(poi({ distanceMeters: 120 })).distanceMeters).toBe(120)
-    expect(NearbyStationSchema.parse(poi({ distanceMeters: 0 })).distanceMeters).toBe(0)
-  })
-
-  it('still requires the name and the route type the radar is read for', () => {
-    // 只有距离允许缺失：没有站名或没有类型的 POI 根本无法与站台匹配。
-    expect(NearbyStationSchema.safeParse({ type: 'bus' }).success).toBe(false)
-    expect(NearbyStationSchema.safeParse({ name: '甲路(公交站)' }).success).toBe(false)
   })
 })
 

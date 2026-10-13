@@ -22,12 +22,12 @@ import { seedFixtures } from './fixtures.mjs'
 import { MUTATIONS } from './mutations.mjs'
 import * as home from './scenarios/home.mjs'
 import * as lineDetail from './scenarios/line-detail.mjs'
-import * as platform from './scenarios/platform.mjs'
+import * as stationBoard from './scenarios/station-board.mjs'
 import * as commuteChain from './scenarios/commute-chain.mjs'
 import * as settings from './scenarios/settings.mjs'
 import * as mobile from './scenarios/mobile.mjs'
 
-const SCENARIOS = [home, lineDetail, platform, commuteChain, settings, mobile]
+const SCENARIOS = [home, lineDetail, stationBoard, commuteChain, settings, mobile]
 
 // ---------------------------------------------------------------- 命令行
 

@@ -1,4 +1,3 @@
-export * from './coords.js'
 export * from './types.js'
 export * from './station-timetable.js'
 export * from './services/amap-gis.service.js'

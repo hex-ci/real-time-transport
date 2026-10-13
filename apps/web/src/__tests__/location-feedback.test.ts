@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { haversineMeters, wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 
 /**
  * 按下定位之后的四种结局去哪里说。
@@ -131,7 +132,12 @@ describe('一次点按的四种结局各说一句', () => {
     await settle()
 
     expect(pushed).toEqual(['已获取位置'])
-    expect(store.userCoords).toEqual({ lat: FIX.latitude, lng: FIX.longitude })
+    // 两份定位各归各的用途：上报给服务端的是设备原样报的，本地测距用的是换算到站表那个面上的。
+    expect(store.deviceFix).toEqual({ lat: FIX.latitude, lng: FIX.longitude })
+    const [gcjLng, gcjLat] = wgs84ToGcj02(FIX.longitude, FIX.latitude)
+    expect(store.userCoords).toEqual({ lat: gcjLat, lng: gcjLng })
+    // 两份差的正是这次修掉的那个量：北京城区几百米，足以让排序的头几名换人。
+    expect(haversineMeters(FIX.latitude, FIX.longitude, gcjLat, gcjLng)).toBeGreaterThan(400)
   })
 
   it('浏览器没有这套能力：说它不支持，而不是按下一个没有回声的按钮', async () => {
@@ -232,7 +238,7 @@ describe('自动那一次一个字都不说', () => {
     deliver()
     await settle()
 
-    expect(store.userCoords).toEqual({ lat: FIX.latitude, lng: FIX.longitude })
+    expect(store.deviceFix).toEqual({ lat: FIX.latitude, lng: FIX.longitude })
     expect(pushed).toEqual([])
   })
 

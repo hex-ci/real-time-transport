@@ -21,7 +21,7 @@ import {
 import { TransitService, resolvePollIntervalSec } from './services/transit.service.js'
 import { Database, databaseUrlFor, isUniqueViolation } from './db/client.js'
 import { resolveUserId } from './user-id.js'
-import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 
 /**
  * HTTP 边界是浏览器坐标进入服务端的地方，因此也是唯一做换算的地方。
@@ -360,6 +360,40 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     return { success: true, data: status }
   })
 
+  // 电子站牌：我附近的站台（坐标 + 城市 → 站 id），站牌列表据此并入「附近」那些站。
+  // 这是「任意未关注站台」那条路的桥：有了站 id，站点详情就能读它上面全部线路的到站。
+  // lng/lat = 原始 WGS-84 设备定位 -> 在本边界换算（与 /gis/walk-eta 同一条规则）。
+  app.get('/api/transit/stations/nearby', async (req, reply) => {
+    const q = req.query as Record<string, string>
+    if (!q?.lng || !q?.lat) {
+      return reply.status(400).send({ success: false, error: 'Missing coordinate parameters' })
+    }
+    const origin = deviceFixToGcj02(Number(q.lng), Number(q.lat))
+    const stations = await transitService.readNearbyStops(
+      q.cityCode || DEFAULT_CITY_CODE,
+      origin.lng,
+      origin.lat,
+    )
+    if (stations === null) {
+      return reply.status(404).send({ success: false, error: 'Nearby stations not available' })
+    }
+    return { success: true, data: stations }
+  })
+
+  // 电子站牌：一个站台上**全部经过线路**的到站（含未关注的线路）。
+  // 站的身份是它的 id：或来自关注线路的站表，或来自上面那个附近站台端点。
+  app.get('/api/transit/stations/:stationId/board', async (req, reply) => {
+    const { stationId } = req.params as { stationId: string }
+    const q = req.query as Record<string, string>
+    const cityCode = q?.cityCode || DEFAULT_CITY_CODE
+
+    const board = await transitService.readStationBoard(stationId, cityCode)
+    if (!board) {
+      return reply.status(404).send({ success: false, error: 'Station board not available' })
+    }
+    return { success: true, data: board }
+  })
+
   // origin* = 原始 WGS-84 设备定位 -> 在本边界换算。
   // dest*   = GCJ-02 站点坐标 -> 原样转发，绝不换算。
   app.get('/api/transit/gis/walk-eta', async (req, reply) => {
@@ -379,18 +413,6 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (!result) {
       return reply.status(404).send({ success: false, error: 'Walking route not available' })
     }
-    return { success: true, data: result }
-  })
-
-  // lng/lat = 原始 WGS-84 设备定位 -> 在本边界换算。
-  app.get('/api/transit/gis/nearby-stations', async (req, reply) => {
-    const { lng, lat, radius } = req.query as Record<string, string>
-    if (!lng || !lat) {
-      return reply.status(400).send({ success: false, error: 'Missing coordinate parameters' })
-    }
-
-    const origin = deviceFixToGcj02(Number(lng), Number(lat))
-    const result = await transitService.getNearbyStations(origin.lng, origin.lat, Number(radius || 800))
     return { success: true, data: result }
   })
 

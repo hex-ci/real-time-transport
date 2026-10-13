@@ -1,12 +1,10 @@
 import { shallowRef } from 'vue'
-import type { WalkDecision, NearbyStation } from '@real-time-transport/shared'
+import type { WalkDecision } from '@real-time-transport/shared'
 
 /** GIS 组合式：请求全部经后端转发，Web-Service key 不下发到浏览器。 */
 export function useGis() {
   const walkDecision = shallowRef<WalkDecision | null>(null)
-  const nearbyStations = shallowRef<NearbyStation[]>([])
   const isLoadingDecision = shallowRef(false)
-  const isLoadingNearby = shallowRef(false)
 
   async function fetchWalkDecision(params: {
     originLng: number
@@ -40,35 +38,14 @@ export function useGis() {
     }
   }
 
-  async function fetchNearbyStations(lng: number, lat: number, radius: number = 800): Promise<NearbyStation[]> {
-    isLoadingNearby.value = true
-    try {
-      const qs = new URLSearchParams({ lng: String(lng), lat: String(lat), radius: String(radius) })
-      const res = await fetch(`/api/transit/gis/nearby-stations?${qs.toString()}`)
-      const json = await res.json()
-      nearbyStations.value = json.success ? json.data : []
-      return nearbyStations.value
-    }
-    catch {
-      nearbyStations.value = []
-      return []
-    }
-    finally {
-      isLoadingNearby.value = false
-    }
-  }
-
   function clearDecision(): void {
     walkDecision.value = null
   }
 
   return {
     walkDecision,
-    nearbyStations,
     isLoadingDecision,
-    isLoadingNearby,
     fetchWalkDecision,
-    fetchNearbyStations,
     clearDecision,
   }
 }

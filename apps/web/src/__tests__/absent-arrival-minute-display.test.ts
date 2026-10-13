@@ -8,9 +8,10 @@ import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '../arrival-copy'
 /**
  * 列出到站的每个界面都必须渲染「无到站耗时」，绝不显示分钟数。
  *
- * 服务端对无法估价的车辆只下发顺序中的位置，不含 `etaSeconds`。三个界面列出到站：
- * 线路面板的后续进站计划、总览卡片的到站行、站台屏的预计到站列，它们共用
- * `@/arrival-copy` 里的同一个 token，不能各自造句。
+ * 服务端对无法估价的车辆只下发顺序中的位置，不含 `etaSeconds`。两个界面列出到站：
+ * 线路面板的后续进站计划与总览卡片的到站行，它们共用 `@/arrival-copy` 里的同一个 token，
+ * 不能各自造句。（旧站台屏那一列随那个模块一起消失：新站牌的行由上游给到站时刻，
+ * 「有车但没有分钟」这个状态在新契约里不存在。）
  *
  * 这些组件只跑在浏览器（无 jsdom、无 @vue/test-utils），故按 SFC 源码断言。
  */
@@ -27,19 +28,17 @@ function templateOf(source: string): string {
 
 const popover = sfc('../views/line-detail/components/station-popover.vue')
 const card = sfc('../views/overview/components/line-mini-card.vue')
-const board = sfc('../views/platform/components/departure-board.vue')
 const linePage = sfc('../views/line-detail/index.vue')
 
 describe('the unknown-arrival token is one token', () => {
-  it('is the platform board\'s own wording, and contains no digit', () => {
+  it('is the wording the boards use, and contains no digit', () => {
     expect(ARRIVAL_MINUTE_UNAVAILABLE_TEXT).toBe('暂无到站耗时')
     // token 里出现数字会被读成旁边的分钟数。
     expect(ARRIVAL_MINUTE_UNAVAILABLE_TEXT).not.toMatch(/\d/)
   })
 
-  it('is the constant every arrivals surface renders, the board included', () => {
+  it('is the constant every arrivals surface renders', () => {
     // 同一行同一状态在多个界面呈现，措辞必须唯一：只此一处常量，不逐文件重复字面量。
-    expect(templateOf(board)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
     expect(templateOf(popover)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
     expect(templateOf(card)).toContain('ARRIVAL_MINUTE_UNAVAILABLE_TEXT')
   })

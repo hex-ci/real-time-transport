@@ -17,11 +17,12 @@ export const MUTATIONS = {
     find: 'direction: dir })',
     replace: 'direction: (1 - dir) as 0 | 1 })',
   },
-  站台大屏: {
-    file: 'apps/web/src/views/platform/index.vue',
-    // 新鲜度行改成本机时钟（请求时刻），而不是产出这些行的响应自己的时刻。
-    find: 'if (answeredAt !== undefined) rowsReadAt.value = answeredAt',
-    replace: 'rowsReadAt.value = Date.now()',
+  电子站牌: {
+    file: 'apps/web/src/views/station-board/index.vue',
+    // 换站时不再把选中的站记下来：屏上换了名字，页头还是上一个站 —— 换站成了一件只换名字的事。
+    // 顺带也打掉「最后看的那个站台」这条记忆（它记的正是这里选中的那个），故刷新后也回不去。
+    find: `  currentStationId.value = option?.stationId ?? ''`,
+    replace: `  void option`,
   },
   通勤链路页: {
     file: 'apps/web/src/views/commute-chain/index.vue',
@@ -36,9 +37,9 @@ export const MUTATIONS = {
     replace: 'return next',
   },
   移动端可访问性: {
-    file: 'apps/web/src/views/platform/components/platform-header.vue',
+    file: 'apps/web/src/views/station-board/index.vue',
     // 刷新入口从顶部控件那行掉出去：屏上不再量得到它，而它属于那一行（F11）。
-    find: '@refresh="emit(\'refresh\')"',
-    replace: '@refresh="emit(\'refresh\')" v-show="false"',
+    find: `            label="刷新本站台到站"`,
+    replace: `            label="刷新本站台到站" v-show="false"`,
   },
 }

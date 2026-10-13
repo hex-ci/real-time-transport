@@ -373,8 +373,13 @@ function createWindowStub(body: HostElement): Record<string, unknown> {
   }
 }
 
-/** 恰好够 city store 用的 `localStorage`，它在创建时读取。 */
-function createMemoryStorage(): Storage {
+/**
+ * 恰好够 city store 与页面自己的记忆用的 `localStorage`，它在创建时读取。
+ *
+ * 导出：需要**先布下一条记录再挂载**的用例（如「上次看的是哪个站台」）得自己拿一份，
+ * 经 `MountOptions.storage` 交给装置 —— 装置自己造的那份每次挂载都是空的。
+ */
+export function memoryStorage(): Storage {
   const entries = new Map<string, string>()
   return {
     get length() { return entries.size },
@@ -454,6 +459,8 @@ export interface MountedHost {
   root: HostElement
   body: HostElement
   server: MockServer
+  /** 装置给出的那份 `localStorage`：页面写下什么，从这里读回来。 */
+  storage: Storage
   store: ReturnType<typeof useTransitStore>
   city: ReturnType<typeof useCityStore>
   /** 挂载所渲染的一切，含 portal，已归一化空白。 */
@@ -515,6 +522,8 @@ export interface MountOptions {
    * 被测组件的 props，供那些纯展示、一切皆取自 prop 的页面使用（`empty-state.vue`、`chain-empty-state.vue`）。
    */
   props?: Record<string, unknown>
+  /** 用它代替装置自己造的那份 `localStorage`：需要先布下记录再挂载的用例走这里。 */
+  storage?: Storage
   /**
    * 应用全局注册的组件，使渲染它们的模板能在此挂载：`设置` 的索引与四个子页面渲染 `RouterLink`，
    * 而测试从它读到的，是它被给到的**目标**（`RouterLinkStub`）。
@@ -555,8 +564,9 @@ export async function mountComponent(component: Component, options: MountOptions
   // 节点自己的 document，其 `defaultView` 即同一个 window。
   ;(windowStub.document as Record<string, any>).defaultView = windowStub
   hostDocument = windowStub.document as Record<string, any>
+  const storage = options.storage ?? memoryStorage()
   vi.stubGlobal('fetch', server.handle)
-  vi.stubGlobal('localStorage', createMemoryStorage())
+  vi.stubGlobal('localStorage', storage)
   vi.stubGlobal('window', windowStub)
   vi.stubGlobal('document', windowStub.document)
   // reka-ui 测试 `ref instanceof Element`，而 runtime-dom 的 `vModelText` 会问
@@ -631,6 +641,7 @@ export async function mountComponent(component: Component, options: MountOptions
     root: container,
     body: teleportTarget,
     server,
+    storage,
     store: useTransitStore(),
     city: useCityStore(),
     text: () => `${textOf(container)} ${textOf(teleportTarget)}`,

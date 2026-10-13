@@ -29,7 +29,7 @@ import type { ComboboxOption, OptionsMatch, SelectedText } from './types'
  *
  * 键盘由 reka 承担：打开面板走浏览器对触发器的原生激活（Enter / Space），打开之后的上/下移动高亮、
  * 回车选中与 Escape 关闭都由 reka 在面板（`role=listbox`）那一层处理 —— 两条路在真浏览器里都通
- * （`tests/e2e/scenarios/platform.mjs` 的键盘场景钉住）。本组件自己只做一件事：搜索框上的
+ * （`tests/e2e/scenarios/station-board.mjs` 的键盘场景钉住）。本组件自己只做一件事：搜索框上的
  * Escape / 上 / 下不拦截（原样放行给 reka），其余键挡住冒泡，免得输入漏到页面上的其它监听器。
  */
 const {

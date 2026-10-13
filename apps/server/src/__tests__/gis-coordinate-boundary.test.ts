@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import { buildApp } from '../app.js'
 
 /**
@@ -34,9 +34,6 @@ function stubUpstream(): string[] {
 
     if (href.includes('/v3/direction/walking')) {
       return ok({ route: { paths: [{ distance: '1208', duration: '966' }] } })
-    }
-    if (href.includes('/v3/place/around')) {
-      return ok({ pois: [] })
     }
     if (href.includes('/v3/geocode/regeo')) {
       return ok({ regeocode: { addressComponent: { district: '甲区', township: '乙街道' } } })
@@ -151,22 +148,6 @@ describe('GIS routes: a raw WGS-84 device fix is converted exactly once', () => 
       const params = upstreamUrl(urls, '/v3/direction/walking').searchParams
       expect(params.get('origin')).toBe(DEVICE_FIX_AS_GCJ02)
       expect(params.get('destination')).toBe(STATION_AS_HELD)
-    }
-    finally {
-      await app.close()
-    }
-  })
-
-  it('nearby-stations converts the origin once', async () => {
-    const urls = stubUpstream()
-    const app = await buildApp({ amapKey: 'test-key' })
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/api/transit/gis/nearby-stations?lng=${DEVICE_FIX.lng}&lat=${DEVICE_FIX.lat}&radius=800`,
-      })
-      expect(res.statusCode).toBe(200)
-      expect(upstreamUrl(urls, '/v3/place/around').searchParams.get('location')).toBe(DEVICE_FIX_AS_GCJ02)
     }
     finally {
       await app.close()

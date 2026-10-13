@@ -6,7 +6,10 @@ import type {
   LineSummary,
   LiveBus,
   LiveLineStatus,
+  NearbyStop,
   Station,
+  StationBoardArrival,
+  StationBoardLine,
 } from '@real-time-transport/shared'
 import { cumulativeDistances, statedCoordinate, statedStopOrder } from '@real-time-transport/shared'
 import type { ITransitProvider } from '../types.js'
@@ -114,6 +117,112 @@ export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
     if (level) return level
   }
   return 'unknown'
+}
+
+/**
+ * 站台载荷 → 站台上每一条线路/方向一行。
+ *
+ * 上游的应答里 `stationList` 是**若干组站台**：只有被查的那一组带着线路的完整身份与在途车
+ * （其余几组只有站名与线路名）。故这里的判据是「这一组里有没有带 lineId 的线路」而不是位置 ——
+ * 位置是它今天碰巧的排布方式，身份才是它说的话。
+ *
+ * `readAt` 是这次读取从源取得数据的瞬间：每辆车的 `remainSeconds` 由它算出（读数是活的，
+ * 而调用方不该拿自己的钟去减上游的钟）。上游给不出到站时刻的车不进这份列表：一辆车要么有
+ * 时刻，要么不存在，绝不补一个 0 当「现在就到」。
+ */
+export function stationBoardLinesOf(payload: any, readAt: number): StationBoardLine[] {
+  const groups: any[] = Array.isArray(payload?.stationList) ? payload.stationList : []
+  const hydrated = groups.find(group => Array.isArray(group?.lines) && group.lines.some((line: any) => line?.line?.lineId))
+  const rawLines: any[] = Array.isArray(hydrated?.lines) ? hydrated.lines : []
+
+  const lines: StationBoardLine[] = []
+  for (const raw of rawLines) {
+    const rawLine = raw?.line ?? {}
+    const lineId = typeof rawLine.lineId === 'string' ? rawLine.lineId : ''
+    // 只报了站名与线路名的组：它没有身份，不是一条可读的线路。
+    if (!lineId) continue
+
+    const arrivals: StationBoardArrival[] = []
+    for (const st of (Array.isArray(raw?.stnStates) ? raw.stnStates : [])) {
+      const arriveAt = typeof st?.arrivalTime === 'number' && st.arrivalTime > 0 ? st.arrivalTime : null
+      if (arriveAt === null) continue
+      // 已经过去的那一班：上游在应答里留着它（travelTime 为 -1、距离是几公里外的旧读数）。
+      // 它的剩余秒数是负的，按 `arrivalMinutes` 会落在 0 上被读成「正进站」—— 一辆不在那儿的车。
+      // 留 30 秒余量：上游算这批时刻先于我们的读时刻，一辆真的正进站的车按我们的钟看可能刚过去几秒。
+      if (arriveAt < readAt - 30_000) continue
+      const tags: string[] = (Array.isArray(st?.busTagList) ? st.busTagList : [])
+        .map((tag: any) => (typeof tag?.title === 'string' ? tag.title : ''))
+        // 拥挤度那几个词由芯片单独陈述：同一行里同一个事实说两遍，读者会以为那是两件事。
+        .filter((title: string) => title !== '' && !Object.hasOwn(CONGESTION_BY_TAG_TITLE, title))
+      arrivals.push({
+        busId: String(st?.busId ?? ''),
+        arriveAt,
+        remainSeconds: Math.round((arriveAt - readAt) / 1000),
+        // 上游按被查的目标作答：查站台时这个距离就是这辆车到本站还有多少米。
+        distanceToStationMeters: measuredDistance(st?.distanceToDest),
+        congestion: parseCongestion(st?.busTagList),
+        tags,
+      })
+    }
+    arrivals.sort((a, b) => a.arriveAt - b.arriveAt)
+
+    lines.push({
+      lineId,
+      lineName: String(rawLine.name || rawLine.lineNo || ''),
+      direction: rawLine.direction === 1 ? 1 : 0,
+      destination: String(rawLine.endSn || rawLine.destinationName || ''),
+      firstBusTime: typeof rawLine.firstTime === 'string' && rawLine.firstTime ? rawLine.firstTime : null,
+      lastBusTime: typeof rawLine.lastTime === 'string' && rawLine.lastTime ? rawLine.lastTime : null,
+      isSubway: rawLine.isSubway === 1 || rawLine.isSubway === true,
+      arrivals,
+      // 上游给的就是这个窗口原文，照它传：它与到站时刻是两种东西，本层不做任何换算或取舍。
+      intervalForecast: typeof raw?.preArrivalTime === 'string' && raw.preArrivalTime ? raw.preArrivalTime : null,
+    })
+  }
+  return lines
+}
+
+/**
+ * 附近站台载荷 → 我附近的站台（按站 id 去重，按上游给的距离升序）。
+ *
+ * 上游把**同一个站的不同物理站台各给一条**（同 `sId`、不同 `physicalStId` 与坐标），
+ * 故这里按 `sId` 去重、保留最近的那一条 —— 站的身份是 id，一个站只该占一行。
+ *
+ * 不带距离：距离由调用方用项目里那一条直线距离量（数据源自己那个数只决定谁算附近，
+ * 它的窗口约 1 公里）。缺 id 或缺站名的条目不成行；坐标缺失的条目留下但坐标为 null。
+ */
+export function nearbyStopsOf(payload: any): NearbyStop[] {
+  const raw: any[] = Array.isArray(payload?.nearStations) ? payload.nearStations : []
+  const byId = new Map<string, { station: NearbyStop, sourceDistance: number }>()
+
+  for (const entry of raw) {
+    const stationId = typeof entry?.sId === 'string' ? entry.sId : ''
+    const name = typeof entry?.sn === 'string' ? entry.sn : ''
+    if (!stationId || !name) continue
+    const sourceDistance = typeof entry?.distance === 'number' && entry.distance >= 0
+      ? entry.distance
+      : Number.POSITIVE_INFINITY
+    const existing = byId.get(stationId)
+    if (existing && existing.sourceDistance <= sourceDistance) continue
+    byId.set(stationId, {
+      sourceDistance,
+      station: {
+        stationId,
+        name,
+        lat: statedCoordinate(entry?.lat) ?? null,
+        lng: statedCoordinate(entry?.lng) ?? null,
+      },
+    })
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => a.sourceDistance - b.sourceDistance)
+    .map(entry => entry.station)
+}
+
+/** 上游的距离：非负数才算量到过；-1 是它自己的缺省哨兵，不是 0 米。 */
+function measuredDistance(value: unknown): number | null {
+  return typeof value === 'number' && value >= 0 ? value : null
 }
 
 /**
@@ -566,6 +675,48 @@ export class ChelaileProvider implements ITransitProvider {
         isDegraded: false,
         updatedAt: Date.now(),
       }
+    }
+    catch {
+      return null
+    }
+  }
+
+  /**
+   * 我附近的站台：坐标 + 城市 → 站 id 与站名（**站的身份**那条桥）。
+   *
+   * 上游没有半径参数（传什么都会忽略），窗口由它自己定：实测约 1 公里。不给城市码时它答空列表，
+   * 故这里先按城市挡一次，不浪费调用；读不到时返回 null（与「附近确实没有站台」分开）。
+   */
+  async getNearbyStops(cityCode: string, lng: number, lat: number): Promise<NearbyStop[] | null> {
+    if (!isChelaileCity(cityCode)) return null
+    try {
+      const data = await this.request('/bus/stop!encryptedNearPhysicalStns.action', {
+        cityId: cityCode,
+        lng: String(lng),
+        lat: String(lat),
+      })
+      return nearbyStopsOf(data)
+    }
+    catch {
+      return null
+    }
+  }
+
+  /**
+   * 按站台读取到站：一次调用就拿到该站台上**全部经过线路**的到站时刻（未关注的也在内）。
+   *
+   * 上游不认这个城市码时直接返回 null，不浪费一次调用；上游答了但没有可读的线路时返回
+   * 空数组（「读到了、这站没有线路可报」与「读不到」是两件事）。
+   */
+  async getStationBoard(stationId: string, cityCode?: string): Promise<StationBoardLine[] | null> {
+    if (!isChelaileCity(cityCode)) return null
+    try {
+      const data = await this.request('/bus/stop!encryptedPhyStnDetail.action', {
+        stationId,
+        cityId: cityCode ?? '027',
+      })
+      // 读取时刻取自这次应答落地的那一刻：每辆车的剩余秒数由它算出，故它必须与数据同源。
+      return stationBoardLinesOf(data, Date.now())
     }
     catch {
       return null

@@ -87,8 +87,8 @@ describe('the boards state the operating fact instead of the generic sentence', 
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
 
   const card = read('../views/overview/components/line-mini-card.vue')
-  const platform = read('../views/platform/index.vue')
-  const board = read('../views/platform/components/departure-board.vue')
+  const stationBoard = read('../views/station-board/index.vue')
+  const boardRows = read('../views/station-board/board-rows.ts')
 
   it('renders the home card\'s empty state from the operating status', () => {
     expect(card).toContain('operatingTextOf')
@@ -96,10 +96,13 @@ describe('the boards state the operating fact instead of the generic sentence', 
   })
 
   it('no longer answers the station board with a literal 「暂无来车」', () => {
-    expect(codeOf(platform)).not.toContain('暂无来车')
-    expect(codeOf(board)).not.toContain('暂无来车')
+    expect(codeOf(stationBoard)).not.toContain('暂无来车')
+    expect(codeOf(boardRows)).not.toContain('暂无来车')
     // 「待发车/停运」同时说了两件事，正是 F3 要拆开的那种混同。
-    expect(codeOf(board)).not.toContain('待发车/停运')
+    expect(codeOf(boardRows)).not.toContain('待发车/停运')
+    // 没有车也没有预报时说「暂无到站信息」，运营事实（首末班）由底下那行小字照说。
+    expect(codeOf(boardRows)).toContain('暂无到站信息')
+    expect(codeOf(boardRows)).toContain('首末班')
   })
 })
 

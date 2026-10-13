@@ -19,9 +19,10 @@ const router = createRouter({
       }),
     },
     {
-      path: '/platform',
-      name: 'platform',
-      component: () => import('@/views/platform/index.vue'),
+      // 电子站牌：一个站台上全部经过线路的到站（F5）。
+      path: '/station-board',
+      name: 'station-board',
+      component: () => import('@/views/station-board/index.vue'),
     },
     {
       // 换乘链路：一级入口，独立于关注线路列表的界面。

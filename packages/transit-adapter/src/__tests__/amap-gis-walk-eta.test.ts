@@ -4,7 +4,7 @@ import { WALK_ETA_MAX_ENTRIES } from '../services/amap-gis.service.js'
 
 /**
  * GCJ-02 坐标 —— 应用的归一化坐标系，也是本服务发给上游的坐标系
- * （转换在 HTTP 边界完成，见 `amap-gis-coordinate-contract.test.ts`）。
+ * （换算在设备定位进入应用的两侧各做一次，见 `amap-gis-coordinate-contract.test.ts`）。
  */
 const ANCHOR = { lng: 116.403640, lat: 39.910710 }
 const STOP = { lng: 116.392540, lat: 39.924299 }

@@ -32,7 +32,7 @@
 - `tsconfig*.json` 是 JSONC（带注释），`write_file`/`patch` 的严格 JSON 校验会拒写——改它用普通文件写。
 - 数据库 schema 只由 `migrations/` 拥有，编号递增，不许第二处 DDL。
 - UI 层不出现数据源名（chelaile/apizero 等）与技术黑话；AMap key 只在 Node 层经 `AmapGisService` 走 REST，浏览器端永远没有。
-- 坐标：站列表是 GCJ-02，chelaile 车辆/路径是 WGS-84，浏览器定位是 WGS-84——WGS→GCJ 转换只在 HTTP 边界做一次，站点坐标绝不二次转换。
+- 坐标：站列表与锚点是 GCJ-02，chelaile 车辆/路径与浏览器定位是 WGS-84。设备定位在进入应用的两个边界各换算一次（浏览器：定位 store 的 `userCoords`；服务端：`app.ts` 的 `deviceFixToGcj02`），两边都只吃原始定位：上报服务端用 `deviceFix`，浏览器本地测距用换算后的 `userCoords`（审计在 `nearest-station-rule.test.ts`），站点坐标绝不二次换算。
 
 ## 坑
 

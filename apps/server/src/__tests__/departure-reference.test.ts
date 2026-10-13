@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import { arrivalMinutes } from '@real-time-transport/shared'
 import { buildApp } from '../app.js'
 
@@ -48,7 +48,6 @@ function stubUpstream(options: { walking?: boolean } = {}): void {
       return ok({ route: { paths: [{ distance: String(WALK_METERS), duration: String(WALK_SECONDS) }] } })
     }
     if (href.includes('/v3/bus/linename')) return ok({ buslines: [subwayLine] })
-    if (href.includes('/v3/place/around')) return ok({ pois: [] })
     return ok({})
   }))
 }

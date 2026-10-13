@@ -55,7 +55,7 @@ const MEASURE = `JSON.stringify((() => {
 const PRIMARY = {
   home: ['刷新最新车况'],
   line: ['刷新最新车况'],
-  platform: ['刷新最新车况', '定位最近站台'],
+  stationBoard: ['刷新本站台到站', '定位最近站台'],
   chain: ['刷新最新车况', '上班', '下班'],
   settings: ['关注线路', '通勤时段', '位置锚点', '通勤链路'],
 }
@@ -67,7 +67,7 @@ export async function run({ check, equal, note, fixtures }) {
   const pages = [
     { key: 'home', url: `${WEB_ORIGIN}/`, wait: 'JSON.stringify(document.querySelectorAll(\'main\').length > 0)' },
     { key: 'line', url: `${WEB_ORIGIN}/line/${encodeURIComponent(lineId)}?direction=0&cityCode=${fixtures.city}`, wait: 'JSON.stringify(document.body.innerText.includes(\'开往\'))' },
-    { key: 'platform', url: `${WEB_ORIGIN}/platform`, wait: 'JSON.stringify(document.querySelectorAll(\'main select\').length > 0)' },
+    { key: 'stationBoard', url: `${WEB_ORIGIN}/station-board`, wait: `JSON.stringify(document.body.innerText.includes('当前站台'))` },
     { key: 'chain', url: `${WEB_ORIGIN}/commute-chain`, wait: 'JSON.stringify(document.body.innerText.includes(\'换乘链路\'))' },
     { key: 'settings', url: `${WEB_ORIGIN}/settings`, wait: 'JSON.stringify(document.querySelectorAll(\'main a[href^="/settings/"]\').length === 4)' },
   ]

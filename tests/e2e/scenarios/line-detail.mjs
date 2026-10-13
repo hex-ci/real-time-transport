@@ -108,6 +108,15 @@ export async function run({ check, equal, note, fixtures }) {
   const pinButtons = await pageEval(`JSON.stringify([...document.querySelectorAll('[role=dialog] button, [role=dialog] [role=button]')].map(b => b.innerText.trim()).filter(t => /上车点/.test(t)))`)
   check('弹窗里不再有「设为上班/下班上车点」的入口', (pinButtons ?? []).length === 0, JSON.stringify(pinButtons))
 
+  // 切方向之前先关掉站点弹窗：它是一层浮层，开着的时候会盖住方向页签 ——
+  // 真人同样得先关掉它才点得到（实测偶发「subtree intercepts pointer events」）。
+  await cli(['press', 'Escape'])
+  await waitForValue(
+    `JSON.stringify(document.querySelectorAll('[role=dialog]').length)`,
+    count => count === 0,
+    { what: '站点弹窗关掉', timeout: 10_000 },
+  )
+
   // ---- 切方向：站点列表跟着变 ---------------------------------------------------
   await cli(['click', `getByRole('tab', { name: ${JSON.stringify(`开往 ${upDetail.stops[0].name}`)} })`])
   await waitForValue(

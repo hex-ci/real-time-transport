@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { DEFAULT_USER_ID } from '@real-time-transport/shared'
-import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import { createApiHarness, describeEachStore, type ApiHarness } from './support/api-harness.js'
 import { installUpstream } from './support/upstream-mock.js'
 

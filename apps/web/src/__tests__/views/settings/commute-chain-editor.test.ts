@@ -75,7 +75,7 @@ const LEG = read('../../../views/settings/components/chain-leg-fields.vue')
 const DIALOG = read('../../../views/settings/components/chain-removal-dialog.vue')
 const DRAFT = read('../../../views/settings/chain-draft.ts')
 const TYPES = read('../../../views/settings/types.ts')
-const PATTERN = read('../../../views/platform/components/platform-header.vue')
+const PATTERN = read('../../../views/station-board/index.vue')
 /** 本屏的选站器：它自己不再画标记，选单来自共用的控件（见下面那条控件选择的源码规则）。 */
 const PICKER = read('../../../views/settings/components/station-pin-picker.vue')
 

@@ -23,12 +23,11 @@
   - **关键枢纽站精确时刻表**：支持分钟级官方时刻表覆写校准，调休工作日智能识别运行图，直接给出确定性到站时刻。
 - **GIS 赶车决策引擎**（由后端服务统一代理与计算，安全隔离第三方凭据）：
   - **真实步行赶车决策**：计算真实路网步行耗时，与车辆到站时刻智能比对，输出「从容 / 快走 / 赶不上」三态决策。
-  - **周边站台雷达**：扫描周边 800m 公交与地铁站点，站台大屏一键定位对齐。
   - **逆地理编码**：实时 GPS 坐标解析为可读地标。
 - **多样化使用场景**：
   - **首页动态关注流**：微缩动态轨道（Sparkline）与到站大字号看板。
   - **线路拓扑详情**：超长线路折返 / 直线站牌全览，点选站点查看到站时刻与赶车决策。
-  - **站台大屏（虚拟候车亭）**：聚合经过当前站台的所有线路，按到站先后实时重排（“谁先来坐谁”）。
+  - **电子站牌**：一个站台上**全部经过的线路**（含未关注的）并排列出，按到站先后重排（“谁先来坐谁”），并陈述每趟车距本站还有多远。
   - **设置与管理**：关注线路、通勤时段、上下车点与行驶方向、位置锚点、**关注站**（按方向钉一个站点，非通勤时段与异地查线时的卡片锚点）与**实时刷新间隔**（10~120 秒可调）的显式配置。
   - **智能情境感知**：自动根据早晚高峰时间切换上下行方向与目标车站。
 
@@ -52,11 +51,11 @@
 | :---: | :---: |
 | <img src="docs/screenshots/line-folded-mobile.png" width="280" alt="移动端折返排布" /> | <img src="docs/screenshots/line-linear-mobile.png" width="280" alt="移动端直线排布" /> |
 
-### 3. 站台大屏（虚拟候车亭）
+### 3. 电子站牌
 
-| 站台聚合起降大屏 |
-| :---: |
-| <img src="docs/screenshots/platform-pc.png" width="450" alt="站台大屏" /> |
+| 桌面端 | 移动端 |
+| :---: | :---: |
+| <img src="docs/screenshots/station-board-pc.png" width="600" alt="电子站牌" /> | <img src="docs/screenshots/station-board-mobile.png" width="280" alt="移动端电子站牌" /> |
 
 ---
 
@@ -139,23 +138,6 @@ pnpm build        # 生产环境编译构建
 需要 PostgreSQL 的 API/SQL 层（走 HTTP 边界的注入用例）是独立的一条命令：
 `pnpm test:db` 建 `transit_test` 并跑迁移，然后 `pnpm test:api`。运行方法、依赖与失败定位见
 [`tests/README.md`](tests/README.md)。
-
----
-
-## 主要 API
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/transit/cities` | 全国城市公共交通字典 |
-| GET | `/api/transit/lines/search?keyword=&cityCode=` | 跨数据源线路搜索 |
-| GET | `/api/transit/lines/:lineId?direction=&cityCode=` | 线路详情（站序，DB 静态缓存） |
-| GET | `/api/transit/lines/:lineId/live?direction=&cityCode=&order=` | 实时在途车辆（可选 `order=<站序>`：带上它才会下发该目标站的到站秒数 `travelTimeSec`） |
-| GET | `/api/transit/lines/:lineId/stations/:name/arrivals` | 站点到站时刻（精确表优先，否则推演） |
-| GET | `/api/transit/gis/walk-decision` | 真实路网步行赶车决策 |
-| GET | `/api/transit/gis/nearby-stations` | 周边站台雷达 |
-| GET | `/api/transit/gis/regeo` | 逆地理编码 |
-| GET/POST/DELETE | `/api/transit/favorites` | 关注线路增删查 |
-| WS | `/ws` | 线路订阅实时推送（`subscribe` / `unsubscribe` / `ping`） |
 
 ---
 

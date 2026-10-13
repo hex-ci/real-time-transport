@@ -96,7 +96,6 @@ function stubUpstream(line: Record<string, unknown> = subwayLine): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
     if (href.includes('/v3/bus/linename')) return ok({ buslines: [line] })
-    if (href.includes('/v3/place/around')) return ok({ pois: [] })
     return ok({})
   }))
 }

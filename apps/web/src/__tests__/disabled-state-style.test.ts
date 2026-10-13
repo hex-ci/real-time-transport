@@ -97,7 +97,7 @@ describe('禁用态：全局一处定义，本地零处', () => {
       'views/settings/lines.vue',
       'views/settings/anchor-detail.vue',
       'views/settings/components/chain-form.vue',
-      'views/platform/components/departure-board.vue',
+      'views/station-board/index.vue',
     ]) {
       expect(FILES[name], `${name} 没有被扫到`).toBeDefined()
     }

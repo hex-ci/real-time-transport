@@ -7,7 +7,7 @@ import { ArrowLeft } from '@lucide/vue'
     <p class="font-mono text-3xl font-black text-slate-600">404</p>
     <p class="mt-3 text-sm font-semibold text-slate-200 lg:text-base">这个地址没有对应的页面</p>
     <p class="mt-1.5 text-xs text-slate-400 lg:mt-2 lg:text-base">
-      线路地址里缺少线路号时会出现这种情况，返回总览重新选择即可
+      可能是地址写错了，或这个页面已经不在了。返回总览重新选择即可
     </p>
     <RouterLink
       to="/"

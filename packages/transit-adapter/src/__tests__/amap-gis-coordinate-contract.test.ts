@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AmapGisService, wgs84ToGcj02 } from '../index.js'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
+import { AmapGisService } from '../index.js'
 
 /**
  * `AmapGisService` 的坐标契约：每个公开方法接收 GCJ-02 —— 应用的归一化
  * 坐标系，也正是高德 REST API 使用的坐标系 —— 并且原样发出收到的坐标，
  * 不做任何转换。
  *
- * 这是一个承重的分工：转换在 HTTP 边界（`apps/server/src/app.ts`）完成，
- * 那是原始 WGS-84 设备定位进入服务端的唯一入口。这里的终点是站点坐标，
- * 已经是 GCJ-02，再转一次会把步行目标挪开，并把赶车结论翻成相反的。
+ * 这是一个承重的分工：原始 WGS-84 设备定位在进入某一侧时换算一次（服务端
+ * `apps/server/src/app.ts` 与浏览器定位 store），到达本服务的一律已是 GCJ-02。
+ * 这里的终点是站点坐标，本身就在那个基准面上，再转一次会把步行目标挪开，
+ * 并把赶车结论翻成相反的。
  */
 
 const ANCHOR = { lng: 116.403640, lat: 39.910710 }
@@ -60,18 +62,6 @@ describe('AmapGisService takes GCJ-02 and converts nothing', () => {
     expect(params.get('origin')).toBe(wire(ANCHOR))
     expect(params.get('destination')).toBe(wire(STATION))
     expect(params.get('destination')).not.toBe(doubleConverted(STATION))
-  })
-
-  it('getNearbyStations forwards the given point unchanged', async () => {
-    const urls = stubUpstream()
-    const amap = new AmapGisService('test-key')
-
-    await amap.getNearbyStations(ANCHOR.lng, ANCHOR.lat, 800)
-
-    const url = new URL(urls[0]!)
-    expect(url.pathname).toBe('/v3/place/around')
-    expect(url.searchParams.get('location')).toBe(wire(ANCHOR))
-    expect(url.searchParams.get('location')).not.toBe(doubleConverted(ANCHOR))
   })
 
   it('reverseGeocode forwards the given point unchanged', async () => {

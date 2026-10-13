@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { wgs84ToGcj02 } from '@real-time-transport/transit-adapter'
+import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import { haversineMeters } from '@real-time-transport/shared/geo'
 import { buildApp } from '../app.js'
 import { definedOnly, storedCoord } from '../db/client.js'

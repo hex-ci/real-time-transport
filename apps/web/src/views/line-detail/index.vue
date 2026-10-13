@@ -491,9 +491,12 @@ const commuteFocusStationId = computed<string | null>(() => {
 })
 
 async function computeWalkDecision(): Promise<void> {
+  // 门槛量的是「我离这一站多远」，故与站坐标同一个基准面；发给服务端算路线的那个点用原始
+  // 定位，服务端换算。
   const coords = locationStore.userCoords
+  const fix = locationStore.deviceFix
   const st = selectedStation.value
-  if (!coords || !st) return
+  if (!coords || !fix || !st) return
   // 定位与所选城市脱钩时（如北京定位看天津的线），算一条跨城步行路线是荒谬的：
   // 只给 3km 内（NEARBY_RADIUS_M）的站算步行建议。
   const lat = statedCoordinate(st.lat)
@@ -501,8 +504,8 @@ async function computeWalkDecision(): Promise<void> {
   if (lat === undefined || lng === undefined) return
   if (haversineMeters(coords.lat, coords.lng, lat, lng) > NEARBY_RADIUS_M) return
   await fetchWalkDecision({
-    originLng: coords.lng,
-    originLat: coords.lat,
+    originLng: fix.lng,
+    originLat: fix.lat,
     lineId: lineId.value,
     // 与到站同理：匹配屏幕上真正显示的方向。
     direction: activeDirection.value,

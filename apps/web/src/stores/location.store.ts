@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef, watch } from 'vue'
 import { useDebounceFn, useGeolocation, usePermission } from '@vueuse/core'
 import type { Station } from '@real-time-transport/shared'
-import { haversineMeters, statedCoordinate, NEARBY_RADIUS_M } from '@real-time-transport/shared/geo'
+import { haversineMeters, statedCoordinate, wgs84ToGcj02, NEARBY_RADIUS_M } from '@real-time-transport/shared/geo'
 import { announceActionFeedback } from '@/action-feedback'
 
 /**
@@ -31,8 +31,8 @@ const SIMULATION_COORDS: { lat: number, lng: number } | null = (() => {
 /**
  * 一次性的定位，原样保留浏览器的报告。
  *
- * WGS-84，不做转换：服务端的 `/settings` PATCH 是唯一的 WGS-84 → GCJ-02 转换点 ——
- * 存下的锚点会成为之后每条步行路线的起点，转换两次会把坐标放到几百米之外。
+ * WGS-84，浏览器不转换：存下的锚点会成为之后每条步行路线的起点，换算交给接收它的服务端
+ * （`/settings` PATCH 会在那里换算一次）。
  */
 export interface AnchorFix {
   lat: number
@@ -97,14 +97,33 @@ export const useLocationStore = defineStore('location', () => {
   const isSimulated = computed(() => SIMULATION_COORDS !== null)
 
   /**
-   * 当前定位，或 null。`useGeolocation` 在第一个位置到达前用 `POSITIVE_INFINITY` 哨兵值
-   * 填充坐标 —— 把它们当成真值会让每个 haversine 结果都变成 NaN。
+   * 浏览器报告的原始定位，`WGS-84`，或 null。`useGeolocation` 在第一个位置到达前用
+   * `POSITIVE_INFINITY` 哨兵值填充坐标 —— 把它们当成真值会让每个 haversine 结果都变成 NaN。
+   *
+   * **发给服务端的一律用这一份**（附近站台、逆地理、步行走线）：服务端在自己的边界上换算，
+   * 送一份已经换算过的过去会被再换算一次，点位偏走几百米。
    */
-  const userCoords = computed<{ lat: number, lng: number } | null>(() => {
+  const deviceFix = computed<{ lat: number, lng: number } | null>(() => {
     if (SIMULATION_COORDS) return SIMULATION_COORDS
     const { latitude, longitude } = geo.coords.value
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
     return { lat: latitude, lng: longitude }
+  })
+
+  /**
+   * 本地测距用的定位，`GCJ-02`，或 null —— 站表与锚点所在的基准面。
+   *
+   * 定位进入本应用时在这里换算一次：浏览器的定位是 `WGS-84`，与 `GCJ-02` 的站坐标直接比，
+   * 北京城区偏约 500 米（比一半的站间距都大），最近站与列表排序的头几名会整批换人。
+   *
+   * 这是**浏览器侧唯一一处换算**，只作用在原始定位上；站点坐标与锚点已是 `GCJ-02`，绝不二次
+   * 换算。规则由 `anchor-capture` 的审计用例钉着（浏览器里只有这个文件能调换算函数）。
+   */
+  const userCoords = computed<{ lat: number, lng: number } | null>(() => {
+    const fix = deviceFix.value
+    if (!fix) return null
+    const [lng, lat] = wgs84ToGcj02(fix.lng, fix.lat)
+    return { lat, lng }
   })
 
   const accuracyM = computed<number | null>(() => {
@@ -114,7 +133,7 @@ export const useLocationStore = defineStore('location', () => {
     return Number.isFinite(acc) && acc > 0 ? Math.round(acc) : null
   })
 
-  const isLocating = computed(() => tracking.value && userCoords.value === null)
+  const isLocating = computed(() => tracking.value && deviceFix.value === null)
 
   const locationError = computed<string | null>(() => {
     // 固定位置不会失败，权限与设备错误都不适用。
@@ -224,7 +243,8 @@ export const useLocationStore = defineStore('location', () => {
   }
 
   async function resolveLandmark(): Promise<void> {
-    const coords = userCoords.value
+    // 服务端换算，故送原始定位。
+    const coords = deviceFix.value
     if (!coords) return
     try {
       const qs = new URLSearchParams({
@@ -247,7 +267,7 @@ export const useLocationStore = defineStore('location', () => {
    */
   const refreshLandmark = useDebounceFn(resolveLandmark, 2000)
 
-  watch(userCoords, (coords) => {
+  watch(deviceFix, (coords) => {
     if (coords) void refreshLandmark()
     // 取得位置只说一次：位置流每秒都在动，而「已经拿到」不是每秒重新成立一次的事。
     if (!awaited || outcomeSaid || coords === null) return
@@ -328,6 +348,7 @@ export const useLocationStore = defineStore('location', () => {
   })
 
   return {
+    deviceFix,
     userCoords,
     isSupported: geo.isSupported,
     isLocating,

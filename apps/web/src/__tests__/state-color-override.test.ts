@@ -76,7 +76,7 @@ describe('颜色令牌：静态与动态不同时给同一个属性', () => {
       'views/overview/index.vue',
       'components/header-nav/main.vue',
       'components/searchable-combobox/main.vue',
-      'views/platform/components/departure-board.vue',
+      'views/station-board/index.vue',
     ]) {
       expect(FILES[name], `${name} 没有被扫到`).toBeDefined()
       expect(FILES[name], `${name} 里连一个 :class 都没有，闸门等于没扫`).toContain(':class=')

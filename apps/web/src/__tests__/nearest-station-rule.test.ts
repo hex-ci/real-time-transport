@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { haversineMeters } from '@real-time-transport/shared/geo'
+import { haversineMeters, wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import type { Station } from '@real-time-transport/shared'
 
 /**
@@ -12,10 +13,25 @@ import type { Station } from '@real-time-transport/shared'
  * （没有已放置的站会落在 0），从它测量会把步行算到大西洋上的一点，让未放置的站台成为离用户
  * 最近的东西。该规则只存在一处（`statedCoordinate`），本文件钉住使用它的两半：store 通过它读
  * 坐标，由此得到的答案是诚实的——有已放置的站就给出最近站，否则**没有**，而不是退回列表第一站。
+ *
+ * 量距离的基准面是 `GCJ-02`：开发覆写注入的是设备定位（`WGS-84`），store 把它换算一次，站表
+ * 坐标本身就在这个面上。期望值因此从换算后的点算起 —— 按原始定位算会得到另一个数（北京差约
+ * 555 米），而那个数正是这次修掉的东西。
  */
 
-/** 测试所在的位置，经由 store 自己的开发覆写注入。 */
+/** 测试所在的位置（设备定位），经由 store 自己的开发覆写注入。 */
 const FIX = { lat: 39.9, lng: 116.4 }
+
+/** `FIX` 进入 store 后被换算成的那个点：本文件所有距离的起点。 */
+const GCJ_FIX = (() => {
+  const [lng, lat] = wgs84ToGcj02(FIX.lng, FIX.lat)
+  return { lat, lng }
+})()
+
+/** 从「我」到某站的距离，与 store 量的是同一段。 */
+function metresTo(lat: number, lng: number): number {
+  return haversineMeters(GCJ_FIX.lat, GCJ_FIX.lng, lat, lng)
+}
 
 /** 屏幕上线路的一个站，未给定则完全没有位置。 */
 function stop(id: string, name: string, lat?: number, lng?: number): Station {
@@ -68,9 +84,10 @@ describe('the nearest stop is chosen from the stops that state a position', () =
 
     expect(store.nearestStation?.id).toBe('s2')
     // 距离的定义取自应用自身，并加一个由几何推出的界，使该数被检查而非仅被重算。
-    expect(store.nearestDistanceM).toBe(Math.round(haversineMeters(FIX.lat, FIX.lng, near.lat!, near.lng!)))
-    expect(store.nearestDistanceM).toBeGreaterThan(840)
-    expect(store.nearestDistanceM).toBeLessThan(870)
+    expect(store.nearestDistanceM).toBe(Math.round(metresTo(near.lat!, near.lng!)))
+    // 乙站与换算后的我相差约 0.0038 经度、0.0014 纬度：约 357 米。
+    expect(store.nearestDistanceM).toBeGreaterThan(340)
+    expect(store.nearestDistanceM).toBeLessThan(375)
   })
 
   it('reports NO nearest stop when no stop of the line states a position', async () => {
@@ -112,11 +129,71 @@ describe('the coordinate rule is READ here, not spelled again', () => {
   })
 })
 
+describe('换算在浏览器侧只此一处，且只作用于设备定位', () => {
+  /** 浏览器源码（去掉测试与注释），键是相对 `src/` 的路径。 */
+  function browserSources(): Record<string, string> {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const strip = (text: string) => text
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')
+
+    const found: Record<string, string> = {}
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+        const path = `${prefix}${entry.name}`
+        if (entry.isDirectory()) {
+          if (entry.name === '__tests__') continue
+          walk(join(dir, entry.name), `${path}/`)
+        }
+        else if (/\.(ts|vue)$/.test(entry.name)) {
+          found[path] = strip(readFileSync(join(root, dir, entry.name), 'utf8'))
+        }
+      }
+    }
+    walk('.', '')
+    return found
+  }
+
+  it('只有定位 store 换算，且只换一次', () => {
+    const converters = Object.entries(browserSources())
+      .filter(([, text]) => text.includes('wgs84ToGcj02('))
+      .map(([path]) => path)
+
+    // 多一处换算就多一条会漂移的路径：定位到了别的地方仍在用旧值，或者同一个点被换两次。
+    expect(converters).toEqual(['stores/location.store.ts'])
+  })
+
+  it('反向换算在浏览器里根本不存在', () => {
+    // 浏览器拿到的一切坐标都已在 GCJ-02 基准面上；需要反算说明有东西把面搞混了。
+    const reverse = Object.entries(browserSources())
+      .filter(([, text]) => text.includes('gcj02ToWgs84'))
+      .map(([path]) => path)
+
+    expect(reverse).toEqual([])
+  })
+
+  it('上报给服务端的定位一律是设备原样的那一份', () => {
+    // 这三个地方把定位送出浏览器：送换算过的那份会被服务端再换算一次，点位偏走几百米，
+    // 而界面上的距离看起来照样合理。
+    const senders = [
+      'stores/location.store.ts',
+      'views/station-board/index.vue',
+      'views/line-detail/index.vue',
+    ]
+    const sources = browserSources()
+    for (const file of senders) {
+      expect(sources[file], `${file} is missing`).toContain('deviceFix')
+    }
+  })
+})
+
 describe('nearness has a radius: beyond it there is NO nearest stop', () => {
   it('reports null when the closest stop is beyond NEARBY_RADIUS_M', async () => {
     const store = await storeAtFix()
-    // 约 3.4km 外（0.04 经度 ≈ 3.4km）：够不着的「最近」不是最近。
-    store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.44)])
+    // 约 3.7km 外（0.0438 经度 ≈ 3.7km）：够不着的「最近」不是最近。
+    // 距离要从换算后的定位量起 —— 按原始定位量，这一站看着只有 2.9km，会落进半径里。
+    store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.45)])
 
     expect(store.nearestStation).toBeNull()
     expect(store.nearestDistanceM).toBeNull()
@@ -124,7 +201,7 @@ describe('nearness has a radius: beyond it there is NO nearest stop', () => {
 
   it('still reports the stop when it is inside the radius', async () => {
     const store = await storeAtFix()
-    // 约 850m 外：在半径内，照常报出。
+    // 约 357m 外：在半径内，照常报出。
     store.updateNearestStation([stop('s1', '甲站', FIX.lat, 116.41)])
 
     expect(store.nearestStation?.id).toBe('s1')

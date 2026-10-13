@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DataSourceTypeSchema } from './transit.js'
+import { CongestionLevelSchema, DataSourceTypeSchema } from './transit.js'
 import { DEFAULT_USER_ID } from '../constants.js'
 
 export const LineSummarySchema = z.object({
@@ -186,7 +186,7 @@ export type UpdateFavorite = z.infer<typeof UpdateFavoriteSchema>
  * 一个锚点的坐标是从哪来的 —— 这条契约的**凭据**，不是标签。
  *
  * 来源决定写入时换不换算（`docs/PRD.md` §5.4）：`device` 是浏览器上报的原始 WGS-84，
- * 在 HTTP 边界过 `deviceFixToGcj02` 一次；`search` 是高德地点搜索返回的坐标，**本身就是
+ * 在服务端边界过 `deviceFixToGcj02` 一次；`search` 是高德地点搜索返回的坐标，**本身就是
  * GCJ-02**，原样落库。少了这个词，一个已经处于 GCJ-02 的坐标会被再换算一次 ——
  * 北京两个基准之间约 500 m，而结果仍是一个看着合理的坐标。
  *
@@ -439,6 +439,18 @@ export const RefreshLiveTargetSchema = z.object({
 })
 export type RefreshLiveTarget = z.infer<typeof RefreshLiveTargetSchema>
 
+/**
+ * 某个界面希望重读的一个站台。
+ *
+ * 电子站牌页按**站台**读（一个站台上全部经过线路的到站），故它点名的不是几条线路，
+ * 而是一个站台 —— 后者的代价是一次上游读取，与一条线路同级。
+ */
+export const RefreshStationTargetSchema = z.object({
+  stationId: z.string().min(1),
+  cityCode: z.string().default('027'),
+})
+export type RefreshStationTarget = z.infer<typeof RefreshStationTargetSchema>
+
 export const RefreshLiveRequestSchema = z.object({
   /**
    * 该冷却窗口属于谁。由调用方给出：本端点没有鉴权，故该 id 是标签而非身份 ——
@@ -446,7 +458,16 @@ export const RefreshLiveRequestSchema = z.object({
    * 如实说明而不做防护：窗口的存在是为了约束上游读取，且它不暴露任何人的数据。
    */
   userId: z.string().min(1).default(DEFAULT_USER_ID),
-  lines: z.array(RefreshLiveTargetSchema).min(1).max(REFRESH_MAX_LINES),
+  /** 这次点名的若干条线路；点名站台时为空。 */
+  lines: z.array(RefreshLiveTargetSchema).max(REFRESH_MAX_LINES).default([]),
+  /**
+   * 这次点名的一个站台（电子站牌页）。它与线路刷新**共用同一个冷却窗口** ——
+   * 两块屏幕各按下一次不等于绕过冷却。
+   */
+  station: RefreshStationTargetSchema.optional(),
+}).refine(body => body.lines.length > 0 || body.station !== undefined, {
+  // 一次都没点名就没什么可读：那是一次空按压，不是一次刷新。
+  message: '刷新要么点名若干条线路，要么点名一个站台',
 })
 export type RefreshLiveRequest = z.infer<typeof RefreshLiveRequestSchema>
 
@@ -497,3 +518,96 @@ export const RefreshLiveResultSchema = z.object({
   lines: z.array(RefreshLiveLineSchema),
 })
 export type RefreshLiveResult = z.infer<typeof RefreshLiveResultSchema>
+
+/**
+ * 站台上的一辆车：上游给的**绝对到站时刻**（epoch 毫秒），以及服务端读取那一刻由它算出的剩余秒数。
+ *
+ * 两个都带着，因为它们回答两件事：`arriveAt` 是上游的事实，`remainSeconds` 是把它减掉读取时刻
+ * 的一次算术（读数是活的，而两个时刻分别是上游的钟与服务端的钟，调用方不该拿自己的钟去减）。
+ * `remainSeconds` 因此是**读数的一部分**，不是估计：它随这条读数一起过期，绝不独立重算。
+ *
+ * 没有时刻的车辆（上游给不出到站时刻）不在这份列表里 —— 一辆车要么有上游给的时刻，要么不存在。
+ * 已经过去的那一班也不在：上游的应答里会留着它（`arrivalTime` 在过去、`travelTime` 为 -1），
+ * 而按剩余秒数算它会落在 0 上、被读成「正进站」—— 一辆并不在那儿等你的车。
+ */
+export const StationBoardArrivalSchema = z.object({
+  busId: z.string(),
+  arriveAt: z.number(),
+  remainSeconds: z.number(),
+  /**
+   * 该车距**本站**还有多少米。上游按被查的那个目标作答：查站台时它就是到本站的距离
+   * （同一份读数里 `travelTime` 与它同源，距离 ÷ 时间约为车速）。上游没给时为 null。
+   */
+  distanceToStationMeters: z.number().nullable(),
+  /** 该车的拥挤度：上游没给这个标签时为 `unknown`，由 `parseCongestion` 判一次。 */
+  congestion: CongestionLevelSchema,
+  /** 上游给这辆车挂的标签原文（如「无障碍」）；没给就为空数组。 */
+  tags: z.array(z.string()),
+})
+export type StationBoardArrival = z.infer<typeof StationBoardArrivalSchema>
+
+/**
+ * 站台上的一条线路（一个方向一条）。
+ *
+ * 与线路详情的区别在于它按**站台**作答：这条线路是否被使用者关注，与它无关 ——
+ * 上游按站台就把全部经过线路给全，故这里没有任何「已关注」字段。
+ *
+ * 线路自己的静态事实（总站数、本站序、下一站名）**刻意不收**：它们不随车走，同一方向的
+ * 每一趟车都是同一个数，对「哪趟先来」没有信息量，收进来只会诱使屏上把线路元数据
+ * 说成车辆状态。这一层只带能被读成「这趟车现在怎样」的东西。
+ */
+export const StationBoardLineSchema = z.object({
+  lineId: z.string(),
+  lineName: z.string(),
+  direction: z.number().int().min(0).max(1),
+  /** 上游给的终点站名（「开往 X」的那个 X）。 */
+  destination: z.string(),
+  firstBusTime: z.string().nullable(),
+  lastBusTime: z.string().nullable(),
+  isSubway: z.boolean(),
+  /** 该方向此刻在途的车，按到站先后升序；一辆都没有时为空数组。 */
+  arrivals: z.array(StationBoardArrivalSchema),
+  /**
+   * 该方向此刻没有在途车时，上游给的**发车间隔预报**窗口原文（如「15:53~16:03」）；没有时为 null。
+   *
+   * 它与 `arrivals[].arriveAt` 是两种东西，绝不互填：一个是「车什么时候到」，一个是「多久一班」。
+   */
+  intervalForecast: z.string().nullable(),
+})
+export type StationBoardLine = z.infer<typeof StationBoardLineSchema>
+
+/**
+ * 一次站台读取：**一个站台上全部经过线路**的到站对照。
+ *
+ * `readAt` 是这次读取从源取得数据的瞬间（服务端读取那一刻），一块屏上的每一行都用它换算剩余时间；
+ * 它绝不是作答的瞬间，也不是屏上已有数据的年龄。
+ * 站台上一条线路都没有时 `lines` 为空数组 —— 「读到了、但这站没有车可报」与「读不到」是两件事。
+ */
+export const StationBoardSchema = z.object({
+  stationId: z.string(),
+  readAt: z.number(),
+  dataSource: DataSourceTypeSchema,
+  lines: z.array(StationBoardLineSchema),
+})
+export type StationBoard = z.infer<typeof StationBoardSchema>
+
+/**
+ * 我附近的一个站台（按坐标问数据源得到的那一份）。
+ *
+ * 它与「关注线路站表里的站台」是**两种来源**：这一份带数据源自己的**站 id**，
+ * 故它上面能直接读站点详情 —— 「任意未关注站台有哪些车」这条路靠的就是它。
+ * （名字用 `Stop` 而不是 `Station`：这条路上的东西是**带站 id 的站台**，
+ * 与高德 POI 那种「只有名字与坐标」的搜索结果区分开。）
+ *
+ * 只带身份与位置，不带距离：距离由调用方用项目里那一条直线距离量（与站牌列表、
+ * 首页附近模式同一个尺度），数据源自己那个数只决定**谁算附近**（它的窗口约 1 公里），
+ * 不参与显示与排序 —— 两个来源的距离混在一张列表里，量法必须只有一个。
+ */
+export const NearbyStopSchema = z.object({
+  stationId: z.string(),
+  name: z.string(),
+  /** 站的坐标（GCJ-02，与站表同源）；数据源没给时为 null，那时它没有距离。 */
+  lat: z.number().nullable(),
+  lng: z.number().nullable(),
+})
+export type NearbyStop = z.infer<typeof NearbyStopSchema>

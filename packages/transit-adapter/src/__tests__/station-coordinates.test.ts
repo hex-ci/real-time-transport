@@ -59,14 +59,6 @@ function stubAmapBusline(stops: Array<Record<string, unknown>>): void {
   }))
 }
 
-function stubAmapPois(pois: Array<Record<string, unknown>>): void {
-  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
-    const href = String(url)
-    if (!href.includes('/v3/place/around')) throw new Error(`unexpected upstream call: ${href}`)
-    return { ok: true, status: 200, json: async () => ({ status: '1', infocode: '10000', info: 'OK', pois }) }
-  }))
-}
-
 function stubChelaileLine(stations: Array<Record<string, unknown>>): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
@@ -213,55 +205,6 @@ describe('a stop is placed only where the payload placed it', () => {
       expect(stop.lng, stop.name).toBeUndefined()
     }
     expect(line?.stations[3]).toMatchObject({ name: '丁路', lat: 39.9, lng: 116.4 })
-  })
-
-  it('keeps an Amap POI the radar could not place unplaced', async () => {
-    stubAmapPois([
-      { name: '甲路(公交站)', type: '公交车站', location: '116.400000,39.900000', distance: '120' },
-      { name: '乙路(公交站)', type: '公交车站', distance: '300' },
-    ])
-
-    const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
-
-    expect(pois[0]).toMatchObject({ name: '甲路(公交站)', lat: 39.9, lng: 116.4, distanceMeters: 120 })
-    expect(pois[1]?.lat).toBeUndefined()
-    expect(pois[1]?.lng).toBeUndefined()
-    // 它仍是一个带已声明距离的站名，而这个雷达要读的正是后者。
-    expect(pois[1]).toMatchObject({ name: '乙路(公交站)', distanceMeters: 300 })
-  })
-
-  it('keeps an Amap POI the radar marks with a zero unplaced', async () => {
-    stubAmapPois([
-      { name: '甲路(公交站)', type: '公交车站', location: '0,0', distance: '120' },
-    ])
-
-    const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
-
-    expect(pois[0]?.lat).toBeUndefined()
-    expect(pois[0]?.lng).toBeUndefined()
-    expect(pois[0]).toMatchObject({ name: '甲路(公交站)', distanceMeters: 120 })
-  })
-
-  it('leaves a POI whose distance the radar never stated distance-less', async () => {
-    stubAmapPois([
-      { name: '甲路(公交站)', type: '公交车站', location: '116.400000,39.900000' },
-    ])
-
-    const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
-
-    expect(pois[0]?.distanceMeters).toBeUndefined()
-  })
-
-  it('keeps a distance the radar states as 0', async () => {
-    stubAmapPois([
-      { name: '甲路(公交站)', type: '公交车站', location: '116.400000,39.900000', distance: '0' },
-    ])
-
-    const pois = await new AmapGisService('test-key').getNearbyStations(116.4, 39.9, 800)
-
-    // 「写出的数就是读数」的另一半：0 米是合法答案（POI 就在测点上），
-    // 所以缺省需要自己的编码而不是 0 —— 这条规则在 `statedNumber` 里。
-    expect(pois[0]?.distanceMeters).toBe(0)
   })
 
   it('numbers a stop by its own position when the payload states no usable sequence', async () => {

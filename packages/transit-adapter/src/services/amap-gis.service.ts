@@ -45,21 +45,6 @@ export interface WalkEtaResult {
   durationSeconds: number
 }
 
-export interface NearbyStationResult {
-  name: string
-  type: 'bus' | 'subway'
-  /** POI 自身的 GCJ-02 位置；上游未给出位置时缺省。 */
-  lat?: number
-  lng?: number
-  /**
-   * 到 POI 的米数；上游未给出距离时缺省。
-   *
-   * 经 `statedNumber` 读取：写成 `0`（POI 就在测点上）是真实读数，
-   * 只有未声明的距离才算缺省。
-   */
-  distanceMeters?: number
-}
-
 /**
  * 地点搜索的一条候选。
  *
@@ -111,10 +96,10 @@ class AmapRateLimiter {
  *
  * 坐标契约：每个接收坐标的公开方法接收的都是 **GCJ-02** —— 应用的
  * 归一化坐标系，也正是高德 REST API 使用的坐标系 —— 且不做任何转换。
- * 原始设备定位是 WGS-84，必须在 HTTP 边界用 `wgs84ToGcj02` 只转换
- * 一次，在它到达本服务之前：在这里再转一次会把起点挪偏；而在终点上
- * 转更糟，因为应用的每个站点坐标本已是 GCJ-02（`docs/PRD.md` 规定
- * 存储与传输坐标统一为 GCJ-02），那就会是第二次转换。
+ * 原始设备定位是 WGS-84，由接收它的那一侧换算一次（服务端 `app.ts`、
+ * 浏览器定位 store），都在到达本服务之前：在这里再转一次会把起点挪偏；
+ * 而在终点上转更糟，因为应用的每个站点坐标本已是 GCJ-02（`docs/PRD.md`
+ * 规定存储与传输坐标统一为 GCJ-02），那就会是第二次转换。
  */
 export class AmapGisService {
   private readonly apiKey: string
@@ -397,40 +382,6 @@ export class AmapGisService {
     const result: WalkEtaResult = { distanceMeters, durationSeconds }
     this.storeWalkingEta(cacheKey, result.distanceMeters, result.durationSeconds)
     return result
-  }
-
-  /**
-   * 附近公交/地铁站雷达（v3/place/around），
-   * type: 150700 = 公交车站, 150500 = 地铁站。
-   *
-   * `lng`/`lat` 是 GCJ-02，原样发给上游，返回结果同样是 GCJ-02。
-   * 见类上的契约。
-   */
-  async getNearbyStations(lng: number, lat: number, radiusMeters: number = 800): Promise<NearbyStationResult[]> {
-    const json = await this.request('/v3/place/around', {
-      location: `${lng.toFixed(6)},${lat.toFixed(6)}`,
-      types: '150700|150500',
-      radius: String(radiusMeters),
-      sortrule: 'distance',
-      offset: '20',
-    })
-
-    const pois = Array.isArray(json?.pois) ? json.pois : []
-    return pois.map((poi: any) => {
-      const location = parseAmapLocation(poi.location)
-      return {
-        name: String(poi.name || ''),
-        type: String(poi.type || '').includes('地铁站') ? 'subway' : 'bus',
-        // 高德放不下 —— 或用 0 标记 —— 的 POI 保持没有位置，但它仍是
-        // 一个带已声明距离的站名，而这个雷达要读的正是后者。
-        lat: location?.lat,
-        lng: location?.lng,
-        // 载荷「声明」的距离，未声明时缺省。刻意不按坐标读：写出的 0 是
-        // 到测点上那个 POI 的真实距离，而坐标为 0 是没人放置过的站；
-        // 未测量就必须缺省，不能给出看着真实的「0m」。
-        distanceMeters: statedNumber(poi.distance),
-      }
-    })
   }
 
   /** 逆地理编码（v3/geocode/regeo）：GCJ-02 点 -> 可读地标描述。

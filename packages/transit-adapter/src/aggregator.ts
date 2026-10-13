@@ -2,6 +2,8 @@ import type {
   LineDetail,
   LineSummary,
   LiveLineStatus,
+  NearbyStop,
+  StationBoard,
 } from '@real-time-transport/shared'
 import type { ITransitProvider } from './types.js'
 
@@ -25,6 +27,15 @@ export class TransitAggregator {
   private readonly providers: ITransitProvider[]
   private readonly liveCache = new Map<string, CacheEntry<LiveLineStatus>>()
   private readonly detailCache = new Map<string, CacheEntry<LineDetail>>()
+  /** 站台到站：键是 `stationId_cityCode`，与实时读数共用同一个 TTL。 */
+  private readonly stationCache = new Map<string, CacheEntry<StationBoard>>()
+  /**
+   * 我附近的站台：键是 `cityCode_lng_lat`（坐标取四位小数 ≈ 11 米），与实时读数共用同一个 TTL。
+   *
+   * 取整是为了别让 GPS 的抖动把缓存打散：人站着不动时坐标也在跳，而「附近有哪些站」
+   * 在这个尺度上不会变 —— 一跳一读等于把上游配额花在同一个问题上。
+   */
+  private readonly nearbyStopCache = new Map<string, CacheEntry<NearbyStop[]>>()
   private liveCacheTtlMs: number
 
   constructor(providers: ITransitProvider[], options?: { liveCacheTtlMs?: number }) {
@@ -91,6 +102,79 @@ export class TransitAggregator {
             expiresAt: Date.now() + 3600 * 1000,
           })
           return detail
+        }
+      }
+      catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  /**
+   * 我附近的站台（该坐标附近约 1 公里内的站，含未关注线路经过的）。
+   *
+   * 与实时读数共用同一个 TTL：它同样是「此刻这一带」的读数，页面的重读节拍不该比轮询节拍更密。
+   * 只有声明了这项能力的 provider 参与；都不声明、或都读不到时返回 null ——
+   * 「这里读不了附近站台」与「这附近确实没有站台」是两件事，调用方据此分开说。
+   */
+  async getNearbyStops(cityCode: string, lng: number, lat: number): Promise<NearbyStop[] | null> {
+    const cacheKey = `${cityCode}_${lng.toFixed(4)}_${lat.toFixed(4)}`
+    const cached = this.nearbyStopCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data
+    }
+
+    for (const provider of this.providers) {
+      if (!provider.getNearbyStops) continue
+      try {
+        const stations = await provider.getNearbyStops(cityCode, lng, lat)
+        if (stations) {
+          this.nearbyStopCache.set(cacheKey, {
+            data: stations,
+            expiresAt: Date.now() + this.liveCacheTtlMs,
+          })
+          return stations
+        }
+      }
+      catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  /** 丢弃该站台的读数，使下一次读取是真实的一次。 */
+  invalidateStation(stationId: string, cityCode?: string): void {
+    this.stationCache.delete(`${stationId}_${cityCode ?? ''}`)
+  }
+
+  /**
+   * 经由共享缓存读取站台到站（该站台上全部经过线路，含未关注的）。
+   *
+   * 与实时读数共用同一个 TTL：它同样是实时数据，页面的重读节拍不该比轮询节拍更密。
+   * 只有声明了这项能力的 provider 参与；都不声明、或都读不到时返回 null ——
+   * 「这座城市读不了站台」与「这站上没有线路」是两件事，调用方据此分开说。
+   */
+  async getStationBoard(stationId: string, cityCode?: string): Promise<StationBoard | null> {
+    const cacheKey = `${stationId}_${cityCode ?? ''}`
+    const cached = this.stationCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data
+    }
+
+    for (const provider of this.providers) {
+      if (!provider.getStationBoard) continue
+      try {
+        const readAt = Date.now()
+        const lines = await provider.getStationBoard(stationId, cityCode)
+        if (lines) {
+          const board: StationBoard = { stationId, readAt, dataSource: provider.name, lines }
+          this.stationCache.set(cacheKey, {
+            data: board,
+            expiresAt: Date.now() + this.liveCacheTtlMs,
+          })
+          return board
         }
       }
       catch {

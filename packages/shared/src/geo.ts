@@ -14,7 +14,12 @@ const EARTH_RADIUS_M = 6371000
  */
 export const NEARBY_RADIUS_M = 3000
 
-/** 两点间的大圆距离（米）；入参为 WGS-84 坐标。 */
+/**
+ * 两点间的大圆距离（米）。
+ *
+ * 两个入参必须在**同一个坐标系**里：本站基准面是 `GCJ-02`（站表、锚点、换算后的定位），
+ * 混着 WGS-84 与 GCJ-02 比会得到约 500 米的系统性偏差，排序的头几名都会错。
+ */
 export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const rad = Math.PI / 180
   const dLat = (lat2 - lat1) * rad
@@ -135,6 +140,73 @@ export function statedText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
   return trimmed === '' ? undefined : trimmed
+}
+
+/**
+ * WGS-84 → GCJ-02（国测局坐标），以及它的反函数。
+ *
+ * 放在共享包而不是服务端：换算要在**两个入口边界**各做一次 —— 设备定位进入浏览器应用时
+ * （定位 store，供本地测距用）与进入服务端时（`app.ts` 的 `deviceFixToGcj02`）—— 两边都要
+ * 这份纯函数，而浏览器不能引 `transit-adapter`（那是 Node 包）。
+ *
+ * 两侧的规则是同一条：**只吃原始设备定位，绝不换算已经换算过的值**；站点坐标与锚点本身已是
+ * `GCJ-02`，一律原样转发。换算两次会把点位挪到几百米之外，而界面上看不出区别。
+ */
+const GCJ_PI = Math.PI
+const GCJ_A = 6378245.0
+const GCJ_EE = 0.006693421622965943
+
+function gcjTransformLat(x: number, y: number): number {
+  let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
+  ret += ((20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0) / 3.0
+  ret += ((20.0 * Math.sin(y * GCJ_PI) + 40.0 * Math.sin((y / 3.0) * GCJ_PI)) * 2.0) / 3.0
+  ret += ((160.0 * Math.sin((y / 12.0) * GCJ_PI) + 320 * Math.sin((y * GCJ_PI) / 30.0)) * 2.0) / 3.0
+  return ret
+}
+
+function gcjTransformLng(x: number, y: number): number {
+  let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
+  ret += ((20.0 * Math.sin(6.0 * x * GCJ_PI) + 20.0 * Math.sin(2.0 * x * GCJ_PI)) * 2.0) / 3.0
+  ret += ((20.0 * Math.sin(x * GCJ_PI) + 40.0 * Math.sin((x / 3.0) * GCJ_PI)) * 2.0) / 3.0
+  ret += ((150.0 * Math.sin((x / 12.0) * GCJ_PI) + 300.0 * Math.sin((x / 30.0) * GCJ_PI)) * 2.0) / 3.0
+  return ret
+}
+
+/** 境外没有偏移：算法在国界外会把点推向别处，故原样返回。 */
+function outOfChina(lng: number, lat: number): boolean {
+  return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271
+}
+
+export function wgs84ToGcj02(lng: number, lat: number): [number, number] {
+  if (outOfChina(lng, lat)) {
+    return [lng, lat]
+  }
+  let dLat = gcjTransformLat(lng - 105.0, lat - 35.0)
+  let dLng = gcjTransformLng(lng - 105.0, lat - 35.0)
+  const radLat = (lat / 180.0) * GCJ_PI
+  let magic = Math.sin(radLat)
+  magic = 1 - GCJ_EE * magic * magic
+  const sqrtMagic = Math.sqrt(magic)
+  dLat = (dLat * 180.0) / (((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic)) * GCJ_PI)
+  dLng = (dLng * 180.0) / ((GCJ_A / sqrtMagic) * Math.cos(radLat) * GCJ_PI)
+  return [lng + dLng, lat + dLat]
+}
+
+export function gcj02ToWgs84(lng: number, lat: number): [number, number] {
+  if (outOfChina(lng, lat)) {
+    return [lng, lat]
+  }
+  let dLat = gcjTransformLat(lng - 105.0, lat - 35.0)
+  let dLng = gcjTransformLng(lng - 105.0, lat - 35.0)
+  const radLat = (lat / 180.0) * GCJ_PI
+  let magic = Math.sin(radLat)
+  magic = 1 - GCJ_EE * magic * magic
+  const sqrtMagic = Math.sqrt(magic)
+  dLat = (dLat * 180.0) / (((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic)) * GCJ_PI)
+  dLng = (dLng * 180.0) / ((GCJ_A / sqrtMagic) * Math.cos(radLat) * GCJ_PI)
+  const mgLat = lat + dLat
+  const mgLng = lng + dLng
+  return [lng * 2 - mgLng, lat * 2 - mgLat]
 }
 
 /**

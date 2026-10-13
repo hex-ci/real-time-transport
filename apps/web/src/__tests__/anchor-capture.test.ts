@@ -218,11 +218,17 @@ describe('the browser side of the anchor path converts nothing', () => {
   ]
 
   it('carries no coordinate conversion in any file on the anchor path', () => {
-    // 唯一转换在服务端 `/settings` PATCH；本侧可达的转换器会与之重复偏移。
-    // 搜索来的坐标更是**绝不能**在浏览器里转：它本来就是 GCJ-02（见 PRD §5.4）。
+    // 本侧可达的转换器会与接收锚点的服务端重复偏移，而搜索来的坐标更是**绝不能**在浏览器里转：
+    // 它本来就是 GCJ-02（见 PRD §5.4）。锚点这条路原样上报，换算在服务端。
     for (const file of ANCHOR_SOURCES) {
       expect(source(file), `${file} can convert a coordinate in the browser`)
-        .not.toMatch(/wgs84ToGcj02|gcj02ToWgs84|transit-adapter/)
+        .not.toMatch(/gcj02ToWgs84|transit-adapter/)
+    }
+    // 定位 store 自己有一处换算（设备定位 → 本地测距的基准面），故它不是「一处都没有」，
+    // 而是**只有这一处**；其余锚点路径上的文件一处都不许有。
+    for (const file of ANCHOR_SOURCES.filter(f => !f.endsWith('location.store.ts'))) {
+      expect(source(file), `${file} can convert a coordinate in the browser`)
+        .not.toMatch(/wgs84ToGcj02/)
     }
   })
 

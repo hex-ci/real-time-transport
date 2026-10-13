@@ -392,16 +392,44 @@ export const useTransitStore = defineStore('transit', () => {
    * 经端点自己的说明就到达这一侧：时刻与种类都来自应答，到达时什么都不盖本机时钟的戳。
    */
   async function refreshLive(targets: RefreshLiveTarget[]): Promise<RefreshOutcome | null> {
-    if (refreshInFlight.value) return null
     if (targets.length === 0) return null
     const asked = targets.slice(0, REFRESH_MAX_LINES)
+    return runRefresh(
+      { userId: DEFAULT_USER_ID, lines: asked },
+      { wanted: targets.length, covered: asked.length },
+    )
+  }
+
+  /**
+   * 电子站牌页的刷新：这一次点名的是一个**站台**，而不是屏幕上那几条线路。
+   *
+   * 与线路刷新共用同一个动作体、同一个冷却窗口与同一句提示 —— 两块屏幕各按一次不等于绕过冷却，
+   * 且「刷新太频繁 · N 秒后可刷新」这类结局只有一处措辞。
+   */
+  async function refreshStationBoard(
+    station: { stationId: string, cityCode: string },
+  ): Promise<RefreshOutcome | null> {
+    return runRefresh({ userId: DEFAULT_USER_ID, station }, { wanted: 1, covered: 1 })
+  }
+
+  /**
+   * 一次手动刷新的动作体：三个入口（首页、链路页、线路页）与电子站牌页共用它。
+   *
+   * 解析为「这一次调用」是怎么结束的，或在一次请求都没发出时为 null —— 已经有一次在进行时
+   * 不再发第二次：冷却窗口在服务端，先到的那一次已经代表了这一次按下。
+   */
+  async function runRefresh(
+    body: { userId: string, lines?: RefreshLiveTarget[], station?: { stationId: string, cityCode: string } },
+    counts: { wanted: number, covered: number },
+  ): Promise<RefreshOutcome | null> {
+    if (refreshInFlight.value) return null
     refreshInFlight.value = true
     let outcome: RefreshOutcome
     try {
       const res = await fetch('/api/transit/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: DEFAULT_USER_ID, lines: asked }),
+        body: JSON.stringify(body),
       })
       const json = await res.json() as { success: boolean, data?: RefreshLiveResult }
       const result = json.data ?? null
@@ -424,8 +452,8 @@ export const useTransitStore = defineStore('transit', () => {
       outcome,
       // 指针已在应答到达时推过，故这里读到的就是那个窗口还剩的秒数。
       waitSeconds: refreshWaitSecondsLeft(),
-      wanted: targets.length,
-      covered: asked.length,
+      wanted: counts.wanted,
+      covered: counts.covered,
     }))
     return outcome
   }
@@ -1146,6 +1174,7 @@ export const useTransitStore = defineStore('transit', () => {
     searchLines,
     loadLine,
     refreshLive,
+    refreshStationBoard,
     reloadLiveStatus,
     resetLineData,
     initWs,

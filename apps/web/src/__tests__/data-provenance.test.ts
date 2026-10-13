@@ -111,10 +111,9 @@ describe('the marks name no source and carry no marketing register', () => {
     'line-detail/components/line-hero.vue': read('../views/line-detail/components/line-hero.vue'),
     'line-detail/components/station-popover.vue': read('../views/line-detail/components/station-popover.vue'),
     'line-detail/components/line-load-state.vue': read('../views/line-detail/components/line-load-state.vue'),
-    'platform/index.vue': read('../views/platform/index.vue'),
-    'platform/departure-row.ts': read('../views/platform/departure-row.ts'),
-    'platform/components/departure-board.vue': read('../views/platform/components/departure-board.vue'),
-    'platform/components/platform-header.vue': read('../views/platform/components/platform-header.vue'),
+    'station-board/index.vue': read('../views/station-board/index.vue'),
+    'station-board/board-rows.ts': read('../views/station-board/board-rows.ts'),
+    'station-board/station-options.ts': read('../views/station-board/station-options.ts'),
     'components/header-nav/main.vue': read('../components/header-nav/main.vue'),
   }
 
@@ -178,18 +177,12 @@ describe('the marks name no source and carry no marketing register', () => {
     expect(files['overview/components/line-mini-card.vue']).toContain('provenanceLabelOf')
   })
 
-  it('marks each platform row from its own provenance, and words no mark itself', () => {
-    // 站台屏每行对应一条线路/方向，故每行各陈其类——没有可供一个词描述的单一列表。
-    expect(files['platform/components/departure-board.vue']).toContain('provenanceLabelOf')
-    // 类型取自载荷声明的来源，就在产出该行的分支上——站台视图不自己算分钟，
-    // 而拥有这些分支的行构造器才是应用来源之处。
-    expect(files['platform/index.vue']).toContain('dataSource')
-    expect(files['platform/departure-row.ts']).toContain('platformRowProvenanceOf(')
-    expect(files['platform/departure-row.ts']).toContain('dataSource')
-    // 写进模板的标记词会绕过 provenance-copy.ts（类型变词的唯一处）；实时尤其不得硬编码。
-    const boardTemplate = rendered['platform/components/departure-board.vue']!
+  it('the station board words no mark of its own', () => {
+    // 电子站牌整屏来自同一次实时读取（站台详情那条路径不做排班兜底），故它没有可逐行标记的来源；
+    // 但它同样不许自己造词 —— 写进模板的标记词会绕过 provenance-copy.ts（类型变词的唯一处）。
+    const boardTemplate = rendered['station-board/index.vue']!
     for (const word of ['实时', '排班推演', '精确时刻表']) {
-      expect(boardTemplate, `the board template states ${word} itself`).not.toContain(word)
+      expect(boardTemplate, `the station board template states ${word} itself`).not.toContain(word)
     }
   })
 
@@ -202,17 +195,18 @@ describe('the marks name no source and carry no marketing register', () => {
       'line-detail/components/station-popover.vue',
       'overview/components/line-mini-card.vue',
       'line-detail/index.vue',
-      'platform/index.vue',
+      'station-board/index.vue',
     ] as const) {
       expect(codeOf(files[name]), `${name} still branches on isExact`).not.toContain('.isExact')
     }
-    // 站台屏按每行自身载荷声明的来源分类，因此同样不得从线路标识符嗅探线路类型。
-    const platformCode = codeOf(files['platform/index.vue'])
-    expect(platformCode, 'platform/index.vue still guesses the route type from the identifier')
+    // 电子站牌只认载荷声明的来源，因此同样不得从线路标识符嗅探线路类型（地铁那条线由载荷的
+    // `isSubway` 说，不是从 lineId 里看出来的）。
+    const stationBoardCode = codeOf(files['station-board/index.vue'])
+    expect(stationBoardCode, 'station-board/index.vue still guesses the route type from the identifier')
       .not.toMatch(/lineId\s*\.\s*startsWith\(/)
-    expect(platformCode, 'platform/index.vue still names a route-type prefix')
+    expect(stationBoardCode, 'station-board/index.vue still names a route-type prefix')
       .not.toMatch(/['"`]subway/)
-    expect(platformCode, 'platform/index.vue still branches on a route-type field')
+    expect(stationBoardCode, 'station-board/index.vue still branches on a route-type field')
       .not.toMatch(/\b(?:lineType|routeType)\b/)
   })
 })

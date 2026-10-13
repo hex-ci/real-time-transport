@@ -66,7 +66,6 @@ describeEachStore('F13 精确时刻表优先于推演', (store) => {
     api.upstream.mockImplementation(async (url: unknown) => {
       const href = String(url)
       if (href.includes('/v3/bus/linename')) return amapOk({ buslines: [line] })
-      if (href.includes('/v3/place/around')) return amapOk({ pois: [] })
       return amapOk({})
     })
   })

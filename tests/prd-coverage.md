@@ -11,7 +11,7 @@
 | 0 静态 | `pnpm code-check` | typecheck + ESLint |
 | 1 离线 | `pnpm test` | 全仓库单元 / 契约用例，服务端跑内存存储，不碰数据库 |
 | 2 API/SQL | `pnpm test:db` → `pnpm test:api` | `app.inject()` 走 HTTP 边界，断言真的落在 SQL 上 |
-| 3 浏览器 | `pnpm test:e2e` | 真实浏览器 e2e，六个场景（含站台大屏的键盘场景） |
+| 3 浏览器 | `pnpm test:e2e` | 真实浏览器 e2e，六个场景（含电子站牌的选择器键盘场景） |
 
 「怎么证」一列给的是**真能区分行为的断言**（改坏被测路径会红的那条），不是「它测了」这种话。
 标「变异验证」的那些行，是被实际改坏过、确认会变红的（见文末）。
@@ -48,7 +48,8 @@
 | 单轴为 0 是真实坐标，不是哨兵 | `api/f2-…` ·「单轴为 0 是真实坐标，照常写下来」；`api/x-sentinel-single-parse` ·「单轴为 0 是坐标而不是哨兵」 | 写入成功且落库 | 2 |
 | 只给一个轴（或只清一个轴）被拒 | `api/f2-…` ·「只给一个轴（或只清一个轴）被拒」 | 400；成对 null 才清空 | 2 |
 | WGS-84 只换算一次，站点坐标原样转发 | `api/f2-…` ·「原始 WGS-84 只换算一次」「GIS 边界：设备定位换算一次，站点坐标原样转发」 | 换算调用计数/入参 | 1+2 |
-| 浏览器侧不做换算 | `web/__tests__/anchor-capture.test.ts` ·「returns the fix exactly as the browser reported it, converted by nobody」 | 浏览器上报值原样透传 | 1 |
+| 锚点这条路：浏览器原样上报，换算在服务端 | `web/__tests__/anchor-capture.test.ts` ·「returns the fix exactly as the browser reported it, converted by nobody」 | 抓来的锚点逐字等于浏览器上报值，且不等于换算一次的结果 | 1 |
+| **浏览器本地测距的基准面是 GCJ-02**（定位进入应用时换算一次；上报服务端用原始定位） | `web/__tests__/nearest-station-rule.test.ts` ·「只有定位 store 换算，且只换一次」「反向换算在浏览器里根本不存在」「上报给服务端的定位一律是设备原样的那一份」「picks the placed stop nearest the fix, in metres」；`web/__tests__/location-feedback.test.ts` ·「取到了：说一句已获取位置」（`deviceFix` 原样、`userCoords` 为换算值、两者相差 400 米以上） | 换算调用只出现在 `stores/location.store.ts`；最近站与列表排序的距离从换算后的定位量起 | 1 |
 | **搜索来源不换算**（`search` 的坐标已是 GCJ-02，原样落库） | `api/f2-anchor-source-and-place-search.test.ts` ·「搜索来的坐标原样落库：一次换算都不做」；`web/__tests__/views/settings/anchor-place-search.test.ts` ·「选了之后保存按钮可点，按下写一次库：坐标 + 名字 + 来源 search」 | 落库值**逐字等于**高德给的那一对（并断言它不等于换算一次的结果）；PATCH 体里 `homeAnchorSource === 'search'` 且坐标未被动过 | 1+2 |
 | **地点名落库**（名字供界面认人，没有名字时显示坐标） | `api/f2-anchor-source-and-place-search.test.ts` ·「搜索来的坐标原样落库…」（`home_place_name` 逐字落库）·「设备路径把上一个搜索来的名字清掉」；`web/__tests__/views/settings/anchor-place-search.test.ts` ·「设备抓来的锚点没有名字：摘要显示坐标，不编造一个名字」 | 名字与坐标同行落库；设备路径写入后名字为 `null`；位置锚点索引页的两行对「有名字 / 没名字 / 没坐标」三种情形各说各的 | 1+2 |
 | 地点搜索接口的三种结局分得开（空词 400 / 上游失败 502 / 答了没有匹配 200+空） | `api/f2-anchor-source-and-place-search.test.ts` ·「空 keywords → 400：空词不是「搜索全部」」「上游失败 → 502，不是「没有这个地方」」「上游答了但没有匹配 → 200 与空数组」 | 三种状态码与形状互不相同；且 400 时**没有**发出上游调用 | 2 |
@@ -74,33 +75,52 @@
 | 生成车辆标「排班推演」，绝不标「实时」 | `api/f4-…` ·「生成车辆的到站行标为排班推演，绝不标成实时」 | 该行 provenance ≠ live | 2 |
 | 已注册分钟级时刻表的站台标「精确时刻表」 | `api/f4-…` ·「已注册分钟级时刻表的站台标为精确时刻表」 | provenance == exact_timetable | 2 |
 | 文字说明，不只靠颜色 | `web/__tests__/data-provenance.test.ts` ·「renders the vocabulary's three marks」「reads every kind differently」 | 三个 mark 有各自文字 | 1 |
-| 站台行按各自来源标记，不靠路线类型/组件位置 | `web/__tests__/platform-provenance.test.ts` ·「never rounds an unclassifiable row up to the flattering mark」 | 不可分类行不被取整 | 1 |
 
-## F5 · 站台聚合大屏
+## F5 · 电子站牌（站台视角）
 
 | 功能点 | 证明（spec · 用例） | 怎么证（区分性断言） | 层级 |
 |---|---|---|---|
-| 多线路聚合到同一站台：每行的分钟与车辆只来自它自己那条读数 | `api/f5-platform-aggregation.test.ts` ·「同一站台的多条线路各自成行：分钟与车辆只来自它自己那条线的读数」 | 两条线路在同一站序各读一次：对方的 `busId` 不出现在自己的载荷里，两边的分钟各自等于数据源给的那个 | 2 |
+| 多线路聚合到同一站台：每行的分钟与车辆只来自它自己那条读数 | `api/f5-live-read-contract.test.ts` ·「同一站台的多条线路各自成行：分钟与车辆只来自它自己那条线的读数」 | 两条线路在同一站序各读一次：对方的 `busId` 不出现在自己的载荷里，两边的分钟各自等于数据源给的那个 | 2 |
 | 排序依据：分钟是**被请求的那一站**的价，不是线路末端的价 | `api/f5-…` ·「分钟是被请求的那一站的价：换一个站序读数，同一辆车给出另一行自己的数字」 | **变异验证**：聚合器 live 缓存键丢掉 `targetOrder` → 红（第二次读数重放第一次的 180） | 2 |
 | 每行带各自的来源标记 | `api/f5-…` ·「一块屏上各行按各自的来源标记：实时读数与排班推演不是同一个标记」 | 两条线路的 `dataSource` 各不相同且都不缺失（`chelaile` / `subway_schedule`） | 2 |
 | 「答了但没车」≠「读不到」 | `api/f5-…` ·「「答了但没车」与「读不到」不互相冒充：一块屏上两种结局的形状不同」 | 200 + 点名线路的空列表（仍带来源与时刻）vs 404 且连 `data` 都没有 | 2 |
 | 最后更新跟着读数走 | `api/f5-…` ·「最后更新跟着读数走：重读同一条读数不换时刻，读不到的那一次没有时刻可给」 | 同一读数重读 → `updatedAt` 不变且上游只被读一次；读失败的一次没有任何可当时刻的值 | 2 |
-| （既有的行级覆盖）单行倒计时、拥挤度、失败行、距离、刷新保持 | `web/__tests__/views/platform/departure-minute.test.ts`、`congestion.test.ts`、`failure-row.test.ts`、`landmark-distance.test.ts`、`refresh-retention.test.ts`、`favourites-read-state.test.ts`；`web/__tests__/platform-provenance.test.ts` | 各测行的一个字段/一种状态 | 1 |
-| 平台页**自己的**多线路聚合：每行的分钟与站数只来自它自己那条读数 | `web/__tests__/views/platform/aggregation-order.test.ts` ·「分钟与站数都来自本行的读数，绝不跨线借用」「每行问的是自己那条线路在本站台的站序」 | **变异验证**：把各路线的车并进同一个池子逐行复用 → 红（支线那行拿到快线的 10 分钟）；两条线路的读数是同一站序上互相可借的数字 | 1 |
-| 平台页**自己的**排序：按到站耗时升序，秒级读数决定谁在前（不是关注顺序 / 线路名 / 站数） | 同上 ·「升序，秒级读数决定谁在前，而不是关注顺序或线路名」「排序按到站耗时，不按站数」「同落到一分钟的两行相邻」 | **变异验证**：比较器取反 → 红；540 s 与 555 s 同落 9 分钟而 600 s 与 120 s 差出一档，站数更多的行因秒数更小仍在前 | 1 |
-| 无分钟的行排在所有有数字的行之后 | 同上 ·「无分钟的行排在所有有数字的行之后，且不冒充数字」 | **变异验证**：比较器里 `null` 的两个分支对调 → 红（无分行的行跑到第一行） | 1 |
-| 平台页一块屏上每行的来源标记取自自己那条响应 | 同上 ·「实时读数与排班推演在同一块屏上各标自己的那一行」 | 支线声明 `subway_schedule` → 该行「排班推演」而非「实时」；无分钟的行一个标记都不带 | 1 |
-| 平台页一块屏上「答了但没车」「读不到」「有车但没有分钟」三种说法互不相同 | `web/__tests__/views/platform/answered-vs-unreadable.test.ts` ·「答了但没车的一行陈述线路自己的运营事实…」「读不到的一行只陈述失败，不冒充运营事实」「三种说法在屏上互不相同，且各自只出现一次」 | **变异验证**：读失败的 `answer: null` 改成空答案 → 红（该行改口说运营事实）；三种说法在整块屏上各只出现一次 | 1 |
-| 一行读不到不升级成整块屏的失败 | 同上 ·「只有一行读不到时，失败留在那一行，不升级成整块屏的刷新失败」 | **变异验证**：报告板的 `items.every` 改 `items.some` → 红（单行失败让整块屏说「刷新失败 · 未能取到最新数据」） | 1 |
-| 表头与数据行是同一套两列网格（对齐） | `tests/e2e/scenarios/platform.mjs` ·「表头是两列」「数据行左列与表头左列对齐」「数据行与表头相接」 | 落到真实坐标（left/top）断言：只按类名查会让网格换回 12 列那套的回归照样通过 | 3 |
-| 每行陈述道路距离（米/公里），与站数并存 | `web/__tests__/views/platform/departure-minute.test.ts` ·「由所请求站的路线距减车的连续位置」「读数没带连续位置时不陈述距离」「规则里本站没有路线距时不陈述距离」 | **变异验证**：把 `distanceToStation` 改成站数*800 的估算 → 红 | 1 |
-| 请求失败的行不渲染拥挤度芯片（「无法获取」与「未知」不同行） | `web/__tests__/views/platform/failure-row.test.ts` ·「does not render the chip at all on a failed row」 | 芯片按 `!item.unavailable` 才渲染，同一行不能同时说两件事 | 1 |
+| （新页的行级覆盖）排序、两种东西分开、距本站、数字缺一个不编 | `web/__tests__/views/station-board/board-rows.test.ts` | 各测行的一个字段/一种状态 | 1 |
+| 站台列表的顺序：最近的在前，没有距离的不冒充最近 | `web/__tests__/views/station-board/station-options.test.ts` | 坐标由夹具给，断言的是顺序与「不知道就说不知道」 | 1 |
+| **记住最后看的那个站台**（刷新/重新进入回到它；不在列表里就退回第一个） | `web/__tests__/views/station-board/remembered-station.test.ts` ·「按城市分开记：换到别的城市再换回来，还是原来那个」「传空串即忘掉这个城市的那一条」「坏值一律当没有」「存储拒写时不抛」；`station-board-page.test.ts` ·「上次看的是列表里的站：重新进入还是它，读的也是它的站牌」「上次看的那一站已经不在列表里：退回第一个，但记忆留着」「按「定位最近站台」= 回到自动并解除固定，而不是把最近的那个固定下来」「固定的那一站**恰好**就是最近的那个：按定位同样解除固定」「没记过时选第一个，且不把自动选中的那个当成「上次看的」」；`tests/e2e/scenarios/station-board.mjs` ·场景「电子站牌」 | 真浏览器里选一个**不是列表第一个**的站，真导航一次，比对它读的站台 id 仍是原来那个 —— 退回列表第一个会读到另一个 id | 1+3 |
+| 整屏：答复里每一条线路都渲染（含未关注的）、读不到 ≠ 没有可报的线路、刷新点名站台、重读期间不清空屏 | `web/__tests__/views/station-board/station-board-page.test.ts` | 挂载页面本身；刷新答复由测试挂住，量的是「重读还没有答案」那一刻的屏幕 | 1 |
+| 浏览器层：选择器键盘（开面板 / 移动高亮 / 回车拿走高亮项 / Escape 不动值）、换站（名字 + 读数 + 页头一起换）、「距本站」来自载荷、分钟升序、刷新点名站台、**两种来源标记** | `tests/e2e/scenarios/station-board.mjs` ·场景「电子站牌」 | 真按键打到真浏览器；「距本站」的每个数必须落进它收到过的载荷（自造一个、或拿分钟折算，都落不进去）；给上真坐标后下拉里必须出现带「附近」的站，且不是每一行都带（两种来源都在列表里） | 3 |
+| **我附近的站台**：坐标 → 站 id（列表的第二个来源，任意未关注站台由此可读） | `server/__tests__/nearby-stops-endpoint.test.ts` ·「答复里每个站都带身份与坐标」「坐标在本边界换算一次」「读不到是 404，附近没有站台是 200 + 空数组」「节拍内重复请求只打一次上游」；`transit-adapter` 的 `nearby-stops-mapping.test.ts` ·「同一个站的不同物理站台合成一条，保留最近的那个」「没有站 id 或没有站名的条目不成行」「坐标缺失就是 null」「上游答了但没有附近站台时是空数组」 | 上游那条端点把同一个站的不同物理站台各给一条，故这一层必须按站 id 去重；坐标换算只做一次、且做在 HTTP 边界 | 2 |
+| 两个来源合成一张列表：同名只占一行、标明凭什么在这儿 | `web/__tests__/views/station-board/station-options.test.ts` ·「一个名字一行：两个来源都有的名字算「附近」」「同一个来源里同名只留一条」「关注线路那份没给坐标时用附近那份补上」「合并之后仍然按远近排」；`station-board-page.test.ts` ·「问了附近的站台，并把它与关注线路的站表合成一张列表」「附近站台读不到时退回关注线路的站表」「下拉里的行与触发器上选中的那个用同一套次级文字」 | 桩件把候选渲染成文本，断言的是**下拉里真的标出了什么**；附近读不到时列表退回现状且屏上不出现「附近」（标记只标例外，不标默认） | 1 |
 
-**如实说明**：F5 的**第 2 层空白已补**（上表前五行：聚合到同一站台的读侧契约、排序依据、
-逐行来源、「没车」与「读不到」、最后更新）；**界面层里「平台页自己的聚合与排序」这一处空白也已补**
-（上表后六行：两支 spec 挂载这一页本身，钉住分钟不跨线借用、按到站耗时排序与无分钟的行的位置、
-逐行来源、以及「答了但没车 / 读不到 / 有车但没分钟」三种说法各自只出现一次）。仍**未覆盖**的
-只剩一处：翻牌动效 / 发光行等视觉形态 —— 界面形态，只能由浏览器 e2e 证明。
+**旧口径那条路径已整体退役（2026-10 复核）**：`/platform` 那页、它的 9 个用例文件、
+`platform-provenance.test.ts`、e2e 场景「站台大屏」与两张截图一起下线（`git rm`），导航里只剩「电子站牌」一条。
+
+- 上表**前五行留着**：它们钉的是读侧契约（`GET /lines/:id/live?order=…`），首页卡片与线路页仍按它取价。
+- 上表**后十行**钉的是旧屏自己的界面行为，随页面一起消失 —— 其中三件搬到了新页：拥挤度措辞与颜色 →
+  `web/__tests__/congestion-copy.test.ts`；「重读期间不清空屏」→ `station-board-page.test.ts`；
+  「读不到」与「没有可报的线路」互不冒充 → 同一文件。
+- **没有搬过来的**，如实记下 —— 它们不是缺口，是随旧行模型一起消失的状态：逐行来源标记、行级失败芯片、
+  「一行读不到不升级成整块屏」、表头对齐的 e2e 坐标断言、旧行模型的距离与站数并存。
+
+**新路径的实现状态**：F5 已按「站台视角」重新定义（见 `docs/PRD.md` F5），实现与用例是：
+
+- 取数层：`GET /api/transit/stations/:stationId/board`（`server/__tests__/station-board-endpoint.test.ts`：
+  站上全部线路都在、到站时刻与预报分开、读不到是 404、节拍内重复读只打一次上游、
+  按下刷新失效站台缓存并真读一次、节拍内再按一次 429 且不花上游、空按压被拒）
+  与适配器的映射函数（`transit-adapter` 的 `station-board-mapping.test.ts`：只取带身份的那一组、
+  没有时刻的车不成行、**已经过去的那一班不成行（余量 30 秒）**、-1 距离哨兵不是 0 米、
+  拥挤度不混进车辆标签、**线路的静态事实（总站数/本站序/下一站名）不在字段里**）；
+- 界面层：电子站牌页 `/station-board` —— `web/__tests__/views/station-board/board-rows.test.ts`
+  钉排序（有车的按最快那班在前、只有预报的其次）、两种东西分开、**这趟车距本站多远（缺就不说）**、
+  数字缺一个就不编；`station-options.test.ts` 钉站台顺序（最近的在前、没有距离的不冒充最近、
+  没有定位时如实说不知道、「最近的也在 3 公里外」这句话何时出现）；`station-board-page.test.ts`
+  钉整屏把答复里的每一条线路都渲染出来（含谁都没关注的那条）、「读不到」与「本站没有可报的线路」
+  互不冒充、按下刷新时点名的是站台而不是线路、**重读还没有答案时不清空屏也不藏起抬头行**；
+- 浏览器层：`tests/e2e/scenarios/station-board.mjs`（场景「电子站牌」）—— 上表倒数第三行。
+
+站台列表按距离排序、手动刷新（与另三页共用冷却窗口）、旧页退役都已落地，见 PRD F5 那几条。
+翻牌动效 / 发光行这类视觉形态已从需求中删除（§1.1 明确否掉「给路人看的展示大屏」）。
 
 ## F6 · 线路拓扑报站屏（RouteBoard）
 
@@ -126,7 +146,7 @@
 | 功能点 | 证明（spec · 用例） | 怎么证（区分性断言） | 层级 |
 |---|---|---|---|
 | manifest 启动参数 / 起始页 / 图标齐全 | `apps/web/src/__tests__/tests/installability.test.ts` ·「launches standalone, with no browser chrome」「starts at the board, not at a sub-page」「declares the 192 and 512 icons…」 | 解析 manifest 逐字段断言 | 1 |
-| 点一下直达结论页：`start_url` 就是应用自己的首页 | `apps/web/src/__tests__/tests/install-promise.test.ts` ·「start_url 指的就是应用自己的首页，不是子页也不是一次重定向」 | **变异验证**：把 `start_url` 改成 `/platform` → 红；并断言路由表里 `/` 那一条就是首页（有 `name: 'overview'`、没有 `redirect:`） | 1 |
+| 点一下直达结论页：`start_url` 就是应用自己的首页 | `apps/web/src/__tests__/tests/install-promise.test.ts` ·「start_url 指的就是应用自己的首页，不是子页也不是一次重定向」 | **变异验证**：把 `start_url` 改成 `/station-board` → 红；并断言路由表里 `/` 那一条就是首页（有 `name: 'overview'`、没有 `redirect:`） | 1 |
 | 名称 / 短名 / 主题色 / 图标尺寸与 PRD 的承诺一致 | 同上 ·「名称与短名都在，且短名是主屏放得下的那个名字」「display 是 standalone，主题色是一个真实的六位色值」「图标声明齐了安装所需的尺寸与类型」 | 短名 ≤ 12 字；`display` 恰为 `standalone`；主题色与背景色都是六位色值；192 与 512 齐备且有一枚 maskable | 1 |
 | 图标文件真实存在且不透明 | `installability.test.ts` ·「gives every declared icon a real file at exactly its declared size」「ships the apple-touch-icon opaque」 | manifest → 解码 PNG 头 | 1 |
 | 声明的每个图标都在盘上、尺寸与声明相符 | `install-promise.test.ts` ·「manifest 的条目与 public/ 里的文件一对一」 | 逐条读 IHDR：宽高必须等于声明的 `sizes`，否则报点名的那一条 | 1 |
@@ -216,12 +236,12 @@
 | 只刷实时类，不重读长 TTL | `api/f11-…` ·「刷新丢掉两类实时键：按站读数与整线读数都真的重取」「刷新不重读长 TTL 的线路数据」 | 长 TTL 键的取数计数不变 | 2 |
 | 上游答不出 → 502，不把作答时刻当读数时刻 | `api/f11-…` ·「上游答不出来时是 502，且绝不把作答时刻当成读数时刻」 | 502 + 时刻字段不动 | 2 |
 | UI 三态文案（正在刷新 / 已刷新 / 刷新太频繁） | `web/__tests__/refresh-throttle-ui.test.ts` ·describe「the three states the control has to state」 | 三态三句 | 1 |
-| 刷新不清空已在屏上的行；「最后更新」跟随读数 | `web/__tests__/views/platform/refresh-retention.test.ts` ·「(a)…已在屏上的行保持渲染，加载态不出现」「(d)…「最后更新」仍是产生屏上的行的那次读取的时刻」 | 刷新中行仍在；时刻不被改写 | 1 |
+| 刷新不清空已在屏上的行；「最后更新」跟随读数 | `web/__tests__/views/station-board/station-board-page.test.ts` ·「重读还没有答案时不清空屏：行与「最后更新」都在，且时刻仍是产生这些行的那一次读取」 | 刷新答复由测试挂住：请求还挂着时，行与抬头行都必须还在 | 1 |
 | **实时节拍可调：10~120 秒，越界钳两端，非法回退 18** | `server/__tests__/refresh-interval.test.ts` ·「区间内的整数原样保留」「越界被钳到两端，小数四舍五入」「环境变量给的是字符串也算数」「读不出数就回退默认，绝不写成 NaN 或 0」 | 钳制后的值逐个相等；回退值是 18 而不是 0 或 NaN | 1 |
 | **手动刷新的冷却跟随当前节拍，且热切换不重启服务** | 同上 ·「按 30 秒配置：窗口开在尝试那一刻，29 999ms 拒、30 000ms 放行」「换成 10 秒：同一个进程里立刻按新的节拍算窗口」「保存一个非法值时回退默认 18，而不是让节拍变成 0 秒」 | 窗口长度 == 节拍（由响应自己的 `nextAllowedAt` 与 `retryAfterSeconds` 读）；`setPollIntervalSec` 之后另一个窗口立刻按新节拍开；**已开的窗口保留自己的到期时刻**（调快不改写别人手里那个） | 1 |
 | 设置索引那一行的四种事实（没选过 / 选过 / 读不到 / 连生效值都没读到） | `web/__tests__/views/settings/settings-index.test.ts` ·「实时刷新间隔行说此刻生效的秒数或所选秒数，读不到就说读不到」 | 「未设置（默认每 18 秒）」/「未设置（默认每 30 秒）」（运维改过环境变量的服务端）/「每 N 秒」/「未读到」/「未设置」五句互不相同；读不到时不许出现「18 秒」；答案里没有生效值时只说「未设置」，不拿 18 顶上 | 1 |
 | 刷新间隔子页的「当前」与编辑器起点 | `web/__tests__/views/settings/refresh-interval-page.test.ts` ·「生效 30 秒 → 起点是 30 而不是 18」「生效 18 秒」「读完但没有生效值」「选了 10 秒」「读取失败」「按 60 秒再保存」 | 那句话与起点都取**此刻在跑的**数（30/18 各一句）、读不到时说「未读到设置」且不印「只是起点」那句、保存写回的请求体是选中那一档且写完那句话跟着改 | 2 |
-| 站点选择器的键盘（打开 / 移动高亮 / 回车选中 + 重读 / Escape 关且不动值） | `e2e` ·场景「站台大屏」 ·「关着时上/下键不开面板：开面板是原生激活那条路」「Enter 打开面板并列出候选」「下键建立高亮，且恰有一项（reka 的 data-highlighted）」「再按一次把高亮移到另一项」「回车拿走的是高亮那一项」「Escape 关掉面板且不动值」 | 真按键打到真浏览器：高亮读 reka 的 `data-highlighted`、回车后 `trigger` 换成高亮那一站且 `/live` 重读过；**背景**：组件换成 reka 的 Combobox 后，宿主（不冒泡、不跑默认动作）量不到这些，单元层只剩「本组件不抢键」那半 | 3 |
+| 站点选择器的键盘（打开 / 移动高亮 / 回车选中 + 重读 / Escape 关且不动值） | `e2e` ·场景「电子站牌」（`tests/e2e/scenarios/station-board.mjs`）·「关着时上/下键不开面板：开面板是原生激活那条路」「Enter 打开面板并列出候选」「下键建立高亮，且恰有一项（reka 的 data-highlighted）」「再按一次把高亮移到另一项」「回车拿走的是高亮那一项」「Escape 关掉面板且不动值」 | 真按键打到真浏览器：高亮读 reka 的 `data-highlighted`、回车后 `trigger` 换成高亮那一站且 `/live` 重读过；**背景**：组件换成 reka 的 Combobox 后，宿主（不冒泡、不跑默认动作）量不到这些，单元层只剩「本组件不抢键」那半 | 3 |
 | **节拍听谁的：设置页的选择（DB）> 环境变量 > 启动参数 > 默认 18s** | `server/__tests__/refresh-interval.test.ts` ·「三处都给了：用设置页那个」「设置页没选过（NULL）：落到环境变量」「设置页与环境变量都没有：用启动参数」「三处都没有：undefined，交给构造时落默认 18」「环境变量读不出数就当它没给，不吃掉后面的来源」「这条链不钳制取值」 | 六种来源组合各给出确定的答案；`abc` 这类读不出数的环境变量被当作「没给」而不是「给过」；**接线**另有三条源码断言：`buildApp` 把来源喂给那条链、`index.ts` 不再自己解析环境变量、`app.ts` 里那个环境变量也只读一次（曾经两处各写一份、对无效值的判法还不一样） | 1 |
 | **接口答出的「生效节拍」就是此刻在跑的** | `server/__tests__/refresh-interval.test.ts` ·「没选过 + 环境变量 30 → 答 30，而不是存储行说的 18」「选过 10 → 答 10：环境变量的 30 盖不掉使用者的选择」「清空选择（PATCH null）→ 回到环境变量的 30，与重启后同一个答案」「两个来源都没有 → 18」 | 真 app + `inject`：读的答复（与写回的答复）里的 `effectiveRefreshIntervalSec` 逐个相等；清空之后那一列回到 NULL 而行还在，且节拍落到**与环境变量一致**的 30 —— 同一份存储状态不因「有没有重启过」得到两个节拍 | 2 |
 
@@ -236,8 +256,8 @@
 | 按 `title` **全串精确相等**判定（「不拥挤」绝不被读成拥挤） | `api/f12-congestion-levels.test.ts` ·「每辆车按自己的标签归档：「不拥挤」绝不被读成拥挤」 | **变异验证**：`title.includes('拥挤')` → 红（`不拥挤` 被判 `high`） | 2 |
 | 只取实测档位，无「适中」这类中间档 | `api/f12-…` ·「等级只取实测到的那几个，没有中间档」 | 等级落在 `{unknown,low,high}` 内且三种都出现 | 2 |
 | 地铁一律 `unknown`（时刻表推不出人多不多） | `api/f12-…` ·「地铁一律 unknown」 | 每辆车 `congestion == 'unknown'` | 2 |
-| 界面词取上游实测原词，「未知」自成一档 | `web/__tests__/views/platform/congestion.test.ts` ·「labels each observed level with the wording the upstream itself served」「keeps 「未知」 for every level nobody has sampled」 | 自造词（如「适中」）→ 未知 | 1 |
-| 拥挤度不参与自动判断（颜色随判决不随分钟） | `web/__tests__/views/platform/congestion.test.ts` ·「never lets the arrival minute decide a class」 | 类名只由拥挤度决定 | 1 |
+| 界面词取数据源实测原词，「未知」自成一档 | `web/__tests__/congestion-copy.test.ts` ·「labels each observed level with the wording the upstream itself served」「keeps 「未知」 for every level nobody has sampled」 | 自造词（如「适中」）→ 未知 | 1 |
+| 拥挤度不参与自动判断（颜色随判决不随分钟） | `web/__tests__/congestion-copy.test.ts` ·「never lets the arrival minute decide a class」 | 类名只由拥挤度决定 | 1 |
 | `parseCongestion` 本身 | `packages/transit-adapter/src/__tests__/congestion.test.ts` | 直接单测级别映射 | 1 |
 
 ## F13 · 地铁精确时刻表迁入数据库 —— ⚠️ 见下
@@ -272,7 +292,7 @@
 ### 改名说明
 
 原 `api/f5-commute-window-three-states.test.ts` 测的是**通勤时段（`user_settings` 四个时刻）的三态**
-（`docs/PRD.md` §4.1 `/settings/schedule` + §5.2），与 **F5（站台聚合大屏）无关**。已改名为中性的
+（`docs/PRD.md` §4.1 `/settings/schedule` + §5.2），与 **F5（电子站牌）无关**。已改名为中性的
 `api/commute-window-three-states.test.ts`：PRD 的 F 清单里没有「通勤时段」这一项（它是一域的设置，
 不是功能点），套 `f2-` 也不对（F2 是「通勤起终点锚点 = 家/公司」，不含时刻）。
 
@@ -280,9 +300,9 @@
 
 ## 未覆盖清单（如实汇总）
 
-1. **F5 站台聚合大屏**：接口层已补（见 F5 节前五行）；平台页自己的多线路聚合、按到站耗时排序、
-   逐行来源与「答了但没车 / 读不到 / 有车但没分钟」三种说法也已补（见 F5 节后六行，两支 spec 挂载
-   这一页本身）；仍**未覆盖**翻牌/发光等视觉形态 —— 属浏览器 e2e。
+1. **F5 电子站牌**：**已无未覆盖项** —— 旧口径那条路径（`/platform`）连同它的用例整体退役，
+   F5 现在只有一条路径（`/station-board`），取数层、适配器映射、行规则、站台顺序、整屏与浏览器层
+   都有用例，见 F5 节末那段「实现状态」。
 2. **F6 线路拓扑报站屏**：数据成形、车辆投影契约与角标归属已补；仍**未覆盖** Konva 图层本身
    （轨道/站点节点/列车动态/视口交互）与画布像素 —— 这个仓库没有 canvas 测试台。
 3. **F7 加到主屏**：安装面的字段、图标与「不加 worker、不加推送」已逐条钉住；仍**未覆盖**
@@ -324,10 +344,10 @@
 | 2 | `api/f8-pinned-favorite.test.ts` | `setPinned` 去掉「先清上一个置顶」（SQL 的 `UPDATE … is_pinned = FALSE` 与内存清理循环） | 2 failed / 11 passed | 内存路径 `rows.map(f=>f.id)` ≠ `[b,a]`；SQL 路径第二次置顶 `404 ≠ 200` |
 | 3 | `api/f9-favorite-display-order.test.ts` | 内存比较器 `createdAt` 决胜取反 + SQL `ORDER BY created_at DESC` | 4 failed / 6 passed | 「位置相同的两条按关注先后收敛」的 `toEqual([first,second,third])` |
 | 4 | `api/f12-congestion-levels.test.ts` | `parseCongestion` → `title.includes('拥挤') ? 'high' : 'low'` | 2 failed / 4 passed | 「不拥挤」被判 `high`（`expected 'high' to be 'low'`） |
-| 5 | `api/f5-platform-aggregation.test.ts` | `aggregator.ts` 的 live 缓存键丢掉 `targetOrder`（`${lineId}_${direction}`） | 2 failed / 8 passed | 「分钟是被请求的那一站的价」：两个站序都拿到 180（`expected 180 to be 600`） |
+| 5 | `api/f5-live-read-contract.test.ts` | `aggregator.ts` 的 live 缓存键丢掉 `targetOrder`（`${lineId}_${direction}`） | 2 failed / 8 passed | 「分钟是被请求的那一站的价」：两个站序都拿到 180（`expected 180 to be 600`） |
 | 6 | `api/test-db-script.test.ts` | `test-db.sh` 不再采信 `TEST_DB_NAME`（退回只按开发库名派生） | 2 failed / 2 passed | 脚本没造出点名的库（`测试库 transit_gap_test …` 而非 `…script_peg_test`）；不合规的库名被接受 |
 | 7 | `web/__tests__/views/line-detail/route-board-shaping.test.ts` | `use-route-layout.ts` 折返同站插值 `p2.x - p1.x` → `Math.abs(p2.x - p1.x)`（永远向右） | 1 failed / 6 passed | 「折返的第二行沿它自己的方向走」：`expected 326.25 to be less than 282.5` |
-| 8 | `apps/web/src/__tests__/tests/install-promise.test.ts` | `public/manifest.webmanifest` 的 `start_url` 改成 `/platform` | 1 failed / 6 passed | 「start_url 指的就是应用自己的首页」（`expected '/platform' to be '/'`） |
+| 8 | `apps/web/src/__tests__/tests/install-promise.test.ts` | `public/manifest.webmanifest` 的 `start_url` 改成 `/station-board` | 1 failed / 6 passed | 「start_url 指的就是应用自己的首页」（`expected '/station-board' to be '/'`） |
 | 9 | `api/f2-anchor-source-and-place-search.test.ts` | `app.ts` 的 `anchorPatchToGcj02` 把来源判断去掉（`search` 也走 `deviceFixToGcj02`） | 4 failed / 28 passed | 「搜索来的坐标原样落库」：落库值 ≠ 高德给的那一对（且等于换算一次的结果） |
 | 10 | `api/f2-anchor-source-and-place-search.test.ts` | `anchorPatchToGcj02` 里 `patch[pair.placeName] = null`（名字永不落库） | 2 failed / 30 passed | 「搜索来的坐标原样落库」的 `home_place_name` 逐字断言；「设备路径把上一个搜索来的名字清掉」的反向对照 |
 | 11 | `api/f2-anchor-source-and-place-search.test.ts` | `place-search` 的空 keywords 检查短路（`if (false)`） | 2 failed / 30 passed | 「空 keywords → 400」：`expected 200 to be 400` |

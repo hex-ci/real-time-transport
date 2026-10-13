@@ -35,6 +35,8 @@ import type {
   RefreshLiveLineResult,
   RefreshLiveRequest,
   RefreshLiveResult,
+  NearbyStop,
+  StationBoard,
 } from '@real-time-transport/shared'
 import {
   CITY_DICTIONARY,
@@ -352,6 +354,30 @@ export class TransitService {
     return cached
   }
 
+  /**
+   * 站台到站：一个站台上**全部经过线路**的到站（含没被关注的线路）。
+   *
+   * 与线路读数同一条缓存、同一个节拍（聚合器里与实时读数共用 TTL），故页面的 12 秒重读
+   * 不会比轮询节拍更密地打上游。返回 null 是「读不到」；「读到了、这站没有线路」是空数组。
+   */
+  async readStationBoard(stationId: string, cityCode: string = DEFAULT_CITY_CODE): Promise<StationBoard | null> {
+    return this.aggregator.getStationBoard(stationId, cityCode)
+  }
+
+  /**
+   * 我附近的站台：城市 + 坐标 → 站 id 与站名（站的身份那条桥）。
+   *
+   * 坐标是 GCJ-02（HTTP 边界已换算），与站点详情那条路同一个坐标系。返回 null 是「读不到」，
+   * 空数组是「这附近确实没有站台」—— 调用方据此决定是退回关注线路的站表，还是如实说没有。
+   */
+  async readNearbyStops(
+    cityCode: string,
+    lng: number,
+    lat: number,
+  ): Promise<NearbyStop[] | null> {
+    return this.aggregator.getNearbyStops(cityCode, lng, lat)
+  }
+
   async getLiveStatus(
     lineId: string,
     direction: number = 0,
@@ -403,6 +429,31 @@ export class TransitService {
     // 窗口在尝试时开，而不是在结果时开：失败的刷新已经花掉了
     // 上游调用，不能变成重试循环。
     const nextAllowedAt = attemptedAt + this.refreshCooldownMs
+
+    // 电子站牌页点名的是一个**站台**：这一次的结果是那个站台的读数（一次上游读取，
+    // 与一条线路同级）。窗口与线路刷新共用同一个键 —— 两块屏幕各按一次不等于绕过冷却。
+    if (params.station) {
+      this.aggregator.invalidateStation(params.station.stationId, params.station.cityCode)
+      const board = await this.readStationBoard(params.station.stationId, params.station.cityCode)
+      // 取得读数的时刻取自这次站台读取自己的 `readAt`，绝不是本方法作答的时刻。
+      const obtainedAt = board?.readAt ?? null
+      const lastObtainedAt = obtainedAt ?? held?.lastObtainedAt ?? null
+      this.rememberRefreshWindow(key, { lastObtainedAt, nextAllowedAt })
+
+      return {
+        outcome: obtainedAt === null ? 'unavailable' : 'ok',
+        result: {
+          dataClass: 'live',
+          throttled: false,
+          lastUpdatedAt: lastObtainedAt,
+          nextAllowedAt,
+          retryAfterSeconds: secondsUntil(nextAllowedAt, attemptedAt),
+          // 逐线路的结果这一半为空：这次点名的不是线路，为站台上的线路各报一条读数
+          // 等于说它们被逐条读过（它们是那一次站台读取的附带）。
+          lines: [],
+        },
+      }
+    }
 
     const lines: RefreshLiveLineResult[] = []
     let newestObtainedAt: number | null = null
@@ -731,10 +782,6 @@ export class TransitService {
   }
 
   /** 一个 GCJ-02 点周边的站点（该点已在 HTTP 边界换算）。 */
-  async getNearbyStations(lng: number, lat: number, radius: number = 800) {
-    return this.amap.getNearbyStations(lng, lat, radius)
-  }
-
   /** 一个 GCJ-02 点的地标（该点已在 HTTP 边界换算）。 */
   async reverseGeocode(lng: number, lat: number) {
     return this.amap.reverseGeocode(lng, lat)

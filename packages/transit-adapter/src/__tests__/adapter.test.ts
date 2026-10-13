@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  wgs84ToGcj02,
-  gcj02ToWgs84,
   UniversalSubwayEngine,
   SubwayRouterProvider,
   ChelaileProvider,
@@ -31,19 +29,6 @@ class FailingProvider implements ITransitProvider {
 }
 
 describe('Transit Adapter Package', () => {
-  it('converts coordinates between WGS-84 and GCJ-02 with reasonable precision', () => {
-    const wgsLng = 116.3974
-    const wgsLat = 39.9093
-
-    const [gcjLng, gcjLat] = wgs84ToGcj02(wgsLng, wgsLat)
-    expect(gcjLng).toBeGreaterThan(wgsLng)
-    expect(gcjLat).toBeGreaterThan(wgsLat)
-
-    const [backLng, backLat] = gcj02ToWgs84(gcjLng, gcjLat)
-    expect(backLng).toBeCloseTo(wgsLng, 4)
-    expect(backLat).toBeCloseTo(wgsLat, 4)
-  })
-
   it('runs UniversalSubwayEngine with graceful degradation without Amap key', async () => {
     const amap = new AmapGisService('') // 显式空 key（不回落环境变量）
     const subway = new UniversalSubwayEngine(amap)

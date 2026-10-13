@@ -57,7 +57,6 @@ function stubUpstream(answered: Record<string, unknown> = line): void {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const href = String(url)
     if (href.includes('/v3/bus/linename')) return ok({ buslines: [answered] })
-    if (href.includes('/v3/place/around')) return ok({ pois: [] })
     return ok({})
   }))
 }

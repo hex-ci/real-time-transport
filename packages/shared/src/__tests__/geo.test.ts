@@ -2,13 +2,47 @@ import { describe, expect, it } from 'vitest'
 import {
   cumulativeDistances,
   distanceToSegment,
+  gcj02ToWgs84,
   haversineMeters,
   polylineLengthMeters,
   statedCoordinate,
   statedNumber,
   statedStopOrder,
   stationProgressToDistance,
+  wgs84ToGcj02,
 } from '../geo.js'
+
+describe('WGS-84 ↔ GCJ-02 换算', () => {
+  it('把一个北京的点按国测局算法偏移，并且能原路换回来', () => {
+    const wgsLng = 116.3974
+    const wgsLat = 39.9093
+
+    const [gcjLng, gcjLat] = wgs84ToGcj02(wgsLng, wgsLat)
+    // 偏移是单向可预期的：两个轴都变大。
+    expect(gcjLng).toBeGreaterThan(wgsLng)
+    expect(gcjLat).toBeGreaterThan(wgsLat)
+
+    const [backLng, backLat] = gcj02ToWgs84(gcjLng, gcjLat)
+    // 往返误差在一米以内 —— 这正是「只换算一次」可行的依据：换算本身不引入可见偏差。
+    expect(haversineMeters(wgsLat, wgsLng, backLat, backLng)).toBeLessThan(1)
+  })
+
+  it('偏移的量级足以改变结论：北京城区约 500 米', () => {
+    // 这条用例钉住的是**为什么必须换算**，不是换算算法本身：定位（WGS-84）与站表（GCJ-02）
+    // 直接比，偏差正是下面这个数 —— 它比一半的站间距都大，排序的头几名会整批换人。
+    const [gcjLng, gcjLat] = wgs84ToGcj02(116.4074, 39.9042)
+    const offset = haversineMeters(39.9042, 116.4074, gcjLat, gcjLng)
+
+    expect(offset).toBeGreaterThan(400)
+    expect(offset).toBeLessThan(700)
+  })
+
+  it('境外不做偏移：算法在国界外会把点推向别处', () => {
+    // 东京。没有这条闸，境外的点会被按国内的参数偏移几百米。
+    expect(wgs84ToGcj02(139.6917, 35.6895)).toEqual([139.6917, 35.6895])
+    expect(gcj02ToWgs84(139.6917, 35.6895)).toEqual([139.6917, 35.6895])
+  })
+})
 
 describe('geo helpers', () => {
   it('haversineMeters computes a known distance', () => {

@@ -19,7 +19,8 @@ const navItems = [
   { to: '/', label: '关注线路', icon: Bus },
   // 换乘链路与首页同级：它服务出门前那一刻。
   { to: '/commute-chain', label: '换乘链路', icon: Waypoints },
-  { to: '/platform', label: '站台大屏', icon: Clock },
+  // 电子站牌：一个站台上全部经过线路的到站（F5）。
+  { to: '/station-board', label: '电子站牌', icon: Clock },
   { to: '/settings', label: '设置', icon: Settings },
 ]
 

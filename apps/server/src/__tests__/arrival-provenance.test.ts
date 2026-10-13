@@ -295,7 +295,6 @@ describe('F4: the arrivals route ships a provenance on every row', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
       const href = String(url)
       if (href.includes('/v3/bus/linename')) return OK({ buslines })
-      if (href.includes('/v3/place/around')) return OK({ pois: [] })
       return OK({})
     }))
   }

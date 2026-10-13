@@ -4,23 +4,20 @@ import { createApiHarness, describeEachStore, type ApiHarness } from './support/
 import { installUpstream, type BusFixture, type LineFixture } from './support/upstream-mock.js'
 
 /**
- * F5：站台聚合大屏的读侧。
+ * F5 的读侧：**一条线路的一次定点实时读数**
+ * （`GET /lines/:id/live?order=<目标站在本方向上的站序>`）。
  *
- * 大屏由「同一站台上的一行行」拼起来，每行是**一条线路**的一次定点实时读数
- * （`GET /lines/:id/live?order=<本站在本方向上的站序>`）：行的分钟取自该响应自己发布的
- * `travelTimeSec`，行的来源标记取自该响应声明的 `dataSource`。于是聚合屏赖以成立的四条契约
- * 都发生在这一层，而不是界面里：
+ * 首页卡片、线路页与电子站牌都按它取价（站牌整屏也是这些读数拼起来的：一行一条线路）。
+ * 四条契约都发生在这一层，而不是界面里：
  *
- *  - 一行只说自己那条线路：分钟与车辆不跨线路借用，否则这一屏的排序键会把两条线的读数混起来；
- *  - `travelTimeSec` 是**被请求的那一站**的价，不是线路末端的价，否则整屏的排序依据是错的；
- *  - 每行各带自己的来源；「答了但没车」与「读不到」形状不同，不得互相冒充；
- *  - 每行的时间戳是产出这些行的那次读数，轮询的钟推不动它。
- *
- * 翻牌动效、发光行这类视觉形态不在这一层。
+ *  - 一次读数只说自己那条线路：分钟与车辆不跨线路借用，否则一块屏的排序键会把两条线的读数混起来；
+ *  - `travelTimeSec` 是**被请求的那一站**的价，不是线路末端的价，否则排序依据就是错的；
+ *  - 每次读数各带自己的来源；「答了但没车」与「读不到」形状不同，不得互相冒充；
+ *  - 时刻是产出这条读数的那次读数的时刻，轮询的钟推不动它。
  */
 
 const STATION = '换乘站'
-/** 换乘站在站表里的序号（1 基）——大屏对每条线路都用它问价。 */
+/** 目标站在站表里的序号（1 基）——每条线路都用它问价。 */
 const TARGET_ORDER = 3
 const STOP_NAMES = ['甲站', '乙站', STATION, '丁站', '戊站']
 
@@ -36,7 +33,7 @@ interface LiveStatusView {
   updatedAt?: number
 }
 
-describeEachStore('F5 · 站台聚合大屏的读侧', (store) => {
+describeEachStore('F5 · 定点实时读数的读侧契约', (store) => {
   let api: ApiHarness
 
   beforeEach(async () => {

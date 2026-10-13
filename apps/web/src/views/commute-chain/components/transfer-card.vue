@@ -37,7 +37,7 @@ function branchesFor(row: TransferRowView): BranchView[] | null {
 <template>
   <article class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60">
     <!-- 这批数字的抬头，不是脚注：读屏顺序上「这批读数是什么时候取的」先于读数本身，
-         放在末尾则要先读完内容才知道它可能已经过期。呈现方式与站台大屏同一种 ——
+         放在末尾则要先读完内容才知道它可能已经过期。呈现方式与电子站牌同一种 ——
          一条整宽的行 + 一条下分界线。 -->
     <p
       v-if="card.reading"

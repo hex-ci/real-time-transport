@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h, type Ref } from 'vue'
 import {
   click,
+  memoryStorage,
   mountComponent,
   type MountedHost,
   type Route,
@@ -34,14 +35,15 @@ vi.mock('@/stores/location.store', async () => {
   const deviceFix = ref<{ lat: number, lng: number } | null>({ ...DEVICE })
   const userCoords = ref<{ lat: number, lng: number } | null>({ ...DEVICE })
   const accuracyM = ref<number | null>(null)
+  const requestLocation = vi.fn()
   const store = reactive({
     deviceFix,
     userCoords,
     accuracyM,
-    requestLocation: () => {},
+    requestLocation,
     stopLocation: () => {},
   })
-  return { useLocationStore: () => store, __locationStub: { deviceFix, userCoords, accuracyM } }
+  return { useLocationStore: () => store, __locationStub: { deviceFix, userCoords, accuracyM, requestLocation } }
 })
 
 /** 桩件自己的那三个 ref（测试改它们就等于人挪了地方）。 */
@@ -50,6 +52,7 @@ const stub = (await import('@/stores/location.store') as unknown as {
     deviceFix: Ref<{ lat: number, lng: number } | null>
     userCoords: Ref<{ lat: number, lng: number } | null>
     accuracyM: Ref<number | null>
+    requestLocation: ReturnType<typeof vi.fn>
   }
 }).__locationStub
 
@@ -166,6 +169,45 @@ function moveTo(dNorth: number, dEast: number): void {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('挂载时就开始定位', () => {
+  it('页面自己请求一次定位：少了它，刷新之后列表一直量不出「离我多远」', async () => {
+    // 实测报过的现象：F5 之后列表没有任何距离，必须去首页再回来才有 —— 因为只有首页与线路页
+    // 在挂载时请求定位，站牌页没有，于是它在等一个不会来的定位。
+    stub.requestLocation.mockClear()
+    const host = await mountBoard()
+
+    expect(stub.requestLocation).toHaveBeenCalled()
+    host.unmount()
+  })
+
+  it('还没有定位时按「定位最近站台」：解除固定，但不清空当前选中的站台', async () => {
+    // 这个按钮的意思是「回到自动」；解除固定不需要定位，故没定位时也该生效。
+    // 清空选中会让屏上没有站台可读 —— 那不是这个按钮要做的事。
+    stub.deviceFix.value = null
+    stub.userCoords.value = null
+    const storage = memoryStorage()
+    storage.setItem('rt-transit-station-board-station', JSON.stringify({ '027': '010-00002' }))
+    const host = await mountComponent(StationBoardPage, { routes: routes(), storage })
+    await host.flush()
+
+    stub.requestLocation.mockClear()
+    click(panelToggle(host))
+    await host.flush()
+    click(panelToggle(host))
+    await host.flush()
+    const selectedBefore = host.nodes(item => item.props['data-stub'] === 'option').length
+
+    click(host.node(item => item.tag === 'button' && item.props['aria-label'] === '定位最近站台', '定位按钮'))
+    await host.flush()
+
+    expect(JSON.parse(storage.getItem('rt-transit-station-board-station') ?? '{}')).toEqual({})
+    expect(stub.requestLocation).toHaveBeenCalledWith({ userInitiated: true })
+    // 屏上仍有候选、仍选着原来那一站。
+    expect(host.nodes(item => item.props['data-stub'] === 'option').length).toBe(selectedBefore)
+    host.unmount()
+  })
 })
 
 describe('列表什么时候重建', () => {

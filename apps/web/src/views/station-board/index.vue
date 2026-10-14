@@ -371,6 +371,9 @@ async function detectNearby(): Promise<void> {
   const coords = locationStore.userCoords
   if (!coords) {
     detecting.value = true
+    // 没有定位时也得解除固定：这个按钮的意思是「回到自动」，而解除固定不需要定位 ——
+    // 少了这一句，它第一次按下去只请求定位，用户看到的仍是原来那个站（实测报过）。
+    rememberStationId(cityStore.currentCode, '')
     locationStore.requestLocation({ userInitiated: true })
     landmarkHint.value = '正在获取定位…'
     return
@@ -397,6 +400,9 @@ async function detectNearby(): Promise<void> {
 
 onMounted(async () => {
   await transitStore.fetchFavorites()
+  // 开始定位：没有它，列表量不出「离我多远」、也问不到附近的站台 —— 刷新后一直空着，
+  // 直到别的页面（首页、线路页）碰巧请求过定位。拒绝授权在这里是空操作，故绝不重复询问。
+  locationStore.requestLocation()
   await loadStationOptions()
   if (current.value) await readBoard()
 })

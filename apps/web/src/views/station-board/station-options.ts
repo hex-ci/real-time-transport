@@ -170,15 +170,23 @@ export function applyAnchors(list: StationOption[], anchors: StationOption[]): S
 }
 
 /**
- * 下拉里的排列：**钉过的站台在最前**（按钉的顺序），其余按远近取最近的 `cap` 个。
+ * 下拉里的排列：**一张按距离排的表**，钉过的站保证不被名额截掉。
  *
- * 锚点不占那些名额：它们最多几个，而名额是给「我附近有哪些站」这件事留的 ——
- * 让 20 公里外的一个钉过的站挤掉一个 300 米内的站，这一页就答错了它要答的问题。
+ * 两步，别的不做：
+ *  - 候选（附近的站台 + 关注线路的站表）取最近的 `cap` 个 —— 名额是给「我附近有哪些站」留的；
+ *  - 全部钉过的站（上下班上车点、关注站）额外并入，**不占名额、也不因远而被截掉**，
+ *    然后整体按距离排。
+ *
+ * 于是「最近的在前」对整张表成立（钉过的站也在它该在的位置上），而「我钉过的站一定找得到」
+ * 也成立 —— 这两件事不再互相打架。代价是钉过的站通常比附近的站远，故它落在列表末尾；
+ * 由默认选中与「记住最后看的站台」兜底（上次看过的那个会直接被选中）。
+ *
+ * 没有坐标的钉过的站排在有距离的之后：不知道远近就不冒充最近。
  */
 export function arrangeOptions(list: StationOption[], cap: number): StationOption[] {
   const anchors = list.filter(option => option.anchor)
   const rest = sortByDistance(list.filter(option => !option.anchor)).slice(0, cap)
-  return [...anchors, ...rest]
+  return sortByDistance([...anchors, ...rest])
 }
 
 /**

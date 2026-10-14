@@ -26,7 +26,8 @@
 |---|---|---|
 | 首屏全量 | `POST /bus/line!encryptedLineDetail.action` | 线路+站点+车辆全量 |
 | 轻量刷新 | `POST /bus/line!encryptedBusDetail.action` | 仅车辆明细，参数 `lineId/targetOrder/stationId/cityId`，对应 30s 定时器 |
-| 站点详情 | `POST /bus/stop!encryptedPhyStnDetail.action` | 参数 `stationId` + `cityId`（只给 `stationId` 答空对象，`stopId` 这个名字不认）。返回 `stationList[]`，**第一组**就是所查的那个站台：该站**全部经过线路**（未关注的也在内）各车的 `arrivalTime`（epoch 毫秒）+ `stnStates[].distanceToDest`（**这辆车距本站还有多少米**，见下方误解行）+ 线路元数据（`lineId` / 方向 / 开往 / 首末班 / 票价 / 站数 / 本站序 / 下一站）。另：`stnStates[].travelTime` 与该车的剩余秒数同值（上游自己的行程时间），`busTagList` 是车辆标签（拥挤度那几个词也在这里，故两者要分开取） |
+| 站点详情 | `POST /bus/stop!encryptedPhyStnDetail.action` | 参数 `stationId` + `cityId`（只给 `stationId` 答空对象，`stopId` 这个名字不认）+ **`lineId`（非空即可，见下）**。返回 `stationList[]`，**第一组**就是所查的那个站：该站全部经过线路（未关注的也在内）各车的 `arrivalTime`（epoch 毫秒）+ `stnStates[].distanceToDest`（**这辆车距本站还有多少米**，见下方误解行）+ 线路元数据（`lineId` / 方向 / 开往 / 首末班 / 票价 / 站数 / 本站序 / 下一站）。另：`stnStates[].travelTime` 与该车的剩余秒数同值（上游自己的行程时间），`busTagList` 是车辆标签（拥挤度那几个词也在这里，故两者要分开取） |
+| 站点详情 · **`lineId` 是「全站视图」的开关** | 同一个站名两侧的站牌（物理站牌 `physicalStId`）在 `stationList[]` 里各占一组，但**只有带 `lineId` 的那次调用会把各组都补上线路身份**：不带 → 只有本侧平台那几条线（**一条线路只剩一个方向**）；带（**任何非空值都行**，实测给一条不经过本站的 id、甚至 `x` 都一样；空串或空格退回前者）→ 各组并成一组，两侧站牌的线路全在，**同一条线的两个方向各占一条**（`lineId` 也各不同）。2026-10-13 实测（万盛南街西口 `010-20607`）：不带 5 条线路（T12 只有 dir0）、带上 13 条（T12 的 dir0 与 dir1 都在，各自带自己的到站车数）。故本仓固定带上 `WHOLE_STATION_VIEW_LINE_ID`（值不参与取数） |
 | **附近站台** | `POST /bus/stop!encryptedNearPhysicalStns.action` | 参数 `cityId` + `lng`/`lat`（GCJ-02）—— **不给 `cityId` 答空列表**。返回 `nearStations[]`：`sId`（站 id）/ `sn`（站名）/ `distance`（米，升序）/ `lat`/`lng`/`physicalStId`/`namesakeStId`/`sType`。**没有半径参数**（`radius`、`distance` 传什么都不变），窗口由上游定：实测约 1 公里、15～48 条；**同一个站的不同物理站台会各占一条**，按 `sId` 去重后是 6～21 个站。这是「任意未关注站台」那条路的桥：坐标 → 站 id（2026-10-13 实测） |
 | 首屏 | `POST /bus/stop!encryptedHomePage.action` | 返回 `{toast, nearSts, tag, lines}`；只给 `cityId` + 坐标时两者都为空 —— **参数未确认**（附近站台请走上一行） |
 | 搜索 | `POST /bus/query!encryptedNSearch.action`、`!encryptedSearchMore.action` | 按关键词搜站/线；`keyword` 不是它的参数名（答空对象），**参数未确认** |
@@ -39,7 +40,7 @@
 - 首屏全量：`/bus/line!encNLineDetail.action`
 - 轻量刷新：`/bus/line!encRefreshLineDetail.action`
 
-本项目当前使用 H5 接口（`encryptedLineDetail`），与小程序同源。电子站牌页（PRD F5）另用**站点详情**（`encryptedPhyStnDetail`）—— 它一次就给出该站台上全部经过线路的到站时刻；「我附近的站台有哪些」走**附近站台**（`encryptedNearPhysicalStns`）。
+本项目当前使用 H5 接口（`encryptedLineDetail`），与小程序同源。电子站牌页（PRD F5）另用**站点详情**（`encryptedPhyStnDetail`）—— 它一次就给出该站全部经过线路的到站时刻（带上 `lineId` 时含两侧站牌、同一条线的两个方向各一条）；「我附近的站台有哪些」走**附近站台**（`encryptedNearPhysicalStns`）。
 
 ### 2.1 端点总清单（2026-10-13 从 Android APK 的 `classes.dex` 字符串清点）
 

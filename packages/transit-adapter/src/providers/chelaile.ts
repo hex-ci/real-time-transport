@@ -130,6 +130,19 @@ export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
  * 而调用方不该拿自己的钟去减上游的钟）。上游给不出到站时刻的车不进这份列表：一辆车要么有
  * 时刻，要么不存在，绝不补一个 0 当「现在就到」。
  */
+/**
+ * 站点详情要一个**非空**的 `lineId` 才返回「全站视图」：同名站牌两侧的并集，
+ * 一条线路的两个方向各占一条（`lineId` 也各不同）。
+ *
+ * 值本身不参与取数 —— 实测给一条**不经过本站**的 id、甚至给 `x` 都一样解锁；
+ * 给空串或空格则退回「只有本侧平台」的那个视图（每线只剩一个方向）。
+ * 故这里用一个明确的「不针对某条线路」的占位值，而不是随手拿一条真实线路的 id。
+ *
+ * 2026-10-13 实测（万盛南街西口 010-20607）：不带 → 5 条线路、T12 只有 dir0；
+ * 带上 → 13 条线路，T12 的 dir0 与 dir1 都在（各自有自己的到站车数）。
+ */
+export const WHOLE_STATION_VIEW_LINE_ID = '0'
+
 export function stationBoardLinesOf(payload: any, readAt: number): StationBoardLine[] {
   const groups: any[] = Array.isArray(payload?.stationList) ? payload.stationList : []
   const hydrated = groups.find(group => Array.isArray(group?.lines) && group.lines.some((line: any) => line?.line?.lineId))
@@ -703,7 +716,7 @@ export class ChelaileProvider implements ITransitProvider {
   }
 
   /**
-   * 按站台读取到站：一次调用就拿到该站台上**全部经过线路**的到站时刻（未关注的也在内）。
+   * 按站台读取到站：一次调用就拿到该站**全部经过线路**的到站时刻（未关注的也在内）。
    *
    * 上游不认这个城市码时直接返回 null，不浪费一次调用；上游答了但没有可读的线路时返回
    * 空数组（「读到了、这站没有线路可报」与「读不到」是两件事）。
@@ -714,6 +727,8 @@ export class ChelaileProvider implements ITransitProvider {
       const data = await this.request('/bus/stop!encryptedPhyStnDetail.action', {
         stationId,
         cityId: cityCode ?? '027',
+        // 见 `WHOLE_STATION_VIEW_LINE_ID`：不带它只拿到本侧平台那几条线（一条线路一个方向）。
+        lineId: WHOLE_STATION_VIEW_LINE_ID,
       })
       // 读取时刻取自这次应答落地的那一刻：每辆车的剩余秒数由它算出，故它必须与数据同源。
       return stationBoardLinesOf(data, Date.now())

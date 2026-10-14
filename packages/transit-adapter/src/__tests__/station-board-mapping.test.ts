@@ -76,6 +76,22 @@ describe('站台载荷里取哪一组、取哪几条线', () => {
   })
 })
 
+describe('同一条线的两个方向各占一行', () => {
+  it('两个方向都留下：行数不按线路名合并', () => {
+    // 全站视图（带 `lineId` 的那次调用）会把两侧站牌并成一组，同一条线的上行与下行各有自己的
+    // `lineId` 与开往。按线路名合并会让这一站只剩一个方向 —— 而这一页答的是「这个站上哪趟先来」。
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({ lineId: '10114983855', name: 'T12', direction: 0, destination: '房辛店' }),
+      lineOf({ lineId: '10114983856', name: 'T12', direction: 1, destination: '通州北苑路口南' }),
+    ]), READ_AT)
+
+    expect(lines.map(line => [line.lineName, line.direction, line.destination])).toEqual([
+      ['T12', 0, '房辛店'],
+      ['T12', 1, '通州北苑路口南'],
+    ])
+  })
+})
+
 describe('在途车：上游给了时刻才算一辆车', () => {
   it('每辆车的剩余秒数由读取时刻算出，按到站先后升序', () => {
     const lines = stationBoardLinesOf(payloadOf([

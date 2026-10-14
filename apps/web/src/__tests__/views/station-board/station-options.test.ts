@@ -50,29 +50,43 @@ function positionEastOf(meters: number): { lat: number, lng: number } {
   return { lat: ME.lat, lng: ME.lng + (meters / 854) * 0.01 }
 }
 
-describe('钉过的站台排在最前，且不占最近 30 个名额', () => {
-  it('钉过的站按远近也无所谓：它们就在最前', () => {
+describe('一张按距离排的表，钉过的站不被名额截掉', () => {
+  it('钉过的站也在它该在的位置上：整张表严格按远近', () => {
+    // 角色（上班 / 下班 / 关注）只是**标注**，不是排序：一个 10 公里的上班上车点不该压住
+    // 300 米外的站，也不该压住 2.5 公里的下班上车点。
     const arranged = arrangeOptions(withDistances([
-      eastOfMe('近处站', 100),
-      anchorOf('远处钉过的站', 'followed', 20000),
-      eastOfMe('中距站', 900),
+      anchorOf('上班上车点', 'morning', 10300),
+      anchorOf('下班上车点', 'evening', 2500),
+      anchorOf('关注站', 'followed', 6000),
+      eastOfMe('旁边的站', 300),
     ], ME), 30)
 
-    expect(arranged.map(option => option.name)).toEqual(['远处钉过的站', '近处站', '中距站'])
+    expect(arranged.map(option => option.name)).toEqual(['旁边的站', '下班上车点', '关注站', '上班上车点'])
   })
 
-  it('名额是给「我附近有哪些站」留的：31 个候选 + 2 个钉过的 → 2 + 30', () => {
+  it('钉过的站在 30 名之外也照样在列表里（免截断），位置仍按远近', () => {
+    // 20/30 公里外的两个钉过的站：没有这一条它们会被「最近 30 个」整批截掉 ——
+    // 那正是「我走远了就找不到我钉的站」。
     const candidates = Array.from({ length: 31 }, (_, index) => eastOfMe(`站${index + 1}`, 100 + index * 10))
     const arranged = arrangeOptions(withDistances([
       anchorOf('钉过的甲', 'morning', 30000),
-      anchorOf('钉过的乙', 'evening', 31000),
+      anchorOf('钉过的乙', 'evening', 20000),
       ...candidates,
     ], ME), 30)
 
     expect(arranged).toHaveLength(32)
-    expect(arranged.slice(0, 2).map(option => option.name)).toEqual(['钉过的甲', '钉过的乙'])
+    expect(arranged.map(option => option.name).slice(-2)).toEqual(['钉过的乙', '钉过的甲'])
     // 被挤掉的是**第 31 近**的候选，不是钉过的那个。
     expect(arranged.map(option => option.name)).not.toContain('站31')
+  })
+
+  it('钉过的站没有距离时排在有距离的锚点之后（不知道远近就不冒充最近）', () => {
+    const arranged = arrangeOptions(withDistances([
+      { ...anchorOf('没有坐标的锚点', 'morning', 0), lat: null, lng: null },
+      anchorOf('有坐标的锚点', 'evening', 2500),
+    ], ME), 30)
+
+    expect(arranged.map(option => option.name)).toEqual(['有坐标的锚点', '没有坐标的锚点'])
   })
 
   it('盖身份：同名项换成用户钉的那一个的站 id 与坐标', () => {

@@ -130,13 +130,18 @@ interface Answers {
   holdRefresh?: { release?: () => void }
 }
 
-/** 我附近的两个站：一个是关注线路站表里没有的，一个与它同名（合并成一行）。 */
+/**
+ * 我附近的两个站：一个是关注线路站表里没有的，一个与它同名（合并成一行）。
+ *
+ * 坐标刻意不同（相隔约 200 米）：距离相同时排序会落到站名上，用例就说不清「默认选中的是最近
+ * 那个」还是「名字排前面那个」。
+ */
 function nearbyAnswer(): Record<string, unknown> {
   return {
     success: true,
     data: [
       { stationId: '010-77777', name: 'NN附近站', lat: 39.8745, lng: 116.6715 },
-      { stationId: '010-00001', name: 'NN站', lat: 39.8745, lng: 116.6715 },
+      { stationId: '010-00001', name: 'NN站', lat: 39.8745, lng: 116.6740 },
     ],
   }
 }
@@ -268,12 +273,21 @@ describe('记住上次看的那个站台', () => {
   })
 })
 
-describe('我钉过的站台：排在最前，且不受最近 30 个名额挤压', () => {
-  it('上班上车点在下拉最前，一进来读的就是它的站牌', async () => {
+describe('我钉过的站台：在列表里（不受名额截断），但默认选中最近的那个站', () => {
+  it('上班上车点在 20 公里外：它照样在列表里，而一进来读的是脚边那个站', async () => {
     const host = await mountBoard({
+      // 自带一份坐标明确的附近答复：离我最近的是 010-77777（约 80 米）。
+      nearby: {
+        success: true,
+        data: [
+          { stationId: '010-77777', name: 'NN附近站', lat: 39.8745, lng: 116.6765 },
+          { stationId: '010-00001', name: 'NN站', lat: 39.8745, lng: 116.6740 },
+        ],
+      },
       stops: [
         { id: '010-00001', name: 'NN站' },
-        { id: '010-00009', name: 'NN上车点', order: 9, lat: 39.8745, lng: 116.6715 },
+        // 钉过的那个在 20 公里外：整张表按距离排，它落在末尾。
+        { id: '010-00009', name: 'NN上车点', order: 9, lat: 39.9, lng: 116.7 },
       ],
       favorites: [{
         ...favourite(),
@@ -284,10 +298,12 @@ describe('我钉过的站台：排在最前，且不受最近 30 个名额挤压
     })
 
     const options = host.nodes(item => item.props['data-stub'] === 'option').map(node => host.textOf(node).trim())
-    expect(options[0]).toContain('NN上车点')
-    expect(options[0]).toContain('上班')
-    // 它是首选，故这一屏读的站牌就是它的 —— 而不是按距离排在最前的那个。
-    expect(host.server.seen(/\/api\/transit\/stations\/010-00009\/board/).length).toBeGreaterThan(0)
+    // 它在列表里，且带自己的身份。
+    expect(options.some(text => text.includes('NN上车点') && text.includes('上班'))).toBe(true)
+    expect(options[0], '整张表按距离排，钉过的站不该被顶到最前').not.toContain('NN上车点')
+    // 默认选中最近的那个站：这一页要答的是「我这个站上的车还有多久」。
+    expect(host.server.seen(/\/api\/transit\/stations\/010-77777\/board/).length).toBeGreaterThan(0)
+    expect(host.server.seen(/\/api\/transit\/stations\/010-00009\/board/).length).toBe(0)
     host.unmount()
   })
 

@@ -168,6 +168,21 @@ describe('读不到与读到了是两件事', () => {
   })
 })
 
+describe('站点详情要一个非空的 lineId 才给全站视图', () => {
+  it('每次读取都带上它 —— 少了它，同一条线路只会剩一个方向', async () => {
+    // 上游的怪癖：`lineId` 为空时只答「本侧平台」那几条线（每线一个方向），
+    // 给了（值本身不参与取数）才答两侧站牌的并集。这是这条规则唯一该被写下的地方。
+    stubUpstream(stationBody([lineOf({ lineId: '101', name: '101路' })]))
+    const instance = await app()
+
+    await readBoard(instance)
+
+    const url = upstreamCalls.find(call => call.includes('encryptedPhyStnDetail')) ?? ''
+    const lineId = new URL(url).searchParams.get('lineId')
+    expect(lineId, `上游请求没带 lineId：${url.slice(0, 120)}`).toBeTruthy()
+  })
+})
+
 describe('节拍：一次站台读取只打一次上游', () => {
   it('节拍内重复读由缓存作答，上游只被读一次', async () => {
     stubUpstream(stationBody([lineOf({ lineId: '101', name: '101路' })]))

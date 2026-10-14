@@ -255,6 +255,13 @@ export async function run({ check, equal, note, fixtures }) {
     width => typeof width === 'number' && width > 0,
     { what: '窄档刷新按钮可见', timeout: 20_000 },
   )
+  // 按下之前等它可点：页面挂载时会自己刷一次，正忙的按钮（`disabled` + `aria-busy`）点不动，
+  // 那一次点击会以超时告终 —— 那是时序，不是被测行为（实测咬过一次）。
+  await waitForValue(
+    `JSON.stringify(document.querySelector('[data-toolbar="narrow"] button[aria-label="刷新最新车况"]')?.disabled ?? null)`,
+    disabled => disabled === false,
+    { what: '刷新按钮空闲下来', timeout: 20_000 },
+  )
   // 连按两次：第一次说「已刷新」，第二次必须在窗口没走完时说出「刷新太频繁 · N 秒后可刷新」——
   // 冷却期按钮按不动就等于把这句话藏起来，那正是它该出现的时候。
   await cli(['click', '[data-toolbar="narrow"] button[aria-label="刷新最新车况"]'])

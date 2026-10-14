@@ -4,6 +4,7 @@ import {
   click,
   memoryStorage,
   mountComponent,
+  RouterLinkStub,
   type MountedHost,
   type Route,
 } from '@/__tests__/views/settings/settings-harness'
@@ -189,7 +190,12 @@ function routes(answers: Answers = {}): Route[] {
 }
 
 async function mountBoard(answers: Answers = {}, storage?: Storage): Promise<MountedHost> {
-  const host = await mountComponent(StationBoardPage, { routes: routes(answers), storage })
+  const host = await mountComponent(StationBoardPage, {
+    routes: routes(answers),
+    storage,
+    // 行是去详情页的链接：本宿主没有路由，只读取它被指向了哪里。
+    components: { RouterLink: RouterLinkStub },
+  })
   await host.flush()
   return host
 }
@@ -321,6 +327,46 @@ describe('我钉过的站台：在列表里（不受名额截断），但默认�
     // 看候选行本身：整页文本里「上班」可能来自别处，那一句就证不到这一条。
     const options = host.nodes(item => item.props['data-stub'] === 'option').map(node => host.textOf(node).trim())
     expect(options.some(text => text.includes('上班'))).toBe(false)
+    host.unmount()
+  })
+})
+
+describe('每行可点进详情页，并标出它服务哪一腿通勤', () => {
+  it('通勤方向是一句灰字：只有文字、不做成角标，窄屏另起一行、宽屏跟在终点站右面', async () => {
+    const host = await mountBoard({ favorites: [{ ...favourite(), morningDirection: 0 }] })
+
+    // 认元素而不是认文本：同一句话在提升的静态子树里还会以文本节点的样子出现一次。
+    // 本宿主没有 `getAttributeNames`，故断言一律落到数字或字符串上，不把节点交给 `expect`。
+    const marks = host.nodes(node => node.tag === 'span' && host.textOf(node).trim() === '上班')
+    expect(marks.length).toBe(1)
+    // 灰字：没有边框、没有底色 —— 有那两个它就成了第二个角标，会跟终点站抢那一行的宽度。
+    const mark = String(marks[0]!.props['class'] ?? '')
+    expect(mark).not.toContain('border')
+    expect(mark).not.toContain('bg-')
+    // 与终点站在同一个块里，窄屏那一档是列（上下排，不并排），宽屏那一档才是行。
+    const line = marks[0]!.parent!
+    const lineClass = String(line.props['class'] ?? '')
+    expect(lineClass).toContain('flex-col')
+    expect(lineClass).toContain('lg:flex-row')
+    expect(host.textOf(line).startsWith('开往')).toBe(true)
+    host.unmount()
+  })
+
+  it('关注线路的那一行指向它自己的详情页，并带「上班」；没关注的行不带标记', async () => {
+    const host = await mountBoard({
+      favorites: [{ ...favourite(), morningDirection: 0 }],
+    })
+
+    const rows = host.nodes(item => item.tag === 'a')
+    const hrefs = rows.map(node => String(node.props['href']))
+    // 关注线路（101路，bus_027_1）那一行：地址带方向与城市。
+    expect(hrefs).toContain(`/line/bus_027_1?direction=0&cityCode=${CITY}`)
+    // 同一屏上没关注的那条线路也有自己的地址（未关注也能点进去）。
+    expect(hrefs).toContain(`/line/bus_027_9?direction=0&cityCode=${CITY}`)
+    // 通勤那句灰字只说关注线路的那个方向：在那一行里，不在别的行里。
+    const textOfRow = (href: string): string => host.textOf(rows.find(node => node.props['href'] === href)!)
+    expect(textOfRow(`/line/bus_027_1?direction=0&cityCode=${CITY}`)).toContain('上班')
+    expect(textOfRow(`/line/bus_027_9?direction=0&cityCode=${CITY}`)).not.toContain('上班')
     host.unmount()
   })
 })

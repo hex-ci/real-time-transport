@@ -22,6 +22,7 @@ import { SearchableCombobox, type ComboboxOption, type SelectedText } from '@/co
 import { RefreshControl } from '@/components/refresh-control'
 import { congestionChipClass, congestionLabel } from '@/congestion-copy'
 import { distanceTextOf } from '@/distance-copy'
+import { plainPurposeTextOf } from '@/purpose-badge'
 import {
   applyAnchors,
   arrangeOptions,
@@ -349,7 +350,7 @@ async function readBoard(): Promise<void> {
     const board = json.data as StationBoard
     // 晚到的答案若属于别的站台，就不是本屏的答案：丢掉，而不是把它挂在当前站台下。
     if (station.stationId !== current.value?.stationId) return
-    rows.value = boardRowsOf(board)
+    rows.value = boardRowsOf(board, cityStore.currentCode, favorites.value)
     readAt.value = board.readAt
     rowsStationId.value = station.stationId
     readState.value = 'ok'
@@ -565,9 +566,12 @@ function onSelectOption(option: ComboboxOption): void {
       </div>
 
       <div v-else class="divide-y divide-slate-800/60">
-        <div
+        <!-- 整行是一个链接：点进这条线路这个方向的详情页（全线站牌与在途车辆）。行里没有别的可点
+             东西，故整行可点比在行尾放一个小图标更好按。 -->
+        <RouterLink
           v-for="row in rows"
           :key="row.key"
+          :to="row.detailHref"
           class="grid grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-3 transition hover:bg-slate-900/50 md:px-4 md:py-3.5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] lg:gap-x-6"
         >
           <!-- 左列：线路徽标 + 开往。小字事实在窄屏上跟在开往下面，宽屏上自成中列（见下一块）。 -->
@@ -579,7 +583,18 @@ function onSelectOption(option: ComboboxOption): void {
               {{ row.lineName }}
             </span>
             <div class="min-w-0">
-              <div class="text-xs font-medium text-slate-200 lg:text-base">开往 {{ row.destination }}</div>
+              <!-- 通勤方向是一句灰字：窄屏自成一行排在「开往」下面（不并排），宽屏跟到终点站右面。
+                   终点站自己 `nowrap`，故一行放不下时折的总是这句灰字，终点站不会被拆开。 -->
+              <div class="flex flex-col text-xs font-medium text-slate-200 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-2 lg:text-base">
+                <span class="whitespace-nowrap">开往 {{ row.destination }}</span>
+                <span
+                  v-for="purpose in row.commutePurposes"
+                  :key="purpose"
+                  class="text-[11px] font-normal text-slate-400 lg:text-xs"
+                >
+                  {{ plainPurposeTextOf(purpose) }}
+                </span>
+              </div>
               <div class="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 lg:hidden">
                 <span v-for="fact in factsOf(row)" :key="fact">{{ fact }}</span>
               </div>
@@ -614,7 +629,7 @@ function onSelectOption(option: ComboboxOption): void {
               {{ congestionLabel(row.congestion) }}
             </span>
           </div>
-        </div>
+        </RouterLink>
       </div>
     </div>
 

@@ -14,6 +14,7 @@ import { operatingTextOf } from '@/operating-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { readingText, unreadText, type ReadState } from '@/read-state'
+import { shortPurposeTextOf } from '@/purpose-badge'
 
 const props = defineProps<{
   lineName: string
@@ -325,9 +326,9 @@ const aheadBadgeText = computed(() => {
   return aheadCount.value > 0 ? `前方 ${aheadCount.value} 辆` : '前方暂无来车'
 })
 
-const modeLabel = computed(() => (props.mode === 'morning'
-  ? '🏠 上班'
-  : props.mode === 'evening' ? '🏢 下班' : '📍 附近'))
+const modeLabel = computed(() => (props.mode === 'morning' || props.mode === 'evening'
+  ? shortPurposeTextOf(props.mode)
+  : '📍 附近'))
 
 /**
    * 首行的 F1 参考，或 null。

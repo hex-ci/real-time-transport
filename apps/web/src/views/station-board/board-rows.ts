@@ -1,6 +1,7 @@
-import type { CongestionLevel, StationBoard, StationBoardLine } from '@real-time-transport/shared'
-import { arrivalMinutes } from '@real-time-transport/shared'
+import type { CongestionLevel, StationBoard, StationBoardLine, UserFavoriteLine } from '@real-time-transport/shared'
+import { arrivalMinutes, effectiveCommuteDirection } from '@real-time-transport/shared'
 import { distanceTextOf } from '@/distance-copy'
+import { detailHrefOf } from '@/line-detail-href'
 
 /**
  * 电子站牌屏上的一行：**一条线路的一个方向**。
@@ -12,6 +13,16 @@ export interface BoardRow {
   lineName: string
   destination: string
   isSubway: boolean
+  /** 这一行的详情页地址：点进去看这条线路这个方向的全线站牌。 */
+  detailHref: string
+  /**
+   * 这一行服务哪几腿通勤；不是关注线路、或方向没配过时为空数组。
+   *
+   * 它与「线路自己的静态事实」不是一类：线路的静态事实（总站数、下一站名）不随车走也不随人走，
+   * 故不上屏；而「这个方向是我上班要坐的那一个」是关于**使用者**的事实，正是他要挑行时用的。
+   * 这里只存「哪一腿」——措辞与色调由 `purpose-badge` 一处给出（与详情页头部同一套）。
+   */
+  commutePurposes: Array<'morning' | 'evening'>
   /** 最快那班的剩余分钟（`0` 即正进站）；没有在途车时为 null。 */
   etaMinutes: number | null
   /** 最快那班的到站钟点（本地 `HH:mm`），来自数据源给的绝对时刻。 */
@@ -57,7 +68,31 @@ function clockOf(epochMs: number): string {
  * 两者都没有的最后；同一档内按线路名稳定排序 —— 故每 12 秒的重读不会让行随意跳位
  * （数据源没给新东西时，屏上的次序保持不变）。
  */
-export function boardRowsOf(board: StationBoard): BoardRow[] {
+/**
+ * 这一行服务哪几腿通勤。
+ *
+ * 判据只有一条：使用者自己存下来的方向选择（关注线路上的 `morningDirection` / `eveningDirection`，
+ * 见 `effectiveCommuteDirection`）。线路按**它自己的 lineId** 对上 —— 同一条线的两个方向是两个不同的
+ * lineId，故对得上哪一条就知道是哪个方向，不靠行自己的 `direction` 字段去猜。
+ * 不是关注线路、或那个方向没配过时什么都不标：绝不替使用者声明一个他没选过的方向。
+ */
+export function commutePurposesOf(lineId: string, favorites: UserFavoriteLine[]): Array<'morning' | 'evening'> {
+  const purposes: Array<'morning' | 'evening'> = []
+  for (const favorite of favorites) {
+    const direction = lineId === favorite.lineId
+      ? 0
+      : (favorite.reverseLineId && lineId === favorite.reverseLineId ? 1 : null)
+    if (direction === null) continue
+    for (const purpose of ['morning', 'evening'] as const) {
+      if (effectiveCommuteDirection(favorite, purpose) === direction && !purposes.includes(purpose)) {
+        purposes.push(purpose)
+      }
+    }
+  }
+  return purposes
+}
+
+export function boardRowsOf(board: StationBoard, cityCode: string, favorites: UserFavoriteLine[] = []): BoardRow[] {
   const rows = board.lines.map((line: StationBoardLine): BoardRow => {
     const [first, ...later] = line.arrivals
     return {
@@ -65,6 +100,8 @@ export function boardRowsOf(board: StationBoard): BoardRow[] {
       lineName: line.lineName,
       destination: line.destination,
       isSubway: line.isSubway,
+      detailHref: detailHrefOf(line.lineId, line.direction === 1 ? 1 : 0, cityCode),
+      commutePurposes: commutePurposesOf(line.lineId, favorites),
       etaMinutes: first ? arrivalMinutes(first.remainSeconds) : null,
       firstArrivalClock: first ? clockOf(first.arriveAt) : null,
       laterMinutes: later.map(arrival => arrivalMinutes(arrival.remainSeconds)),

@@ -28,6 +28,7 @@ import {
   resolveNearbyStop,
 } from '@real-time-transport/shared/line-group'
 import type { ReadState } from '@/read-state'
+import { detailHrefOf } from '@/line-detail-href'
 
 const transitStore = useTransitStore()
 const locationStore = useLocationStore()
@@ -470,7 +471,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         rows,
         legState: null,
         primaryDirection,
-        detailHref: detailHrefOf(rows[0]?.lineId ?? f.lineId, rows[0]?.direction ?? 0),
+        detailHref: detailHrefOf(rows[0]?.lineId ?? f.lineId, rows[0]?.direction ?? 0, cityStore.currentCode),
         favoriteId: f.id ?? null,
       })
       continue
@@ -497,7 +498,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
         rows: [],
         legState: commuteLegStateOf({ direction: null, stop: boardStop, stops: undefined }),
         primaryDirection: null,
-        detailHref: detailHrefOf(f.lineId, (f.preferredDirection === 1 ? 1 : 0) as 0 | 1),
+        detailHref: detailHrefOf(f.lineId, (f.preferredDirection === 1 ? 1 : 0) as 0 | 1, cityStore.currentCode),
         favoriteId: f.id ?? null,
       })
       continue
@@ -528,7 +529,7 @@ const cardsData = computed<MiniCardConfig[]>(() => {
       // 通勤卡片只有一行，所以领起的就是那一行，无论如何。
       primaryDirection: null,
       // 方向在这里是选了的，但上车点可能未设：回退到该方向自己的 lineId，使卡片两种情况都点得动。
-      detailHref: detailHrefOf(resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId, direction),
+      detailHref: detailHrefOf(resolveFavoriteLineId(f, direction) ?? detail?.lineId ?? f.lineId, direction, cityStore.currentCode),
       favoriteId: f.id ?? null,
     })
   }
@@ -630,20 +631,6 @@ async function refreshAllArrivals(): Promise<void> {
   // 把正在跑的 move 掐掉。丢的这一轮不补 —— 10 秒后下一次轮询会带上最新值。
   if (pinningFavoriteId.value !== null) return
   arrivalsMap.value = nextMap
-}
-
-/**
- * 卡片主体作为链接指向的线路详情地址。
- *
- * 一条线路的详情地址由「线路 id + 方向 + 城市」三件事决定，而它们都在这里定：线路 id 与方向
- * 来自卡片自己那一段通勤（没配好时回退到关注行的锚点），城市取当下选中的那个。
- */
-function detailHrefOf(lineId: string, direction: 0 | 1): string {
-  const qs = new URLSearchParams({
-    direction: String(direction),
-    cityCode: cityStore.currentCode,
-  })
-  return `/line/${encodeURIComponent(lineId)}?${qs.toString()}`
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   click,
   memoryStorage,
   mountComponent,
+  RouterLinkStub,
   type MountedHost,
   type Route,
 } from '@/__tests__/views/settings/settings-harness'
@@ -154,7 +155,7 @@ async function mountBoard(): Promise<MountedHost> {
   stub.deviceFix.value = { ...DEVICE }
   stub.userCoords.value = { ...DEVICE }
   stub.accuracyM.value = null
-  const host = await mountComponent(StationBoardPage, { routes: routes() })
+  const host = await mountComponent(StationBoardPage, { routes: routes(), components: { RouterLink: RouterLinkStub } })
   await host.flush()
   return host
 }
@@ -189,7 +190,7 @@ describe('挂载时就开始定位', () => {
     stub.userCoords.value = null
     const storage = memoryStorage()
     storage.setItem('rt-transit-station-board-station', JSON.stringify({ '027': '010-00002' }))
-    const host = await mountComponent(StationBoardPage, { routes: routes(), storage })
+    const host = await mountComponent(StationBoardPage, { routes: routes(), storage, components: { RouterLink: RouterLinkStub } })
     await host.flush()
 
     stub.requestLocation.mockClear()

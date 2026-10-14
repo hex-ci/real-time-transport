@@ -23,3 +23,23 @@ export function purposeBadgeOf(purpose: 'morning' | 'evening' | null): PurposeBa
   if (purpose === null) return null
   return BADGES[purpose]
 }
+
+/** 窄处的短说法（首页卡片的标签、电子站牌行里那三个字）：同一件事的字数不同，指的不是两件事。 */
+const SHORT: Record<'morning' | 'evening', string> = {
+  morning: '🏠 上班',
+  evening: '🏢 下班',
+}
+
+export function shortPurposeTextOf(purpose: 'morning' | 'evening'): string {
+  return SHORT[purpose]
+}
+
+/** 只有字的那种（电子站牌行里那句灰字）：比短说法更轻，因为它跟着终点站，不该抢戏。 */
+const PLAIN: Record<'morning' | 'evening', string> = {
+  morning: '上班',
+  evening: '下班',
+}
+
+export function plainPurposeTextOf(purpose: 'morning' | 'evening'): string {
+  return PLAIN[purpose]
+}

@@ -28,8 +28,12 @@ const PANEL_COUNT = `JSON.stringify(document.querySelectorAll('[role=listbox]').
 const HIGHLIGHTED = `JSON.stringify([...document.querySelectorAll('[role=option][data-highlighted]')].map(el => el.innerText.trim()))`
 const focusTrigger = `(() => { const el = document.querySelector('${TRIGGER}'); el.focus(); return document.activeElement === el })()`
 
-/** 屏幕上的行：每一行都带「开往」。 */
-const ROW_TEXTS = `JSON.stringify([...document.querySelectorAll('main div[class*=divide-y] > div')]
+/**
+ * 屏幕上的行：每一行都带「开往」。
+ *
+ * 行本身是一个去详情页的链接（`<a>`），故这里不写死标签名 —— 写 `> *` 取那一层的直接子元素。
+ */
+const ROW_TEXTS = `JSON.stringify([...document.querySelectorAll('main div[class*=divide-y] > *')]
   .filter(row => row.innerText.includes('开往'))
   .map(row => row.innerText))`
 

@@ -138,8 +138,8 @@ describeEachStore('F1 · 参考行与到站读数', (store) => {
     const res = await api.inject({ method: 'GET', url: stationArrivalsUrl(line.lineId) })
     expect(res.statusCode, res.body).toBe(200)
     const row = arrivalsOf(res)[0]!
-    // 车确实在途：观测到的东西照常给出。
-    expect(row).toMatchObject({ busId: 'no-eta', stopsAway: 1 })
+    // 车确实在途：观测到的东西照常给出。它的下一站就是本站，故站数是 0。
+    expect(row).toMatchObject({ busId: 'no-eta', stopsAway: 0 })
     // 分钟没有任何来源发布或建模：这一行不给数字，也不给一个「0 分」。
     expect(Object.hasOwn(row, 'etaSeconds')).toBe(false)
     expect(Object.hasOwn(row, 'time')).toBe(false)

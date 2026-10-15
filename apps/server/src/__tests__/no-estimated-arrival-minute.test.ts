@@ -100,6 +100,7 @@ describe('an extrapolated arrival minute is not stated', () => {
       // 车本身照旧报出来 —— 它确实在路上，
       // 这一行说的是关于它确实观测到的东西。
       expect(row.busId).toBe('b1')
+      // 车头正开向第 2 站，目标 3 站：中间隔着一站（2），故是 1 站。
       expect(row.stopsAway).toBe(1)
       expect(row.isAtStation).toBeUndefined()
     }

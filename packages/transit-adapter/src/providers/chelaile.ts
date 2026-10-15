@@ -590,11 +590,15 @@ export class ChelaileProvider implements ITransitProvider {
 
       const rawBuses = data.buses || []
       const rawStations = data.stations || []
-      // 轻量接口不带站表：总站数按「响应自带 → getLineDetail 缓存 → 兜底 1」取。
-      // 只用于钳制 nextOrder 不越界，取不到时宁可保守（1）也不编造。
-      const totalStations = rawStations.length
-        || this.stationCountCache.get(`${cityId}_${lineId}`)
-        || 1
+      // 轻量接口不带站表：总站数按「响应自带 → getLineDetail 缓存」取，**取不到时不封顶**。
+      //
+      // 封顶只防上游报出越过终点的站序，故它需要一个真的总站数；兜底成 1 不是「保守」而是
+      // 编造：它把 `nextOrder` 压成 1，于是定向读数（`targetOrder`）里每辆车都变成
+      // 「距目标站 = 目标站序 − 1」（实测：目标 13 站时三辆车全报 12 站，而它们分别距
+      // 141 m / 1.4 km / 3.8 km），并且 `nextOrder > targetOrder` 这个「已过站」判据永不成立。
+      // 定向读数的上游响应正是不带站表的那种，而静态详情常由库缓存作答、走不到这里的
+      // `getLineDetail`，所以这条路径上总站数经常是取不到的。
+      const knownStations = rawStations.length || this.stationCountCache.get(`${cityId}_${lineId}`)
 
       // 上游没答出这条线路：载荷里没有身份（见 `holdsLineRecord`），也没有
       // 车辆。这里没有一样是读数，而据此回 `{buses: []}` 会让「这条线路
@@ -610,7 +614,8 @@ export class ChelaileProvider implements ITransitProvider {
       // 轻量载荷传 undefined，让 fetchRouteGeometry 按缓存未命中走全量获取，
       // 否则会被误判为"线路无轨迹"而写负缓存，永久关掉这条线的道路几何。
       const fullDetail = data.jxPath || data.line?.jxPath ? data : undefined
-      const geom = await this.fetchRouteGeometry(cityId, lineId, totalStations, fullDetail)
+      // 几何那边只用它当长度阈值（判断标记点是否覆盖全程），未知时按 1 传与从前一致。
+      const geom = await this.fetchRouteGeometry(cityId, lineId, knownStations ?? 1, fullDetail)
       const routeLen = geom?.routeLengthMeters
       const sd = geom?.stationDistances
 
@@ -627,7 +632,7 @@ export class ChelaileProvider implements ITransitProvider {
         // 按车来了的线上协议，b.order 是车辆正前往的下一站，所以它刚
         // 经过的那一站是 orderNum - 1。
         const order = hasOrder ? Math.max(1, orderNum - 1) : undefined
-        const nextOrder = hasOrder ? Math.min(totalStations, orderNum) : undefined
+        const nextOrder = hasOrder && knownStations ? Math.min(knownStations, orderNum) : (hasOrder ? orderNum : undefined)
 
         const hasDist = Number.isFinite(distNum) && distNum >= 0
         // -1 是车来了「已过目标站」的哨兵值，原样透传，使到达接口

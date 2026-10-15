@@ -101,7 +101,8 @@ describeEachStore('F4 · 来源标记', (store) => {
     const rows = (await arrivalsOf(line.lineId)).arrivals
     expect(rows).toHaveLength(1)
     // 行仍然在，但没有数字可标记：来源为 null，绝不是 live。
-    expect(rows[0]!.stopsAway).toBe(1)
+    // 站数照旧给出：这辆车的下一站就是本站，故是 0（屏上说「即将到站」）。
+    expect(rows[0]!.stopsAway).toBe(0)
     expect(Object.hasOwn(rows[0]!, 'etaSeconds')).toBe(false)
     expect(rows[0]!.provenance).toBeNull()
   })

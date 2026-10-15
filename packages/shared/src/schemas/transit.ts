@@ -150,6 +150,7 @@ export type OperatingStatus = z.infer<typeof OperatingStatusSchema>
 export const ArrivalRowSchema = z.object({
   time: z.string().optional(),
   etaSeconds: z.number().min(0).optional(),
+  /** 车辆当前位置与本站之间还隔着几个站台：**下一站就是本站时是 0**（屏上说「即将到站」）。 */
   stopsAway: z.number().int().min(0).optional(),
   distanceMeters: z.number().min(0).optional(),
   isAtStation: z.boolean().optional(),

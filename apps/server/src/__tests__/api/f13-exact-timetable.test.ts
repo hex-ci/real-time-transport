@@ -158,8 +158,9 @@ describeEachStore('F13 精确时刻表优先于推演', (store) => {
       expect(isMultiple, `整线耗时 ${bus.travelTimeSec} 不是每站 135 秒的刻度`).toBe(true)
     }
 
-    // 再看站台那一面：引擎给每一行的是「到目标站还要几站 × 135 秒」，故分钟数严格落在
-    // （剩余站数 × 135, (剩余站数 + 1) × 135] 之内 —— 两侧都紧，换个每站秒数就出界。
+    // 再看站台那一面：引擎给每一行的是「到目标站还要几站 × 135 秒」，而屏上那个「站数」是
+    // 车头到本站之间的站台数（下一站就是本站时是 0），故分钟数严格落在
+    // （站数 × 135, (站数 + 1) × 135] 之内 —— 两侧都紧，换个每站秒数就出界。
     const data = await arrivalsOf(UNTRANSCRIBED, 0, 4)
     expect(data.arrivals.length).toBeGreaterThan(0)
 

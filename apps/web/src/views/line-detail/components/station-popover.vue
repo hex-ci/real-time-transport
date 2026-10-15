@@ -13,6 +13,7 @@ import { statedArrivalMinutes } from '@real-time-transport/shared'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { arrivalListProvenanceOf, arrivalRowProvenanceOf } from '../provenance'
+import { stopsTagTextOf } from '../stops-text'
 import type { StationAnchor } from '../types'
 
 const props = defineProps<{
@@ -212,7 +213,7 @@ const decisionStyle = computed(() => {
                   <span v-if="!a.isAtStation" class="ml-1 text-xs text-slate-400">{{ statedArrivalMinutes(a) }}分</span>
                 </template>
                 <template v-else>{{ ARRIVAL_MINUTE_UNAVAILABLE_TEXT }}</template>
-                <span v-if="a.stopsAway" class="ml-1 text-xs text-slate-400">({{ a.stopsAway }}站)</span>
+                <span v-if="!a.isAtStation && stopsTagTextOf(a.stopsAway)" class="ml-1 text-xs text-slate-400">{{ stopsTagTextOf(a.stopsAway) }}</span>
                 <!-- 同一个列表里来源不同：每一行自己说话——且只对陈述了数字的行说。
                      在本站的行是关于车在哪里的观测，没有分钟可供标记限定。 -->
                 <span v-if="!a.isAtStation && rowMarkOf(i)" class="ml-1 text-xs text-slate-400">{{ rowMarkOf(i) }}</span>

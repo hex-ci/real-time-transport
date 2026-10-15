@@ -55,6 +55,7 @@ import {
   operatingStatusOf,
   statedArrivalMinutes,
   statedCoordinate,
+  stopsAwayOf,
   vehicleProvenanceOf,
 } from '@real-time-transport/shared'
 import type {
@@ -985,8 +986,8 @@ export class TransitService {
         continue
       }
 
-      // 车正在接近：stopsAway 是从 nextOrder 到 target 的完整跳数。
-      const stopsAway = Math.max(1, targetOrder - (b.nextOrder ?? b.order))
+      // 车正在接近：几站 = 从车刚经过的那一站数起（规则在 `stopsAwayOf` 一处，前端回退分支同调它）。
+      const stopsAway = stopsAwayOf({ targetOrder, order: b.order, nextOrder: b.nextOrder })
       const distanceMeters = b.distanceToWaitStn && b.distanceToWaitStn > 0 ? b.distanceToWaitStn : undefined
 
       /**

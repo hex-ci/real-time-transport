@@ -81,7 +81,8 @@ describeEachStore('零假数据：上游不给分钟就不出现分钟字段', (
     expect(rows, 'the vehicle in transit should still be a row').toHaveLength(1)
     const row = rows[0]!
     expect(row.busId, 'the row must still name the vehicle it observed').toBe('b-silent')
-    expect(row.stopsAway, 'the observation it did make travels with it').toBe(1)
+    // 下一站就是本站 → 0 站（这与「没有分钟」是两件事：车在哪、还隔几站，都是观测）。
+    expect(row.stopsAway, 'the observation it did make travels with it').toBe(0)
 
     // 键本身不存在 —— 不是 0，也不是 null：那两种都是「一个可以照着用的分钟」。
     expect('etaSeconds' in row, 'a minute nobody published was served').toBe(false)

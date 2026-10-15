@@ -134,7 +134,7 @@ describe('station count without stations in the light payload', () => {
     expect(status?.buses[0]?.nextOrder).toBe(2)
   })
 
-  it('falls back to 1 when neither the payload nor the cache has a station count', async () => {
+  it('keeps the upstream order when neither the payload nor the cache has a station count', async () => {
     stubEndpoints({
       encryptedBusDetail: () => envelope(LIGHT_PAYLOAD),
       encryptedLineDetail: () => envelope(FULL_PAYLOAD),
@@ -143,7 +143,10 @@ describe('station count without stations in the light payload', () => {
     // 没调过 getLineDetail：缓存是空的
     const status = await new ChelaileProvider().getLiveStatus('line_913', 0, '027')
 
-    expect(status?.buses[0]?.nextOrder).toBe(1)
+    // 取不到总站数时**不封顶**。兜底成 1 不是保守而是编造：它把每辆车都说成
+    // 「下一站是第 1 站」，定向读数里于是每辆车都报「距目标站 = 目标站序 − 1」，
+    // 而「已过目标站」（`nextOrder > targetOrder`）这个判据永不成立。
+    expect(status?.buses[0]?.nextOrder).toBe(18)
   })
 })
 

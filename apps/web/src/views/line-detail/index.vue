@@ -43,7 +43,8 @@ import {
 import type { DirectionOption } from './types'
 import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@real-time-transport/shared'
 import { effectiveCommuteDirection, favoriteDirectionOfLine } from '@real-time-transport/shared/line-group'
-import { statedArrivalMinutes, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { statedArrivalMinutes, stopsAwayOf, vehicleProvenanceOf } from '@real-time-transport/shared'
+import { stopsTextOf } from './stops-text'
 import { NEARBY_RADIUS_M, haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
@@ -565,9 +566,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
     if (next.provenance === 'exact_timetable') {
       return { text: `${next.time} 到站 (约 ${mins} 分钟)`, mark }
     }
-    const stopsText = next.stopsAway
-      ? (next.stopsAway === 1 ? '即将进站 (1 站)' : `距本站 ${next.stopsAway} 站`)
-      : ''
+    const stopsText = stopsTextOf(next.stopsAway)
     const distText = next.distanceMeters && next.distanceMeters > 0
       ? ` · ${(next.distanceMeters / 1000).toFixed(1)}km`
       : ''
@@ -615,12 +614,14 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
   const allBuses = currentLiveStatus.value.buses
   if (allBuses.length === 0) return { text: '线路上暂无在途车辆', mark: null }
 
+  // 离本站最近的那一辆 = 站序最大的那一辆（与服务端一致：它按剩余站数升序排，第一行就是最近的那辆）。
+  // 这里曾按站序**升序**取第一辆，取到的是最远的那辆 —— 服务端报「最近 2 站」而回退报「9 站」。
   const upcoming = allBuses
     .filter((b) => {
       const next = b.nextOrder ?? (b.order !== undefined ? b.order + 1 : undefined)
       return next !== undefined && next <= targetOrder
     })
-    .sort((a, b) => ((a.nextOrder ?? a.order)!) - ((b.nextOrder ?? b.order)!))
+    .sort((a, b) => ((b.nextOrder ?? b.order)!) - ((a.nextOrder ?? a.order)!))
 
   if (upcoming.length === 0) {
     const passed = allBuses.filter((b) => {
@@ -639,8 +640,17 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
   }
 
   const bus = upcoming[0]!
-  const stops = Math.max(1, targetOrder - (bus.nextOrder ?? (bus.order as number)))
-  const stopsText = stops === 1 ? '即将进站 (1 站)' : `距本站 ${stops} 站`
+  // 最近那辆车已经停在本站时，这是关于「车在哪」的观测，不是数字 —— 与服务端同一条规则
+  // （服务端把它做成 `isAtStation` 行，头条因此说在站那一句）。回退分支曾漏掉这一判，
+  // 于是同一辆车在服务端是在站文案、在这里却报出一个站数。
+  if (isBusAtPlatform(bus, targetOrder)) {
+    return { text: AT_PLATFORM_ETA_TEXT, mark: null }
+  }
+
+  // 与服务端同一条规则（`stopsAwayOf`）：这个回退分支曾自己算一遍，用的还是从车头数的那种算法，
+  // 于是同一个距离在服务端的到站行里是 2 站、在这里是 1 站。
+  const stops = stopsAwayOf({ targetOrder, order: bus.order, nextOrder: bus.nextOrder })
+  const stopsText = stopsTextOf(stops)
 
   if (isSubway.value) {
     const progress = typeof bus.progress === 'number' ? bus.progress : 0

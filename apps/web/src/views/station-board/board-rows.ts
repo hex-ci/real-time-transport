@@ -23,10 +23,17 @@ export interface BoardRow {
    * 这里只存「哪一腿」——措辞与色调由 `purpose-badge` 一处给出（与详情页头部同一套）。
    */
   commutePurposes: Array<'morning' | 'evening'>
-  /** 最快那班的剩余分钟（`0` 即正进站）；没有在途车时为 null。 */
+  /** 最快那班的剩余分钟（`0` 即正进站）；那一班没有时刻读数时为 null（此时看 `stopsAway`）。 */
   etaMinutes: number | null
   /** 最快那班的到站钟点（本地 `HH:mm`），来自数据源给的绝对时刻。 */
   firstArrivalClock: string | null
+  /**
+   * 最快那班的剩余站数（`0` 即车头已到本站，屏上说「即将到站」）；那辆车没带这个读数时为 null。
+   *
+   * 它只在**没有分钟**时上屏：远车没有时刻预测，站数是它当家的一条读数；有分钟的行由分钟
+   * 做主答案（分钟答「来得及吗」），站数不上屏。
+   */
+  stopsAway: number | null
   /** 后面几班的剩余分钟与钟点，按到站先后。 */
   laterMinutes: number[]
   laterClocks: string[]
@@ -64,8 +71,9 @@ function clockOf(epochMs: number): string {
  * 之后不随页面停留而改写 —— 这批数字的年龄由「最后更新」那一行披露，而那正是它该被读的地方。
  * 让数字自己走，等于让一个没人重读过的读数假装它还新鲜。
  *
- * 排序就是「哪趟先来」这件事本身：有车的按最快那班升序排在前，只有发车间隔预报的其次，
- * 两者都没有的最后；同一档内按线路名稳定排序 —— 故每 12 秒的重读不会让行随意跳位
+ * 排序就是「哪趟先来」这件事本身：有分钟的最快班升序在前，没有分钟但有站数的紧跟其后
+ * （按站数升序 —— 站数是它们唯一的时间次序），只有发车间隔预报的其次，两者都没有的最后；
+ * 同一档内按线路名稳定排序 —— 故每 12 秒的重读不会让行随意跳位
  * （数据源没给新东西时，屏上的次序保持不变）。
  */
 /**
@@ -102,10 +110,11 @@ export function boardRowsOf(board: StationBoard, cityCode: string, favorites: Us
       isSubway: line.isSubway,
       detailHref: detailHrefOf(line.lineId, line.direction === 1 ? 1 : 0, cityCode),
       commutePurposes: commutePurposesOf(line.lineId, favorites),
-      etaMinutes: first ? arrivalMinutes(first.remainSeconds) : null,
-      firstArrivalClock: first ? clockOf(first.arriveAt) : null,
-      laterMinutes: later.map(arrival => arrivalMinutes(arrival.remainSeconds)),
-      laterClocks: later.map(arrival => clockOf(arrival.arriveAt)),
+      etaMinutes: first?.remainSeconds != null ? arrivalMinutes(first.remainSeconds) : null,
+      firstArrivalClock: first?.arriveAt != null ? clockOf(first.arriveAt) : null,
+      stopsAway: first?.stopsAway ?? null,
+      laterMinutes: later.flatMap(arrival => arrival.remainSeconds != null ? [arrivalMinutes(arrival.remainSeconds)] : []),
+      laterClocks: later.flatMap(arrival => arrival.arriveAt != null ? [clockOf(arrival.arriveAt)] : []),
       congestion: first ? first.congestion : 'unknown',
       tags: first ? first.tags : [],
       distanceToStationMeters: distanceToStationOf(line),
@@ -126,20 +135,30 @@ function distanceToStationOf(line: StationBoardLine): number | null {
 function compareBoardRows(a: BoardRow, b: BoardRow): number {
   const rank = (row: BoardRow): number => {
     if (row.etaMinutes !== null) return 0
-    if (row.intervalForecast) return 1
-    return 2
+    if (row.stopsAway !== null) return 1
+    if (row.intervalForecast) return 2
+    return 3
   }
   if (rank(a) !== rank(b)) return rank(a) - rank(b)
   if (a.etaMinutes !== null && b.etaMinutes !== null && a.etaMinutes !== b.etaMinutes) {
     return a.etaMinutes - b.etaMinutes
   }
+  if (a.stopsAway !== null && b.stopsAway !== null && a.stopsAway !== b.stopsAway) {
+    return a.stopsAway - b.stopsAway
+  }
   return a.lineName.localeCompare(b.lineName)
 }
 
-/** 最快那班怎么说；没有车时 null —— 「没有这一行」由调用方决定说什么。 */
+/**
+ * 最快那班怎么说：有时刻说分钟，没有时刻但有站数说站数（0 站说「即将到站」）；两样都没有时 null
+ * ——「没有这一行」由调用方决定说什么。
+ *
+ * 两种读数各自照数据源说的上屏，绝不互算：没有时刻的车不编一个时刻出来，反之亦然。
+ */
 export function etaTextOf(row: BoardRow): string | null {
-  if (row.etaMinutes === null) return null
-  return row.etaMinutes === 0 ? '正进站' : `还有 ${row.etaMinutes} 分钟`
+  if (row.etaMinutes !== null) return row.etaMinutes === 0 ? '正进站' : `还有 ${row.etaMinutes} 分钟`
+  if (row.stopsAway !== null) return row.stopsAway <= 0 ? '即将到站' : `还有 ${row.stopsAway} 站`
+  return null
 }
 
 /**
@@ -176,7 +195,7 @@ export function serviceTextOf(row: BoardRow): string | null {
  * 「今天已收班」与「这一段还没发车」对等车的人是两件事，故首末班绝不缺席。
  */
 export function quietTextOf(row: BoardRow): string | null {
-  if (row.etaMinutes !== null || row.intervalForecast) return null
+  if (row.etaMinutes !== null || row.stopsAway !== null || row.intervalForecast) return null
   return '暂无到站信息'
 }
 

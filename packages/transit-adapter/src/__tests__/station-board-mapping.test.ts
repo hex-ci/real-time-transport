@@ -92,8 +92,8 @@ describe('同一条线的两个方向各占一行', () => {
   })
 })
 
-describe('在途车：上游给了时刻才算一辆车', () => {
-  it('每辆车的剩余秒数由读取时刻算出，按到站先后升序', () => {
+describe('在途车：至少带一份读数（到站时刻或站数）才算一辆车', () => {
+  it('有时刻的车：剩余秒数由读取时刻算出，按到站先后升序', () => {
     const lines = stationBoardLinesOf(payloadOf([
       lineOf({
         lineId: 'A1',
@@ -111,12 +111,76 @@ describe('在途车：上游给了时刻才算一辆车', () => {
     ])
   })
 
-  it('没有到站时刻的车不进列表：一辆车要么有时刻，要么不存在', () => {
+  it('没有时刻但有站数的车照常成行：站数是它自己的读数', () => {
     const lines = stationBoardLinesOf(payloadOf([
-      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', arrivalTime: 0 }, { busId: 'b2' }] }),
+      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', value: 7, distanceToDest: 4341 }] }),
+    ]), READ_AT)
+
+    expect(lines[0]!.arrivals).toEqual([{
+      busId: 'b1',
+      arriveAt: null,
+      remainSeconds: null,
+      stopsAway: 7,
+      distanceToStationMeters: 4341,
+      congestion: 'unknown',
+      tags: [],
+    }])
+  })
+
+  it('两样读数都没有的车不成行：它没有说过任何关于自己的话', () => {
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', arrivalTime: 0 }, { busId: 'b2' }, { busId: 'b3', value: -1 }] }),
     ]), READ_AT)
 
     expect(lines[0]!.arrivals).toEqual([])
+  })
+
+  it('站数的 -1 哨兵不是 0 站：非负数才算量到过', () => {
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', arrivalTime: READ_AT + 60_000, value: -1 }] }),
+    ]), READ_AT)
+
+    expect(lines[0]!.arrivals[0]!.stopsAway).toBeNull()
+  })
+
+  it('两种读数并排时的次序：有时刻的按到站先后在前，没有时刻的按站数升序跟在后面', () => {
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({
+        lineId: 'A1',
+        name: '101',
+        states: [
+          { busId: 'far', value: 16 },
+          { busId: 'near', arrivalTime: READ_AT + 120_000 },
+          { busId: 'mid', value: 7 },
+        ],
+      }),
+    ]), READ_AT)
+
+    expect(lines[0]!.arrivals.map(arrival => arrival.busId)).toEqual(['near', 'mid', 'far'])
+  })
+
+  it('有时刻的车也带着站数：同一份读数里的两个字段各归各', () => {
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', arrivalTime: READ_AT + 60_000, value: 0 }] }),
+    ]), READ_AT)
+
+    expect(lines[0]!.arrivals[0]).toMatchObject({ stopsAway: 0, remainSeconds: 60 })
+  })
+
+  it('一辆车一条记录的字段集合是钉住的：两种读数各占自己的格', () => {
+    const lines = stationBoardLinesOf(payloadOf([
+      lineOf({ lineId: 'A1', name: '101', states: [{ busId: 'b1', arrivalTime: READ_AT + 60_000, value: 2 }] }),
+    ]), READ_AT)
+
+    expect(Object.keys(lines[0]!.arrivals[0]!).sort()).toEqual([
+      'arriveAt',
+      'busId',
+      'congestion',
+      'distanceToStationMeters',
+      'remainSeconds',
+      'stopsAway',
+      'tags',
+    ])
   })
 
   it('拥挤度与车辆标签取自这辆车自己的标签：拥挤度由芯片陈述，不混进标签里', () => {

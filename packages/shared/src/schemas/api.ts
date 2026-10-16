@@ -520,20 +520,30 @@ export const RefreshLiveResultSchema = z.object({
 export type RefreshLiveResult = z.infer<typeof RefreshLiveResultSchema>
 
 /**
- * 站台上的一辆车：上游给的**绝对到站时刻**（epoch 毫秒），以及服务端读取那一刻由它算出的剩余秒数。
+ * 站台上的一辆车：上游给的**绝对到站时刻**（epoch 毫秒）与「还有几站」，以及服务端读取那一刻
+ * 由时刻算出的剩余秒数。
  *
- * 两个都带着，因为它们回答两件事：`arriveAt` 是上游的事实，`remainSeconds` 是把它减掉读取时刻
- * 的一次算术（读数是活的，而两个时刻分别是上游的钟与服务端的钟，调用方不该拿自己的钟去减）。
- * `remainSeconds` 因此是**读数的一部分**，不是估计：它随这条读数一起过期，绝不独立重算。
+ * `arriveAt`/`remainSeconds` 与 `stopsAway` 是两种读数，上游给哪份就带哪份：远车没有时刻预测
+ * （`arrivalTime`/`travelTime` 都是 -1），但它的站数照给 —— 一辆车**至少带一份读数**才成行，
+ * 两样都没有的才不成行（它没有说过任何关于自己的话）。
+ * `remainSeconds` 是 `arriveAt` 减掉读取时刻的一次算术（读数是活的，而两个时刻分别是上游的钟
+ * 与服务端的钟，调用方不该拿自己的钟去减）。它因此是**读数的一部分**，不是估计：随这条读数一起
+ * 过期，绝不独立重算。
  *
- * 没有时刻的车辆（上游给不出到站时刻）不在这份列表里 —— 一辆车要么有上游给的时刻，要么不存在。
- * 已经过去的那一班也不在：上游的应答里会留着它（`arrivalTime` 在过去、`travelTime` 为 -1），
+ * 已经过去的那一班不在：上游的应答里会留着它（`arrivalTime` 在过去、`travelTime` 为 -1），
  * 而按剩余秒数算它会落在 0 上、被读成「正进站」—— 一辆并不在那儿等你的车。
  */
 export const StationBoardArrivalSchema = z.object({
   busId: z.string(),
-  arriveAt: z.number(),
-  remainSeconds: z.number(),
+  /** 上游给的绝对到站时刻；远车没有时刻预测时为 null。 */
+  arriveAt: z.number().nullable(),
+  /** 由 `arriveAt` 与读取时刻算出；没有时刻时为 null。 */
+  remainSeconds: z.number().nullable(),
+  /**
+   * 车辆当前位置与本站之间还隔着几个站台：**下一站就是本站时是 0**（屏上说「即将到站」）。
+   * 上游没给这个读数时为 null（-1 是它的未给哨兵，不算数）。
+   */
+  stopsAway: z.number().int().min(0).nullable(),
   /**
    * 该车距**本站**还有多少米。上游按被查的那个目标作答：查站台时它就是到本站的距离
    * （同一份读数里 `travelTime` 与它同源，距离 ÷ 时间约为车速）。上游没给时为 null。

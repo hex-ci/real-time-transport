@@ -124,9 +124,11 @@ export async function run({ check, note }) {
   else {
     const boards = await receivedBoards()
     const minutes = rows.map(minutesOfRow).filter(minute => minute !== null)
-    // 每一行都必须说出点什么：有车说分钟，没车说预报或「暂无到站信息」—— 空行不算说了话。
-    const mute = rows.filter(row => minutesOfRow(row) === null && !/暂无到站信息|预报 /.test(row))
-    check('没有分钟的行也说出它的处境（预报或「暂无到站信息」），不留下空行', mute.length === 0, JSON.stringify(mute.slice(0, 2)))
+    // 每一行都必须说出点什么：有车说分钟或站数，没车说预报或「暂无到站信息」—— 空行不算说了话。
+    const mute = rows.filter(row => minutesOfRow(row) === null && !/暂无到站信息|预报 |还有\s*\d+\s*站|即将到站/.test(row))
+    check('没有分钟的行也说出它的处境（站数、预报或「暂无到站信息」），不留下空行', mute.length === 0, JSON.stringify(mute.slice(0, 2)))
+    const stationsRows = rows.filter(row => /还有\s*\d+\s*站/.test(row)).length
+    if (stationsRows > 0) note(`其中 ${stationsRows} 行没有时刻、由站数当家（「还有 N 站」）`)
     const ascending = minutes.every((minute, index) => index === 0 || minutes[index - 1] <= minute)
     check('按到站先后升序排列（哪趟先来就是这一屏的答案）', ascending, JSON.stringify(minutes))
     if (minutes.length === 0) note(`${rows.length} 行此刻都没有在途车（分钟与「距本站」的断言本次无从谈起）`)

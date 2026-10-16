@@ -118,10 +118,33 @@ describe('一屏站台读数的形状', () => {
     const forecastOnly = board.lines.find(line => line.lineName === '202路')!
 
     expect(withBus.arrivals).toHaveLength(1)
-    expect(withBus.arrivals[0]!.remainSeconds).toBeGreaterThan(0)
+    // 有时刻的车必带剩余秒数：null 是「没有时刻」那一支的形状，不该出现在这一条上。
+    expect(withBus.arrivals[0]!.remainSeconds ?? 0).toBeGreaterThan(0)
     expect(withBus.intervalForecast).toBeNull()
     expect(forecastOnly.arrivals).toEqual([])
     expect(forecastOnly.intervalForecast).toBe('16:41~16:51')
+  })
+
+  it('没有时刻但有站数的车照常下发：两样读数都没有的才不成行', async () => {
+    stubUpstream(stationBody([
+      lineOf({
+        lineId: '101',
+        name: '101路',
+        states: [
+          { busId: 'far', value: 7, distanceToDest: 4341 },
+          { busId: 'silent' },
+        ],
+      }),
+    ]))
+
+    const board = StationBoardSchema.parse((await readBoard(await app())).json().data)
+    expect(board.lines[0]!.arrivals).toHaveLength(1)
+    expect(board.lines[0]!.arrivals[0]).toMatchObject({
+      busId: 'far',
+      arriveAt: null,
+      remainSeconds: null,
+      stopsAway: 7,
+    })
   })
 
   it('这辆车距本站还有多少米照上游带上，-1 哨兵不编成 0 米', async () => {

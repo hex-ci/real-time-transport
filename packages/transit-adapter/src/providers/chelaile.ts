@@ -127,8 +127,9 @@ export function parseCongestion(tags?: ChelaileBusTag[]): CongestionLevel {
  * 位置是它今天碰巧的排布方式，身份才是它说的话。
  *
  * `readAt` 是这次读取从源取得数据的瞬间：每辆车的 `remainSeconds` 由它算出（读数是活的，
- * 而调用方不该拿自己的钟去减上游的钟）。上游给不出到站时刻的车不进这份列表：一辆车要么有
- * 时刻，要么不存在，绝不补一个 0 当「现在就到」。
+ * 而调用方不该拿自己的钟去减上游的钟）。一辆车**至少带一份读数**才成行：到站时刻，或「还有
+ * 几站」—— 远车没有时刻预测，但站数照给，那份读数不该丢。两样都没有的车不成行，也绝不
+ * 补一个 0 当「现在就到」。
  */
 /**
  * 站点详情要一个**非空**的 `lineId` 才返回「全站视图」：同名站牌两侧的并集，
@@ -158,11 +159,17 @@ export function stationBoardLinesOf(payload: any, readAt: number): StationBoardL
     const arrivals: StationBoardArrival[] = []
     for (const st of (Array.isArray(raw?.stnStates) ? raw.stnStates : [])) {
       const arriveAt = typeof st?.arrivalTime === 'number' && st.arrivalTime > 0 ? st.arrivalTime : null
-      if (arriveAt === null) continue
+      // 上游的「还有几站」：目标站序 − 车头站序（`value`）—— 与车来了自己的计数同值。
+      // -1 是未给的哨兵；它与到站时刻是两种读数：远车没有时刻预测，这个数照给。
+      const stopsAway = typeof st?.value === 'number' && Number.isInteger(st.value) && st.value >= 0
+        ? st.value
+        : null
+      // 两份读数都没有的车不成行：它没有说过任何关于自己的话。
+      if (arriveAt === null && stopsAway === null) continue
       // 已经过去的那一班：上游在应答里留着它（travelTime 为 -1、距离是几公里外的旧读数）。
       // 它的剩余秒数是负的，按 `arrivalMinutes` 会落在 0 上被读成「正进站」—— 一辆不在那儿的车。
       // 留 30 秒余量：上游算这批时刻先于我们的读时刻，一辆真的正进站的车按我们的钟看可能刚过去几秒。
-      if (arriveAt < readAt - 30_000) continue
+      if (arriveAt !== null && arriveAt < readAt - 30_000) continue
       const tags: string[] = (Array.isArray(st?.busTagList) ? st.busTagList : [])
         .map((tag: any) => (typeof tag?.title === 'string' ? tag.title : ''))
         // 拥挤度那几个词由芯片单独陈述：同一行里同一个事实说两遍，读者会以为那是两件事。
@@ -170,14 +177,22 @@ export function stationBoardLinesOf(payload: any, readAt: number): StationBoardL
       arrivals.push({
         busId: String(st?.busId ?? ''),
         arriveAt,
-        remainSeconds: Math.round((arriveAt - readAt) / 1000),
+        remainSeconds: arriveAt !== null ? Math.round((arriveAt - readAt) / 1000) : null,
+        stopsAway,
         // 上游按被查的目标作答：查站台时这个距离就是这辆车到本站还有多少米。
         distanceToStationMeters: measuredDistance(st?.distanceToDest),
         congestion: parseCongestion(st?.busTagList),
         tags,
       })
     }
-    arrivals.sort((a, b) => a.arriveAt - b.arriveAt)
+    // 有时刻的按到站先后升序在前；没有时刻的跟在后面，按站数升序 —— 站数小者先到。
+    arrivals.sort((a, b) => {
+      if (a.arriveAt !== null && b.arriveAt !== null) return a.arriveAt - b.arriveAt
+      if (a.arriveAt !== null) return -1
+      if (b.arriveAt !== null) return 1
+      // 走到这一支的两辆车都带着站数（上面已保证至少一份读数）。
+      return (a.stopsAway ?? 0) - (b.stopsAway ?? 0)
+    })
 
     lines.push({
       lineId,

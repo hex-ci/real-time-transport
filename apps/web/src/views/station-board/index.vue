@@ -608,7 +608,7 @@ function onSelectOption(option: ComboboxOption): void {
 
           <div class="flex items-center justify-end gap-3 text-right">
             <div class="font-mono">
-              <template v-if="row.etaMinutes !== null">
+              <template v-if="row.etaMinutes !== null || row.stopsAway !== null">
                 <span class="text-base font-bold text-cyan-400">{{ etaTextOf(row) }}</span>
               </template>
               <template v-else-if="forecastTextOf(row)">
@@ -622,7 +622,7 @@ function onSelectOption(option: ComboboxOption): void {
               </div>
             </div>
             <span
-              v-if="row.etaMinutes !== null"
+              v-if="row.etaMinutes !== null || row.stopsAway !== null"
               class="rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap lg:text-xs"
               :class="congestionChipClass(row.congestion)"
             >

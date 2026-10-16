@@ -15,8 +15,9 @@ import {
  * 电子站牌屏的行规则（PRD F5）。
  *
  * 这一屏要回答的问题只有一句：**这个站台上哪趟先来**。故本文件守四件事：
- *  - 排序就是那个答案本身（有车的按最快那班在前，只有发车间隔预报的其次，都没有的最后）；
- *  - 分钟与预报是两种东西，绝不互填；
+ *  - 排序就是那个答案本身（有分钟的按最快那班在前，只有站数的紧跟其后，只有发车间隔
+ *    预报的其次，都没有的最后）；
+ *  - 分钟与预报是两种东西，绝不互填；到站时刻与站数也是两种读数，各说各的、绝不互算；
  *  - 一行只陈述**这辆车**的事实（剩余分钟、距本站的距离、拥挤度、车辆标签）；线路自己的
  *    静态事实（总站数、本站序、下一站名）不进契约、也不在这屏上 —— 它们不随车走，
  *    说在这儿会被读成车辆状态；
@@ -48,6 +49,20 @@ function arrivalOf(busId: string, seconds: number, meters: number | null = null)
     busId,
     arriveAt: READ_AT + seconds * 1000,
     remainSeconds: seconds,
+    stopsAway: null,
+    distanceToStationMeters: meters,
+    congestion: 'unknown' as const,
+    tags: [],
+  }
+}
+
+/** 一辆**没有时刻**的车：数据源只给了「还有几站」，站数是它当家的一条读数。 */
+function untimedArrivalOf(busId: string, stopsAway: number, meters: number | null = null) {
+  return {
+    busId,
+    arriveAt: null,
+    remainSeconds: null,
+    stopsAway,
     distanceToStationMeters: meters,
     congestion: 'unknown' as const,
     tags: [],
@@ -118,15 +133,25 @@ describe('每行标出它服务哪一腿通勤', () => {
 })
 
 describe('排序：哪趟先来', () => {
-  it('有车的按最快那班升序在前，只有预报的其次，都没有的最后；同档按线路名', () => {
+  it('有分钟的按最快那班升序在前，只有站数的紧跟其后，只有预报的其次，都没有的最后；同档按线路名', () => {
     const rows = boardRowsOf(boardOf([
-      lineOf({ lineId: 'D', lineName: '404路' }),
-      lineOf({ lineId: 'C', lineName: '303路', intervalForecast: '16:41~16:51' }),
+      lineOf({ lineId: 'E', lineName: '505路' }),
+      lineOf({ lineId: 'D', lineName: '404路', intervalForecast: '16:41~16:51' }),
+      lineOf({ lineId: 'C', lineName: '303路', arrivals: [untimedArrivalOf('c1', 7)] }),
       lineOf({ lineId: 'B', lineName: '202路', arrivals: [arrivalOf('b1', 720)] }),
       lineOf({ lineId: 'A', lineName: '101路', arrivals: [arrivalOf('a1', 300)] }),
     ]), CITY)
 
-    expect(rows.map(row => row.lineName)).toEqual(['101路', '202路', '303路', '404路'])
+    expect(rows.map(row => row.lineName)).toEqual(['101路', '202路', '303路', '404路', '505路'])
+  })
+
+  it('都没有分钟时按站数升序：站数是它们唯一的时间次序', () => {
+    const rows = boardRowsOf(boardOf([
+      lineOf({ lineId: 'B', lineName: '202路', arrivals: [untimedArrivalOf('b1', 12)] }),
+      lineOf({ lineId: 'A', lineName: '101路', arrivals: [untimedArrivalOf('a1', 3)] }),
+    ]), CITY)
+
+    expect(rows.map(row => row.lineName)).toEqual(['101路', '202路'])
   })
 
   it('上游没给新东西时次序不变：同样的一批行排法一致', () => {
@@ -186,6 +211,52 @@ describe('分钟从这次读数自己的时刻推出来', () => {
     expect(row.firstArrivalClock).toBe(clock(first))
     expect(row.laterClocks).toEqual([clock(later)])
     expect(row.laterMinutes).toEqual([15])
+  })
+})
+
+describe('没有到站时刻的车：站数当家', () => {
+  it('主位说站数：0 站说「即将到站」；没有分钟的行不再报「暂无到站信息」', () => {
+    const rows = boardRowsOf(boardOf([
+      lineOf({ lineId: 'A', lineName: '101路', arrivals: [untimedArrivalOf('a1', 7)] }),
+      lineOf({ lineId: 'B', lineName: '202路', arrivals: [untimedArrivalOf('b1', 0)] }),
+    ]), CITY)
+
+    expect(rows.map(row => [row.lineName, etaTextOf(row)])).toEqual([
+      ['202路', '即将到站'],
+      ['101路', '还有 7 站'],
+    ])
+    expect(rows.map(quietTextOf)).toEqual([null, null])
+  })
+
+  it('它没有到站钟点：小字转说这条线自己的运营事实', () => {
+    const row = boardRowsOf(boardOf([
+      lineOf({
+        lineId: 'A',
+        lineName: '101路',
+        arrivals: [untimedArrivalOf('a1', 7)],
+        firstBusTime: '05:00',
+        lastBusTime: '22:00',
+      }),
+    ]), CITY)[0]!
+
+    expect(row.firstArrivalClock).toBeNull()
+    expect(footnoteTextOf(row)).toBe('首末班 05:00–22:00')
+  })
+
+  it('站数与距离来自同一份记录：站数当家的行照样说「距本站」', () => {
+    const row = boardRowsOf(boardOf([
+      lineOf({ lineId: 'A', lineName: '101路', arrivals: [untimedArrivalOf('a1', 7, 4341)] }),
+    ]), CITY)[0]!
+
+    expect(distanceToStationTextOf(row)).toBe('距本站 4.3 公里')
+  })
+
+  it('有分钟的行由分钟做主：同一辆车带着两个读数时站数不抢答', () => {
+    const row = boardRowsOf(boardOf([
+      lineOf({ lineId: 'A', lineName: '101路', arrivals: [{ ...arrivalOf('a1', 300), stopsAway: 2 }] }),
+    ]), CITY)[0]!
+
+    expect(etaTextOf(row)).toBe('还有 5 分钟')
   })
 })
 

@@ -87,7 +87,7 @@ function boardAnswer(): Record<string, unknown> {
           isSubway: false,
           intervalForecast: null,
           arrivals: [
-            { busId: 'b1', arriveAt: READ_AT + 300_000, remainSeconds: 300, distanceToStationMeters: 2408, congestion: 'high', tags: ['无障碍'] },
+            { busId: 'b1', arriveAt: READ_AT + 300_000, remainSeconds: 300, stopsAway: null, distanceToStationMeters: 2408, congestion: 'high', tags: ['无障碍'] },
           ],
         },
         {
@@ -101,7 +101,7 @@ function boardAnswer(): Record<string, unknown> {
           isSubway: false,
           intervalForecast: null,
           arrivals: [
-            { busId: 'b9', arriveAt: READ_AT + 720_000, remainSeconds: 720, distanceToStationMeters: 5200, congestion: 'unknown', tags: [] },
+            { busId: 'b9', arriveAt: READ_AT + 720_000, remainSeconds: 720, stopsAway: null, distanceToStationMeters: 5200, congestion: 'unknown', tags: [] },
           ],
         },
         {
@@ -544,6 +544,46 @@ describe('手动刷新：这一次点名的是这个站台', () => {
     })
     expect(posted[0]?.body.lines, '站台刷新不该点名线路').toBeUndefined()
     expect(host.server.seen(/\/api\/transit\/stations\/.*\/board/).length).toBeGreaterThan(before)
+    host.unmount()
+  })
+})
+
+describe('没有到站时刻的车：站数当家', () => {
+  it('远车给不出时刻时说「还有 N 站」：不整辆丢，也不编一个时刻出来', async () => {
+    const host = await mountBoard({
+      board: {
+        success: true,
+        data: {
+          stationId: '010-00001',
+          readAt: READ_AT,
+          dataSource: 'chelaile',
+          lines: [{
+            lineId: 'bus_027_1',
+            lineName: '101路',
+            direction: 0,
+            destination: 'NN终点站',
+            firstBusTime: '05:00',
+            lastBusTime: '22:00',
+            isSubway: false,
+            intervalForecast: null,
+            arrivals: [{
+              busId: 'far',
+              arriveAt: null,
+              remainSeconds: null,
+              stopsAway: 7,
+              distanceToStationMeters: 4341,
+              congestion: 'unknown',
+              tags: [],
+            }],
+          }],
+        },
+      },
+    })
+
+    const text = host.text()
+    expect(text).toContain('还有 7 站')
+    expect(text).toContain('距本站 4.3 公里')
+    expect(text, '说了站数的行不该再报「暂无到站信息」').not.toContain('暂无到站信息')
     host.unmount()
   })
 })

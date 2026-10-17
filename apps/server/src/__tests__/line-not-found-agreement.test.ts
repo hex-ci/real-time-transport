@@ -58,16 +58,11 @@ function lineRoutes(lineId: string): Array<{ route: string, url: string }> {
     { route: 'line detail', url: `/api/transit/lines/${id}` },
     { route: 'live status', url: `/api/transit/lines/${id}/live` },
     { route: 'station arrivals', url: `/api/transit/lines/${id}/stations/${encodeURIComponent(STATION)}/arrivals` },
-    {
-      route: 'walk decision',
-      url: `/api/transit/gis/walk-decision?originLng=116.4&originLat=39.9`
-        + `&lineId=${id}&stationName=${encodeURIComponent(STATION)}`,
-    },
   ]
 }
 
 describe('G-D1: a line id the upstream has no record of is refused on every line-keyed route', () => {
-  it('answers 404 with a legible body, on all four routes', async () => {
+  it('answers 404 with a legible body, on all three routes', async () => {
     for (const { route, url } of lineRoutes(GHOST_LINE)) {
       stubUpstream(NO_RECORD)
       const app = await buildApp({})
@@ -91,12 +86,7 @@ describe('G-D1: a line id the upstream has no record of is refused on every line
     // 逐路由的正对照：上面的拒绝必须是关于线路的，
     // 而不是关于空列表的。`/live` 是那条
     // 详情路由是实时路由必须与之一致。
-    //
-    // 步行决策故意不在这个列表里：它通过 Amap 为一段步行
-    // 路由定价，而没有 Amap key 的构建对任何线路都答不出来
-    // —— 包括真实线路。在那里断言 200 就等于断言
-    // key 已配置，那不是本文件要讲的事。
-    for (const { route, url } of lineRoutes(REAL_LINE).filter(r => r.route !== 'walk decision')) {
+    for (const { route, url } of lineRoutes(REAL_LINE)) {
       stubUpstream(NO_VEHICLE)
       const app = await buildApp({})
       try {

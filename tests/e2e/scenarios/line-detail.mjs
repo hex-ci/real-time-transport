@@ -4,7 +4,7 @@
  * 两条行为在这里被钉住：
  *  - 屏幕上显示的站点列表、方向名与站数，全部来自**同一个**事实源（那一次详情读取的载荷）；
  *    切方向之后站点列表必须换成另一个方向的站表，而不是原地不动或两者混排；
- *  - 点画布上的站点打开站点弹窗，弹窗是关于那一站的（到站列表、步行决策）。
+ *  - 点画布上的站点打开站点弹窗，弹窗是关于那一站的（站名、到站列表、新鲜度）。
  *    上车点/下班的**写入入口**不在这一屏：它只在设置页的编辑页里（见 docs/PRD.md §4.1）——
  *    故这一屏的弹窗不再提供那两个按钮。
  *
@@ -79,7 +79,7 @@ export async function run({ check, equal, note, fixtures }) {
   const shownStops = await pageEval('JSON.stringify(document.body.innerText.includes(' + JSON.stringify(`${upDetail.stops.length} 站`) + '))')
   check('屏幕陈述的站数来自同一个载荷', shownStops === true, `期望含「${upDetail.stops.length} 站」`)
 
-  // ---- 点开一站，再把这一站设为上班上车点 --------------------------------------
+  // ---- 点开一站，核对弹窗是关于那一站的 ------------------------------------------
   /** 在同名站只出现一次的前提下，把画布上的点对上载荷里的站（站名 + 站序）。 */
   function locate(points, detail) {
     return (points ?? [])
@@ -131,7 +131,7 @@ export async function run({ check, equal, note, fixtures }) {
   equal('方向 1 的站点列表换成了另一个方向的站表', canvasDown.slice(0, downDetail.stops.length), downDetail.stops.map(s => s.name))
   check('两个方向的站表确实不同（同一事实源而非缓存）', JSON.stringify(canvasUp) !== JSON.stringify(canvasDown), '两个方向站表相同')
 
-  // ---- 反向的站点：写出的方向也要跟着屏幕上显示的方向走 --------------------------
+  // ---- 反向的站点：弹窗同样成立 --------------------------------------------------
   const locatedDown = locate(await pageEval(STATION_POINTS), downDetail)
   check('反向也有可点、站名唯一的站点', locatedDown.length > 0, `可见站点 ${locatedDown.length} 个`)
   const second = locatedDown[1] ?? locatedDown[0]

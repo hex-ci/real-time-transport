@@ -29,7 +29,6 @@ import type {
   UserFavoriteLine,
   WsServerMessage,
   TransitCity,
-  WalkDecision,
   DepartureReference,
   DepartureTrust,
   RefreshLiveLineResult,
@@ -53,7 +52,6 @@ import {
   getCityAdcode,
   operatingDaySecondsOf,
   operatingStatusOf,
-  statedArrivalMinutes,
   statedCoordinate,
   stopsAwayOf,
   vehicleProvenanceOf,
@@ -657,77 +655,6 @@ export class TransitService {
   }
 
   /**
-   * 赶公交决策：把真实道路步行 ETA 与某条线某站最近车辆的剩余行程时间相比。
-   * `origin*` 是 GCJ-02，站点坐标来自缓存的线路详情（Amap 返回的 GCJ-02），步行段两端同一系统。
-   */
-  async getWalkDecision(params: {
-    originLng: number
-    originLat: number
-    lineId: string
-    direction: number
-    stationName: string
-    cityCode?: string
-  }): Promise<WalkDecision | null> {
-    const detail = await this.getLineDetail(params.lineId, params.direction, params.cityCode)
-    if (!detail) return null
-
-    const station = detail.stops.find(s => s.name === params.stationName)
-    // 线路详情无法定位的站台定不出步行价：没有终点可规划，
-    // 从替代点算出的路线回答的是没人命名的地点。
-    const destination = stationPoint(station)
-    if (!destination) return null
-
-    const walk = await this.amap.getWalkingEta(params.originLng, params.originLat, destination.lng, destination.lat)
-    if (!walk) return null
-
-    const arrivalsResult = await this.getStationArrivals(params.lineId, params.stationName, params.direction, 1, params.cityCode)
-    const nextArrival = arrivalsResult?.arrivals?.[0]
-    let vehicleEtaSeconds: number | null = null
-    if (nextArrival) {
-      // `statedArrivalMinutes` 是「有分钟或没有」的唯一规则：到站态答 0，
-      // 声明分钟的行答它，读数没发布分钟的行留空 —— 绝不与没人说过的数字做步行比较。
-      vehicleEtaSeconds = statedArrivalMinutes(nextArrival)
-    }
-
-    if (vehicleEtaSeconds === null) {
-      return {
-        walkSeconds: walk.durationSeconds,
-        walkMeters: walk.distanceMeters,
-        vehicleEtaSeconds: null,
-        bufferSeconds: null,
-        decision: 'unknown',
-        advice: '当前方向暂无在途车辆或上游未提供到站耗时，可按正常步速前往站台候车',
-      }
-    }
-
-    const buffer = vehicleEtaSeconds - walk.durationSeconds
-    let decision: WalkDecision['decision']
-    let advice: string
-
-    if (buffer >= 120) {
-      decision = 'comfortable'
-      advice = `车还有 ${Math.round(vehicleEtaSeconds / 60)} 分钟到站，步行约 ${Math.round(walk.durationSeconds / 60)} 分钟，时间充裕，从容前往`
-    }
-    else if (buffer >= -60) {
-      decision = 'hurry'
-      advice = `车约 ${Math.round(vehicleEtaSeconds / 60)} 分钟后进站，需加快步伐（步行约 ${Math.round(walk.durationSeconds / 60)} 分钟）才赶得上`
-    }
-    else {
-      decision = 'missed'
-      advice = '本班车已赶不上，建议等候下一班'
-    }
-
-    return {
-      walkSeconds: walk.durationSeconds,
-      walkMeters: walk.distanceMeters,
-      vehicleEtaSeconds,
-      bufferSeconds: buffer,
-      decision,
-      advice,
-    }
-  }
-
-  /**
    * F1 针对一个站台的参考行：从用户所在锚点出发的真实步行时间，以及由此得出的出门结论。
    *
    * 锚点在服务端按存储行读（GCJ-02），原样交给 Amap；HTTP GIS 路由的 `originLng/originLat`
@@ -864,7 +791,7 @@ export class TransitService {
         // F-C：时刻表自己的注意事项随它所限定的发车一起走；
         // 空串不是注意事项 —— 没有可说时该字段是 null，渲染方的 v-if 于是陈述事实而不是测空白。
         note: exact.note.trim() ? exact.note : null,
-        // 注册时刻表是时钟的函数而非缓存观测，因此永不陈旧：步行决策可以用它。
+        // 注册时刻表是时钟的函数而非缓存观测，因此永不陈旧：步行比较可以直接用它。
         reference: await this.departureReference({ station: stationPoint(station), arrivals, trust: 'ok' }),
       }
     }

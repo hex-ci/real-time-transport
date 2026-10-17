@@ -65,18 +65,6 @@ describe('Server Application', () => {
     await app.close()
   })
 
-  it('walk-decision endpoint validates required params', async () => {
-    const app = await buildApp()
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/transit/gis/walk-decision',
-    })
-    expect(res.statusCode).toBe(400)
-    const json = JSON.parse(res.body)
-    expect(json.success).toBe(false)
-    await app.close()
-  })
-
   it('serves the multi-city dictionary', async () => {
     const app = await buildApp()
     const res = await app.inject({

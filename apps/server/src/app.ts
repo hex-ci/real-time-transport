@@ -455,35 +455,6 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     return { success: true, data: result }
   })
 
-  // origin* = 原始 WGS-84 设备定位 -> 在本边界换算。站点
-  // 在服务端从线路存储的（GCJ-02）站点坐标解析，
-  // 因此没有别的坐标穿过这个边界。
-  app.get('/api/transit/gis/walk-decision', async (req, reply) => {
-    const { originLng, originLat, lineId, direction, stationName, cityCode } = req.query as Record<string, string>
-    if (!originLng || !originLat || !lineId || !stationName) {
-      return reply.status(400).send({ success: false, error: 'Missing required parameters' })
-    }
-    const parsedDirection = directionQueryOf(direction)
-    if (parsedDirection === null) {
-      return reply.status(400).send({ success: false, error: DIRECTION_QUERY_ERROR })
-    }
-
-    const origin = deviceFixToGcj02(Number(originLng), Number(originLat))
-
-    const result = await transitService.getWalkDecision({
-      originLng: origin.lng,
-      originLat: origin.lat,
-      lineId,
-      direction: parsedDirection,
-      stationName,
-      cityCode: cityCode || undefined,
-    })
-    if (!result) {
-      return reply.status(404).send({ success: false, error: 'Station or route not found' })
-    }
-    return { success: true, data: result }
-  })
-
   // 站点到站（有时刻表则精确时刻表覆盖，否则模拟）
   app.get('/api/transit/lines/:lineId/stations/:stationName/arrivals', async (req, reply) => {
     const { lineId, stationName } = req.params as { lineId: string, stationName: string }

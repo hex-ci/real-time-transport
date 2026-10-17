@@ -7,8 +7,8 @@ import {
   PopoverPortal,
   PopoverRoot,
 } from 'reka-ui'
-import { Footprints, X } from '@lucide/vue'
-import type { ArrivalRow, Station, WalkDecision } from '@real-time-transport/shared'
+import { X } from '@lucide/vue'
+import type { ArrivalRow, Station } from '@real-time-transport/shared'
 import { statedArrivalMinutes } from '@real-time-transport/shared'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
@@ -28,9 +28,6 @@ const props = defineProps<{
      */
     note?: string | null
   } | null
-  walkDecision?: WalkDecision | null
-  hasUserCoords?: boolean
-  gisLoading?: boolean
   eta: string
   /**
    * F4：`eta` 是哪种数字，线路不陈述时为 null。渲染在数字旁、比它轻一档，
@@ -43,7 +40,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'compute-walk'): void
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
@@ -86,19 +82,6 @@ const virtualAnchor = computed(() => {
         toJSON() { return this },
       } as DOMRect
     },
-  }
-})
-
-const decisionStyle = computed(() => {
-  switch (props.walkDecision?.decision) {
-    case 'comfortable':
-      return { border: 'border-emerald-500/30 bg-emerald-500/10', text: 'text-emerald-300', emoji: '🟢' }
-    case 'hurry':
-      return { border: 'border-amber-500/30 bg-amber-500/10', text: 'text-amber-300', emoji: '🏃' }
-    case 'missed':
-      return { border: 'border-rose-500/30 bg-rose-500/10', text: 'text-rose-300', emoji: '🔴' }
-    default:
-      return { border: 'border-slate-700 bg-slate-800/50', text: 'text-slate-300', emoji: 'ℹ️' }
   }
 })
 </script>
@@ -200,7 +183,7 @@ const decisionStyle = computed(() => {
             <div class="flex flex-wrap gap-1.5">
               <span
                 v-for="(a, i) in arrivals.arrivals"
-                :key="a.time || a.busId || i"
+                :key="a.busId || i"
                 class="rounded-lg border px-2 py-0.5 font-mono text-xs"
                 :class="i === 0
                   ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
@@ -230,36 +213,6 @@ const decisionStyle = computed(() => {
           >
             {{ arrivals.note }}
           </p>
-
-          <!-- 步行决策 -->
-          <div
-            v-if="walkDecision"
-            class="rounded-xl border p-2.5 space-y-1"
-            :class="decisionStyle.border"
-          >
-            <div class="flex items-center gap-1.5">
-              <span class="text-sm">{{ decisionStyle.emoji }}</span>
-              <span class="text-xs font-semibold lg:text-base" :class="decisionStyle.text">
-                {{ walkDecision.advice }}
-              </span>
-            </div>
-            <div class="flex items-center gap-3 text-xs text-slate-400 font-mono">
-              <span>步行 {{ Math.round(walkDecision.walkSeconds / 60) }} 分钟 ({{ walkDecision.walkMeters }}米)</span>
-              <span v-if="walkDecision.bufferSeconds !== null">
-                缓冲 {{ Math.round(walkDecision.bufferSeconds / 60) }} 分
-              </span>
-            </div>
-          </div>
-          <button
-            v-else-if="hasUserCoords"
-            type="button"
-            class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-[0.99] lg:gap-2 lg:px-3.5 lg:py-2.5 lg:text-base"
-            :disabled="gisLoading"
-            @click="emit('compute-walk')"
-          >
-            <Footprints class="h-3.5 w-3.5 shrink-0 text-cyan-400" />
-            <span>{{ gisLoading ? '正在规划步行路径…' : `计算我到「${station.name}」的赶车决策` }}</span>
-          </button>
         </div>
 
         <!-- 浮层的精确箭头：两段式无缝开口 V，遮住卡片基线 -->

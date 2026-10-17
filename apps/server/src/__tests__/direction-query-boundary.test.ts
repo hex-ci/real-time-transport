@@ -78,11 +78,6 @@ function directionRoutes(direction: string): Array<{ route: string, url: string 
       route: 'station arrivals',
       url: `/api/transit/lines/${LINE_ID}/stations/${encodeURIComponent(STATION_NAME)}/arrivals?${q}`,
     },
-    {
-      route: 'walk decision',
-      url: '/api/transit/gis/walk-decision?originLng=116.4&originLat=39.9'
-        + `&lineId=${LINE_ID}&stationName=${encodeURIComponent(STATION_NAME)}&${q}`,
-    },
   ]
 }
 

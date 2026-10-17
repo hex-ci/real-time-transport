@@ -13,9 +13,9 @@ export const MUTATIONS = {
   },
   线路详情: {
     file: 'apps/web/src/views/line-detail/index.vue',
-    // 写上车点时把方向反过来 —— 站序属于另一个方向，正是修过的那一个缺陷的形状。
-    find: 'direction: dir })',
-    replace: 'direction: (1 - dir) as 0 | 1 })',
+    // 切方向时把要去的方向写成当前方向 —— 屏上点了另一档，站表却原地不动。
+    find: 'query: { direction: String(opt.direction), cityCode: currentCityCode.value },',
+    replace: 'query: { direction: String(activeDirection.value), cityCode: currentCityCode.value },',
   },
   电子站牌: {
     file: 'apps/web/src/views/station-board/index.vue',

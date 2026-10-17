@@ -174,12 +174,11 @@ describe('换算在浏览器侧只此一处，且只作用于设备定位', () =
   })
 
   it('上报给服务端的定位一律是设备原样的那一份', () => {
-    // 这三个地方把定位送出浏览器：送换算过的那份会被服务端再换算一次，点位偏走几百米，
+    // 这两处把定位送出浏览器：送换算过的那份会被服务端再换算一次，点位偏走几百米，
     // 而界面上的距离看起来照样合理。
     const senders = [
       'stores/location.store.ts',
       'views/station-board/index.vue',
-      'views/line-detail/index.vue',
     ]
     const sources = browserSources()
     for (const file of senders) {

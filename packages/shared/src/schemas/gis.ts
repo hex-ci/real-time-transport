@@ -6,19 +6,9 @@ export const WalkEtaSchema = z.object({
 })
 export type WalkEta = z.infer<typeof WalkEtaSchema>
 
-/** 由步行 ETA 与车辆 ETA 比较得出的赶车结论。 */
+/** 由步行 ETA 与车辆 ETA 比较得出的赶车结论；F1 的 `DepartureState` 复用其中前三态。 */
 export const CatchDecisionSchema = z.enum(['comfortable', 'hurry', 'missed', 'unknown'])
 export type CatchDecision = z.infer<typeof CatchDecisionSchema>
-
-export const WalkDecisionSchema = z.object({
-  walkSeconds: z.number().min(0),
-  walkMeters: z.number().min(0),
-  vehicleEtaSeconds: z.number().min(0).nullable(),
-  bufferSeconds: z.number().nullable(),
-  decision: CatchDecisionSchema,
-  advice: z.string(),
-})
-export type WalkDecision = z.infer<typeof WalkDecisionSchema>
 
 export const TransitCitySchema = z.object({
   code: z.string(),

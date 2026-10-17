@@ -101,7 +101,7 @@ describe('GIS routes: a raw WGS-84 device fix is converted exactly once', () => 
       // 定位只进入服务端一次，也只转换一次。
       expect(params.get('origin')).toBe(DEVICE_FIX_AS_GCJ02)
       // 站点坐标不是设备定位：它已经是 GCJ-02，必须原样发出。
-      // （再转一次会挪动目的地，足以颠倒赶车结论。）
+      // （再转一次会挪动目的地，足以颠倒结论。）
       expect(params.get('destination')).toBe(STATION_AS_HELD)
       expect(params.get('destination')).not.toBe(doubleConverted(STATION_GCJ02.lng, STATION_GCJ02.lat))
     }
@@ -127,27 +127,6 @@ describe('GIS routes: a raw WGS-84 device fix is converted exactly once', () => 
         Number(DEVICE_FIX_AS_GCJ02.split(',')[0]),
         Number(DEVICE_FIX_AS_GCJ02.split(',')[1]),
       ))
-    }
-    finally {
-      await app.close()
-    }
-  })
-
-  it('walk-decision converts the origin once and sends the held station coordinate', async () => {
-    const urls = stubUpstream()
-    const app = await buildApp({ amapKey: 'test-key' })
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/api/transit/gis/walk-decision'
-          + `?originLng=${DEVICE_FIX.lng}&originLat=${DEVICE_FIX.lat}`
-          + `&lineId=subway_027_88&direction=0&stationName=${STATION_NAME}&cityCode=027`,
-      })
-      expect(res.statusCode).toBe(200)
-
-      const params = upstreamUrl(urls, '/v3/direction/walking').searchParams
-      expect(params.get('origin')).toBe(DEVICE_FIX_AS_GCJ02)
-      expect(params.get('destination')).toBe(STATION_AS_HELD)
     }
     finally {
       await app.close()

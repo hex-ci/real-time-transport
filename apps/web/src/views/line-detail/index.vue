@@ -29,7 +29,6 @@ import {
 import { useLocationStore } from '@/stores/location.store'
 import { useCityStore } from '@/stores/city.store'
 import { RefreshControl } from '@/components/refresh-control'
-import { useGis } from '@/composables/use-gis'
 import { useCommutePurpose } from '@/composables/use-commute-purpose'
 import {
   DesktopActionBar,
@@ -45,7 +44,6 @@ import type { ArrivalRow, OperatingStatus, RefreshLiveTarget, Station } from '@r
 import { effectiveCommuteDirection, favoriteDirectionOfLine } from '@real-time-transport/shared/line-group'
 import { statedArrivalMinutes, stopsAwayOf, vehicleProvenanceOf } from '@real-time-transport/shared'
 import { stopsTextOf } from './stops-text'
-import { NEARBY_RADIUS_M, haversineMeters, statedCoordinate } from '@real-time-transport/shared/geo'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
@@ -67,12 +65,6 @@ const router = useRouter()
 const transitStore = useTransitStore()
 const locationStore = useLocationStore()
 const cityStore = useCityStore()
-const {
-  walkDecision,
-  fetchWalkDecision,
-  clearDecision,
-  isLoadingDecision,
-} = useGis()
 
 /** 本视图的根元素，用来把它按可用视口定高。 */
 const pageRef = useTemplateRef('pageEl')
@@ -156,7 +148,6 @@ const lineId = computed(() => String(propId || ''))
  */
 const requestedDirection = computed<0 | 1>(() => (Number(propDirection ?? 0) === 1 ? 1 : 0))
 const currentCityCode = computed(() => String(propCityCode || cityStore.currentCode))
-const gisLoading = computed(() => isLoadingDecision.value)
 
 /**
  * F11 在本页的入口：它重读的那一条线路，点名给服务端。
@@ -332,7 +323,6 @@ function switchDirection(opt: DirectionOption): void {
   selectedStation.value = null
   stationAnchor.value = null
   stationArrivals.value = null
-  clearDecision()
   void router.push({
     path: `/line/${encodeURIComponent(opt.lineId)}`,
     query: { direction: String(opt.direction), cityCode: currentCityCode.value },
@@ -376,7 +366,6 @@ function onSelectStation(st: Station, anchor?: StationAnchor): void {
   if (selectedStation.value?.id === st.id) {
     selectedStation.value = null
     stationAnchor.value = null
-    clearDecision()
     return
   }
 
@@ -387,7 +376,6 @@ function onSelectStation(st: Station, anchor?: StationAnchor): void {
   else if (routeBoardRef.value) {
     stationAnchor.value = routeBoardRef.value.getStationAnchor(st.id)
   }
-  clearDecision()
   void transitStore.reloadLiveStatus()
   void fetchStationArrivals()
 }
@@ -399,7 +387,6 @@ function onStationAnchorChange(anchor: StationAnchor): void {
 function onCloseStationPopover(): void {
   selectedStation.value = null
   stationAnchor.value = null
-  clearDecision()
 }
 
 /**
@@ -490,30 +477,6 @@ const commuteFocusStationId = computed<string | null>(() => {
   const stop = detail.stops.find(s => s.name === name && (order == null || s.order === order))
   return stop?.id ?? null
 })
-
-async function computeWalkDecision(): Promise<void> {
-  // 门槛量的是「我离这一站多远」，故与站坐标同一个基准面；发给服务端算路线的那个点用原始
-  // 定位，服务端换算。
-  const coords = locationStore.userCoords
-  const fix = locationStore.deviceFix
-  const st = selectedStation.value
-  if (!coords || !fix || !st) return
-  // 定位与所选城市脱钩时（如北京定位看天津的线），算一条跨城步行路线是荒谬的：
-  // 只给 3km 内（NEARBY_RADIUS_M）的站算步行建议。
-  const lat = statedCoordinate(st.lat)
-  const lng = statedCoordinate(st.lng)
-  if (lat === undefined || lng === undefined) return
-  if (haversineMeters(coords.lat, coords.lng, lat, lng) > NEARBY_RADIUS_M) return
-  await fetchWalkDecision({
-    originLng: fix.lng,
-    originLat: fix.lat,
-    lineId: lineId.value,
-    // 与到站同理：匹配屏幕上真正显示的方向。
-    direction: activeDirection.value,
-    stationName: st.name,
-    cityCode: currentCityCode.value,
-  })
-}
 
 /**
  * F4：面板的头条答案，连同它是哪种数字。
@@ -792,15 +755,11 @@ onUnmounted(() => {
         :station="selectedStation"
         :anchor="stationAnchor"
         :arrivals="stationArrivals"
-        :walk-decision="walkDecision"
-        :has-user-coords="Boolean(locationStore.userCoords)"
-        :gis-loading="gisLoading"
         :eta="selectedStationEta.text"
         :eta-mark="selectedStationEta.mark"
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
         @close="onCloseStationPopover"
-        @compute-walk="computeWalkDecision"
       />
     </div>
   </div>

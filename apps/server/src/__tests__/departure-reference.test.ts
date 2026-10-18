@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { wgs84ToGcj02 } from '@real-time-transport/shared/geo'
 import { arrivalMinutes } from '@real-time-transport/shared'
 import { buildApp } from '../app.js'
+import { STATION_TIMETABLES } from './support/station-timetables.fixture.js'
 
 /**
  * F1 的参考行，在坐标边界的服务端一侧。
@@ -128,7 +129,7 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
 
   it('prices the walk from the stored GCJ-02 anchor, converting nothing', async () => {
     void stubUpstream()
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
 
@@ -153,7 +154,7 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
 
   it('draws its minutes from the same arrivals the list shows', async () => {
     void stubUpstream()
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
 
@@ -175,7 +176,7 @@ describe('F1 reference: the anchor is resolved server-side, in the datum it is s
 
   it('reports an unsaved anchor as unset, and spends no walking request on it', async () => {
     void stubUpstream()
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       // 只有通勤时刻：家 从未保存过。
       await patchSettings(app, { morningStart: '06:30', morningEnd: '11:30' })
@@ -196,7 +197,7 @@ describe('F1 reference: no anchor means 「where you are」, so no conclusion', 
     void stubUpstream()
     // 15:00 落在早高峰与晚高峰之间。
     freezeAt('2026-09-24T15:00:00')
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       await patchSettings(app, {
         homeLat: DEVICE_FIX.lat,
@@ -221,7 +222,7 @@ describe('F1 reference: no anchor means 「where you are」, so no conclusion', 
   it('uses 公司 for the evening leg instead of 家', async () => {
     void stubUpstream()
     freezeAt('2026-09-24T18:30:00')
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       await patchSettings(app, {
         homeLat: DEVICE_FIX.lat,
@@ -247,7 +248,7 @@ describe('F1 reference: no anchor means 「where you are」, so no conclusion', 
   it('gives no conclusion when no walking route can be priced', async () => {
     stubUpstream({ walking: false })
     freezeAt('2026-09-24T08:30:00')
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       await patchSettings(app, { homeLat: DEVICE_FIX.lat, homeLng: DEVICE_FIX.lng })
 

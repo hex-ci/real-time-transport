@@ -10,7 +10,9 @@ import { getCuratedCityName, CITY_DICTIONARY, cumulativeDistances, statedCoordin
 import type { ITransitProvider } from '../types.js'
 import type { AmapGisService } from '../services/amap-gis.service.js'
 import type { StationTimetableService } from '../services/station-timetable.service.js'
-import { dayTypeForDate, operatingDateOf, serviceWindowOf } from '../station-timetable.js'
+import { dayTypeForDate, operatingDateOf, operatingDaySeconds, serviceWindowOf } from '../station-timetable.js'
+import { SUBWAY_DWELL_SEC, buildSubwayTrips, tripPositionAt } from '../subway-trips.js'
+import type { SubwayTrip } from '../subway-trips.js'
 
 /** 地铁发车间隔窗口（秒），按始发站发车时刻套用。 */
 const HEADWAY_WINDOWS = [
@@ -32,9 +34,6 @@ const SIMULATION_FIRST_SEC = 5 * 3600 + 30 * 60
 const SIMULATION_LAST_SEC = 23 * 3600
 
 const STATION_RUN_SEC = 135
-
-/** 巡航速度，用于 LiveBus.speed（m/s），约 54 km/h。 */
-const CRUISE_SPEED = 15
 
 /**
  * 站点列表自身的坐标，形如 [lat, lng]；任一站点没有位置时返回 null。
@@ -78,12 +77,38 @@ export type DetailResolver = (
 
 export class UniversalSubwayEngine implements ITransitProvider {
   readonly name: DataSourceType = 'subway_schedule'
+  private readonly exactTripsCache = new Map<string, { revision: number, trips: SubwayTrip[] }>()
 
   constructor(
     private readonly amap: AmapGisService,
     private readonly timetables?: StationTimetableService,
     private readonly detailResolver?: DetailResolver,
   ) {}
+
+  /**
+   * 一条线某方向某日型的列车还原；任何一站没有表就返回空，交给 135 秒兜底。
+   * 缓存按时刻表 revision 失效：抓回新表后不需要重启进程。
+   */
+  private exactTripsFor(
+    lineId: string,
+    direction: number,
+    dayType: 'workday' | 'weekend',
+    stops: Station[],
+  ): SubwayTrip[] {
+    const timetables = this.timetables
+    if (!timetables) return []
+    const key = `${lineId}:${direction}:${dayType}`
+    const cached = this.exactTripsCache.get(key)
+    if (cached && cached.revision === timetables.version) return cached.trips
+
+    const stationTimes = stops.map((stop) => {
+      const day = timetables.getRaw(lineId, stop.name)?.directions[String(direction)]?.[dayType]
+      return day ? operatingDaySeconds(day) : []
+    })
+    const trips = buildSubwayTrips(stationTimes)
+    this.exactTripsCache.set(key, { revision: timetables.version, trips })
+    return trips
+  }
 
   private async resolveDetail(
     lineId: string,
@@ -209,6 +234,90 @@ export class UniversalSubwayEngine implements ITransitProvider {
       currentSecOfDay += 24 * 3600
     }
 
+    // 有精确表就绝不再用 135 秒推演：列车位置、剩余站数、旅行时间都
+    // 来自同一份时刻表还原出的车次。没有表才是下面的模拟路径。
+    const dayType = dayTypeForDate(operatingDateOf(bjDate))
+    const exactTrips = this.exactTripsFor(lineId, dir, dayType, stops)
+    if (exactTrips.length > 0) {
+      const sd = detail.stationDistances
+      const exactBuses: LiveBus[] = []
+      for (const trip of exactTrips) {
+        const position = tripPositionAt(trip, currentSecOfDay, sd)
+        if (!position) continue
+
+        const order = position.order
+        const nextOrder = position.nextOrder
+        let distanceToWaitStn: number | undefined
+        let travelTimeSec: number | undefined
+
+        if (options?.targetOrder) {
+          if (order < options.targetOrder) {
+            const targetTime = trip.times[options.targetOrder - 1]
+            if (typeof targetTime === 'number') {
+              travelTimeSec = Math.max(0, targetTime - currentSecOfDay)
+            }
+            if (sd && position.distanceFromStart !== undefined) {
+              const targetDistance = sd[options.targetOrder - 1]
+              if (targetDistance !== undefined) {
+                distanceToWaitStn = Math.max(0, targetDistance - position.distanceFromStart)
+              }
+            }
+          }
+        }
+        else {
+          const terminalTime = trip.times[totalStops - 1]
+          if (typeof terminalTime === 'number') {
+            travelTimeSec = Math.max(0, terminalTime - currentSecOfDay)
+          }
+          if (sd && position.distanceFromStart !== undefined) {
+            const terminalDistance = sd[totalStops - 1]
+            if (terminalDistance !== undefined) {
+              distanceToWaitStn = Math.max(0, terminalDistance - position.distanceFromStart)
+            }
+          }
+        }
+
+        const schedule: NonNullable<LiveBus['schedule']> = []
+        const tripStart = trip.times.findIndex(time => typeof time === 'number')
+        for (let i = Math.max(0, order - 1); i < Math.min(totalStops, order + 3); i++) {
+          const stationTime = trip.times[i]
+          if (typeof stationTime !== 'number') break
+          const arrivalAt = now + Math.round((stationTime - currentSecOfDay) * 1000)
+          schedule.push({
+            order: i + 1,
+            arrivalAt,
+            // 始发站的表内时刻是发车，不再加停站；中间站到站后停 30 秒。
+            departureAt: arrivalAt + (i === tripStart ? 0 : SUBWAY_DWELL_SEC * 1000),
+          })
+        }
+
+        exactBuses.push({
+          id: `train:${lineId}:${dir}:${trip.id}`,
+          order,
+          nextOrder,
+          progress: Number(position.progress.toFixed(3)),
+          lat: statedCoordinate(stops[order - 1]?.lat),
+          lng: statedCoordinate(stops[order - 1]?.lng),
+          congestion: 'unknown',
+          ...(distanceToWaitStn !== undefined ? { distanceToWaitStn } : {}),
+          ...(position.distanceFromStart !== undefined
+            ? { distanceFromStart: position.distanceFromStart }
+            : {}),
+          ...(travelTimeSec !== undefined ? { travelTimeSec } : {}),
+          ...(schedule.length > 0 ? { schedule } : {}),
+          updatedAt: now,
+        })
+      }
+      return {
+        lineId,
+        direction: dir,
+        buses: exactBuses,
+        dataSource: 'subway_schedule',
+        isDegraded: false,
+        updatedAt: now,
+      }
+    }
+
     // 发车窗口，按当日秒数。兜底值是模拟窗口：模型需要一个跨度来
     // 枚举发车，但这个跨度永远不会被当作线路的服务时间上报。跨 0 点
     // 的末班属于本运营日的尾巴 —— 见 `serviceWindowSeconds`。
@@ -304,7 +413,6 @@ export class UniversalSubwayEngine implements ITransitProvider {
           // 未放置（`statedCoordinate`）。
           lat: statedCoordinate(stops[segmentIdx]?.lat),
           lng: statedCoordinate(stops[segmentIdx]?.lng),
-          speed: CRUISE_SPEED,
           // 位置由时刻表推导，完全没有拥挤度数据 —— 拥挤度绝不能
           // 由时钟推断。
           congestion: 'unknown',

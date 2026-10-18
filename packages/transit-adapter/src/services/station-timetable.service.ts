@@ -6,7 +6,6 @@ import {
   operatingDaySeconds,
   type StationArrivalsResult,
 } from '../station-timetable.js'
-import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
 
 /**
  * 规范化站名，使 "甲站站"（高德）与 "甲站"（官方时刻表键）能对上：
@@ -20,14 +19,16 @@ export function normalizeStationName(name: string): string {
 }
 
 /**
- * 官方发布的站点精确时刻表注册表。
+ * 站点级精确时刻表注册表。
  *
- * 可扩展：把新的生成数据文件放进 STATION_TIMETABLES 即可覆盖更多站点/城市。
+ * 生产默认是空表：数据由服务端从 `subway_timetable_cache` 装载（`loadFrom`）。
+ * 测试/离线场景可以直接传入一份表。
  */
 export class StationTimetableService {
   private readonly index = new Map<string, StationTimetable>()
+  private revision = 0
 
-  constructor(timetables: StationTimetable[] = STATION_TIMETABLES) {
+  constructor(timetables: StationTimetable[] = []) {
     for (const t of timetables) {
       this.index.set(this.key(t.lineId, t.stationName), t)
     }
@@ -80,7 +81,25 @@ export class StationTimetableService {
 
     const bjNow = new Date((now ? now.getTime() : Date.now()) + 8 * 3600 * 1000)
     const dayType = dayTypeForDate(operatingDateOf(bjNow))
-    return { dayType, departures: operatingDaySeconds(dir[dayType]) }
+    const day = dir[dayType]
+    if (!day) return null
+    return { dayType, departures: operatingDaySeconds(day) }
+  }
+
+  /**
+   * 用运行时缓存装载/覆盖一批站；不动没出现在这批里的条目。
+   * 缓存里坏掉的行由调用方在转换时丢弃，这里只接受已成形的结果。
+   */
+  loadFrom(timetables: StationTimetable[]): void {
+    for (const timetable of timetables) {
+      this.index.set(this.key(timetable.lineId, timetable.stationName), timetable)
+    }
+    this.revision++
+  }
+
+  /** 每次 `loadFrom` 自增；列车还原缓存据此失效。 */
+  get version(): number {
+    return this.revision
   }
 
   getRaw(lineId: string, stationName: string): StationTimetable | undefined {

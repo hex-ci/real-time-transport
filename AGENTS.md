@@ -6,7 +6,7 @@
 
 - Node `>=22`，包管理器 pnpm（workspace：`apps/*`、`packages/*`）。
 - 环境变量只有根目录一份权威源：复制 `.env.example` → `.env`。服务端脚本经 `--env-file-if-exists=../../.env` 读取，前端经 Vite `envDir` 读根目录；`apps/*` 下不放独立 `.env`。
-- 关键变量（只看名字）：`DATABASE_URL`、`DB_PORT`、`AMAP_MAPS_API_KEY`（Web 服务 key，只在服务端用）、`APIZERO_KEY`、`PORT`/`VITE_PORT`（默认 3000/5173）、`VITE_HOST`、`HOST`、`WS_PATH`、`LOG_LEVEL`、`TRANSIT_POLL_INTERVAL_SEC`、`TRANSIT_SIMULATION`。
+- 关键变量（只看名字）：`DATABASE_URL`、`DB_PORT`、`AMAP_MAPS_API_KEY`（Web 服务 key，只在服务端用）、`APIZERO_KEY`、`CHELAILE_SUBWAY_SIGN_KEY`（可选，可用 `.env` 覆盖）、`PORT`/`VITE_PORT`（默认 3000/5173）、`VITE_HOST`、`HOST`、`WS_PATH`、`LOG_LEVEL`、`TRANSIT_POLL_INTERVAL_SEC`、`TRANSIT_SIMULATION`。
 - 启动：`docker compose up -d`（PostgreSQL）→ `pnpm dev`（后端 + Vite 一起，入口 `scripts/dev.js`）。
 - 仓库是公开的：提交的配置只用默认端口，真实凭据/局域网地址只留在未跟踪的 `.env`。
 
@@ -31,6 +31,7 @@
 - 测试文件也进类型检查：`apps/web/tsconfig.test.json`、`apps/server/tsconfig.test.json` 用 `exclude: []` 把 `__tests__` 收回；契约加了必填字段就把夹具补真实字段，不许 `any` / `@ts-ignore` / 删断言换绿。
 - `tsconfig*.json` 是 JSONC（带注释），`write_file`/`patch` 的严格 JSON 校验会拒写——改它用普通文件写。
 - 数据库 schema 只由 `migrations/` 拥有，编号递增，不许第二处 DDL。
+- 地铁时刻表只预存被关注的线路（运行时抓取 + TTL 缓存，`SUBWAY_TIMETABLE_TTL_DAYS = 7`）；`subway_timetable_cache` 是可丢弃缓存，不是权威数据。
 - UI 层不出现数据源名（chelaile/apizero 等）与技术黑话；AMap key 只在 Node 层经 `AmapGisService` 走 REST，浏览器端永远没有。
 - 坐标：站列表与锚点是 GCJ-02，chelaile 车辆/路径与浏览器定位是 WGS-84。设备定位在进入应用的两个边界各换算一次（浏览器：定位 store 的 `userCoords`；服务端：`app.ts` 的 `deviceFixToGcj02`），两边都只吃原始定位：上报服务端用 `deviceFix`，浏览器本地测距用换算后的 `userCoords`（审计在 `nearest-station-rule.test.ts`），站点坐标绝不二次换算。
 
@@ -42,3 +43,4 @@
 - `docker-compose.yml` 用 `'${DB_PORT:-5432}:5432'` 暴露端口，`.env` 里的 `DB_PORT` 改了之后宿主端口跟着变，连不上时先查这里。
 - `packages/*` 没有 build 步骤（`build` 只有 server 的 `tsc --noEmit` 与 web 的 `vite build`）。
 - `pnpm dev` 的 Ctrl+C 退出链是手工接的（WS/keep-alive 排空），别用 `run-p` 套 `pnpm --filter` 改写它。
+- `preTimetable` 在末班后到次日开服前（北京 01:00–04:00）返回空表；抓取器按失败处理，空表绝不能覆盖旧行。

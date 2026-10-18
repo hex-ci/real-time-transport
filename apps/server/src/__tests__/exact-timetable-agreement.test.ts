@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
+import { STATION_TIMETABLES } from './support/station-timetables.fixture.js'
 
 /**
  * F-B + F-C 走真实路由：精确时刻表的答案必须与自己一致，并且必须带上它持有的提醒。
@@ -81,7 +82,7 @@ async function arrivalsAt(
   freezeAt(localIso)
   const lineId = query.lineId ?? LINE_ID
   const stationName = query.stationName ?? STATION_NAME
-  const app = await buildApp({ amapKey: 'test-key' })
+  const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
   try {
     const res = await app.inject({
       method: 'GET',

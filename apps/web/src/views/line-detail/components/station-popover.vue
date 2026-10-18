@@ -27,6 +27,8 @@ const props = defineProps<{
      * 断言的作者。
      */
     note?: string | null
+    /** 没有在途车辆可列时，下一班时刻表时间；不是到站预测。 */
+    nextScheduled?: { time: string } | null
   } | null
   eta: string
   /**
@@ -202,6 +204,16 @@ const virtualAnchor = computed(() => {
                 <span v-if="!a.isAtStation && rowMarkOf(i)" class="ml-1 text-xs text-slate-400">{{ rowMarkOf(i) }}</span>
               </span>
             </div>
+          </div>
+
+          <!-- 没有可列的车：时刻表单独一行，不伪装成到站预测，也不占列表标题。 -->
+          <div
+            v-if="arrivals && arrivals.arrivals.length === 0 && arrivals.nextScheduled"
+            class="rounded-xl border border-slate-800/80 bg-slate-950/60 px-2.5 py-1.5 text-xs text-slate-400"
+          >
+            暂无在途车辆
+            <span aria-hidden="true">·</span>
+            下一班时刻表 <span class="font-mono text-slate-300">{{ arrivals.nextScheduled.time }}</span>
           </div>
 
           <!-- F-C：表自己的说明，逐字保留，放在它所限定的班次旁；刻意放在列表块**外面**，

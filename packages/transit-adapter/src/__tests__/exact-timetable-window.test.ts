@@ -8,7 +8,7 @@ import {
   operatingDaySeconds,
 } from '../index.js'
 import type { DayTimetable, DayType } from '../index.js'
-import { STATION_TIMETABLES } from '../data/subway-timetables.data.js'
+import { STATION_TIMETABLES } from './fixtures/subway-timetables.fixture.js'
 
 /**
  * F-B：声明的窗口与发车必须是同一张表的两次读取。
@@ -37,12 +37,14 @@ function everyTable(): Array<{ label: string, table: (typeof STATION_TIMETABLES)
   for (const t of STATION_TIMETABLES) {
     for (const [direction, dir] of Object.entries(t.directions)) {
       for (const dayType of ['workday', 'weekend'] as const) {
+        const day = dir[dayType]
+        if (!day) continue
         out.push({
           label: `${t.lineId}/${t.stationName}/dir${direction}/${dayType}`,
           table: t,
           direction: Number(direction),
           dayType,
-          day: dir[dayType],
+          day,
         })
       }
     }
@@ -137,7 +139,7 @@ describe('F-B: the line\'s hours are read through the same window', () => {
       return { ok: true, status: 200, json: async () => body }
     }))
 
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
     const detail = await engine.getLineDetail('subway_027_7', 1, '027')
 
     expect(detail).not.toBeNull()

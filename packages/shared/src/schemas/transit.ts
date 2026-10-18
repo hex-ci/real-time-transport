@@ -80,6 +80,15 @@ export const LiveBusSchema = z.object({
    */
   distanceFromStart: z.number().min(0).optional(),
   travelTimeSec: z.number().optional(),
+  /**
+   * 精确时刻表线路的到站/发车时间线（epoch ms）：前端按它匀速插值，
+   * 保证进站落在表内时刻、出站落在停站结束。公交没有这个字段。
+   */
+  schedule: z.array(z.object({
+    order: z.number().int().positive(),
+    arrivalAt: z.number(),
+    departureAt: z.number(),
+  })).optional(),
   license: z.string().optional(),
   updatedAt: z.number(),
 })

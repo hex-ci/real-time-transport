@@ -18,6 +18,7 @@ import {
   type UpdateSettings,
   type UserFavoriteLine,
 } from '@real-time-transport/shared'
+import type { StationTimetable } from '@real-time-transport/transit-adapter'
 import { TransitService, resolvePollIntervalSec } from './services/transit.service.js'
 import { Database, databaseUrlFor, isUniqueViolation } from './db/client.js'
 import { resolveUserId } from './user-id.js'
@@ -229,6 +230,8 @@ export interface AppOptions {
   apizeroKey?: string
   amapKey?: string
   pollIntervalSec?: number
+  /** 测试注入的精确时刻表；生产为空，由缓存装载。 */
+  stationTimetables?: StationTimetable[]
 }
 
 export async function buildApp(options: AppOptions = {}): Promise<FastifyInstance> {
@@ -275,7 +278,13 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     apizeroKey: options.apizeroKey || process.env.APIZERO_KEY,
     amapKey: options.amapKey,
     pollIntervalSec,
+    stationTimetables: options.stationTimetables,
   })
+
+  // 地铁时刻表缓存：只在有真实存储时预热；测试进程（内存库）不发上游请求。
+  if (dbUrl) {
+    await transitService.startSubwayTimetableRefresh()
+  }
 
   app.addHook('onClose', async () => {
     transitService.stop()
@@ -572,6 +581,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
 
     try {
       const item = await db.addFavorite({ ...body.data, userId })
+      // 关注地铁线时立即预存：不阻塞关注请求，抓完下一次轮询即精确。
+      if (item.lineId.startsWith('subway_')) {
+        void transitService.ensureSubwayTimetable(item.lineId, item.cityCode, item.lineName).catch(() => {})
+      }
       return { success: true, data: item }
     }
     catch (err) {

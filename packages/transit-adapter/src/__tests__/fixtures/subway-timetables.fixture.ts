@@ -1,7 +1,8 @@
 /* eslint-disable */
 /* AUTO-GENERATED from knowledge-base scripts/subway_line7_qunfang.py — official Beijing Subway
-   station timetable (minute-level). Do not edit manually; regenerate from the source script. */
-import type { StationTimetable } from '../station-timetable.js'
+   station timetable (minute-level). Do not edit manually; the generator is not in this repo.
+   2026-10-17: moved here from src/data — test fixture only. Production loads subway_timetable_cache. */
+import type { StationTimetable } from '../../station-timetable.js'
 
 export const STATION_TIMETABLES: StationTimetable[] = [
   {

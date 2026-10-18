@@ -28,6 +28,7 @@ cp .env.prod.example .env.prod
 #   - DATABASE_URL 的密码须与 POSTGRES_PASSWORD 一致
 #   - 填 AMAP_MAPS_API_KEY（逆地理编码，仅服务端使用）
 #   - CHELAILE_SIGN_SALT / CHELAILE_AES_KEY 留空即用代码内置默认值
+#   - CHELAILE_SUBWAY_SIGN_KEY 可选（默认用代码内置值，可用 .env 覆盖）
 #   - TRANSIT_SIMULATION 生产必须 false
 #   - TRANSIT_POLL_INTERVAL_SEC 只是回退值：设置页里的「实时刷新间隔」优先于它
 #     （两者的关系见 docs/PRD.md F11 的补充条款）
@@ -49,6 +50,8 @@ curl http://localhost:${WEB_PORT:-80}/health
 ```
 
 首次启动 migrate 会建表；重复执行幂等（已应用的文件打印 `skip`）。
+
+`subway_timetable_cache`（016）是**可丢弃缓存**，不存用户数据；备份可含可不含，清空/恢复不会影响收藏与设置。
 
 ## 升级
 

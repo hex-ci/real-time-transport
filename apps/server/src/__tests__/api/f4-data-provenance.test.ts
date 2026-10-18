@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import type { LightMyRequestResponse } from 'fastify'
 import { DataProvenanceSchema } from '@real-time-transport/shared'
 import { createApiHarness, describeEachStore, type ApiHarness } from './support/api-harness.js'
+import { STATION_TIMETABLES } from '../support/station-timetables.fixture.js'
 import { installUpstream, type BusFixture, type LineFixture } from './support/upstream-mock.js'
 
 /**
@@ -18,7 +19,7 @@ const TARGET_ORDER = 5
 const STATION = '站5'
 const STOP_NAMES = ['站1', '站2', '站3', '站4', STATION, '站6', '站7', '站8']
 
-/** 已注册分钟级时刻表的站台（`subway-timetables.data.ts` 里的唯一一份）。 */
+/** 已注册分钟级时刻表的站台（测试夹具；生产由运行时缓存装载）。 */
 const TIMETABLE_LINE_ID = 'subway_027_7'
 const TIMETABLE_STATION = '群芳'
 
@@ -45,7 +46,7 @@ describeEachStore('F4 · 来源标记', (store) => {
   let api: ApiHarness
 
   beforeEach(async () => {
-    api = await createApiHarness({ store })
+    api = await createApiHarness({ store, stationTimetables: STATION_TIMETABLES })
   })
 
   afterEach(async () => {

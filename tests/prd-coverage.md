@@ -266,22 +266,25 @@
 | 拥挤度不参与自动判断（颜色随判决不随分钟） | `web/__tests__/congestion-copy.test.ts` ·「never lets the arrival minute decide a class」 | 类名只由拥挤度决定 | 1 |
 | `parseCongestion` 本身 | `packages/transit-adapter/src/__tests__/congestion.test.ts` | 直接单测级别映射 | 1 |
 
-## F13 · 地铁精确时刻表迁入数据库 —— ⚠️ 见下
+## F13 · 地铁精确时刻表（已实施：运行时抓取 + 缓存）
 
-> **PRD 的 F13 是「存储迁移」阶段，章节标题明确写着「尚未实施」**（`docs/PRD.md` L328）。
-> 代码里尚无 `008` 迁移、无从 TS 模块导入数据的加载路径。因此下表覆盖的是**既有的覆写机制**
-> （`StationTimetableService`），**不是** F13 的新阶段 —— 不要把它读成 F13 已完成。
+> F13 以 F16 方案落地：只预存被关注的线路，`preTimetable` 抓取 → `subway_timetable_cache` → `StationTimetableService`；TTL 7 天，过期才抓。
 
 | 功能点 | 证明（spec · 用例） | 怎么证（区分性断言） | 层级 |
 |---|---|---|---|
-| 已转录站答精确、未转录站答推演（同一线路同一刻） | `api/f13-exact-timetable.test.ts` ·「同一线路同一刻：转录的车站答精确，未转录的车站答推演」 | 两站两种 provenance 并存于一次读 | 2 |
-| 未转录站按每站 135 秒推演 | `api/f13-…` ·「未转录的车站按每站 135 秒推演：行的分钟落在模型自己的刻度上」 | 分钟落在 135s 刻度 | 2 |
+| 已缓存站答精确、未缓存站答推演（同一线路同一刻） | `api/f13-exact-timetable.test.ts` ·「同一线路同一刻：转录的车站答精确，未转录的车站答推演」 | 两站两种 provenance 并存于一次读 | 2 |
+| 未缓存站按每站 135 秒推演 | `api/f13-…` ·「未转录的车站按每站 135 秒推演：行的分钟落在模型自己的刻度上」 | 分钟落在 135s 刻度 | 2 |
 | 注册表作答 | `api/f13-…` ·「已转录的车站由注册表作答」 | 值 == 表内值 | 2 |
 | 工作日/双休取表、末班后/首班前返回空、跨零点尾班 | `packages/transit-adapter/src/__tests__/station-timetable.test.ts` · 多例 | 各时刻返回/为空 | 1 |
 | 运营状态窗口由表自身班次推出 | `packages/transit-adapter/src/__tests__/exact-timetable-window.test.ts` ·「pins the window to the departures for EVERY shipped table」；`apps/server/src/__tests__/exact-timetable-agreement.test.ts` ·「the board never says service ended while listing departures」 | 表内首末班 == 状态窗口 | 1 |
-| **F13 的存储迁移本体（008 迁移、导入、DB 加载路径）** | **无 spec** | —— | **未覆盖（代码未实施）** |
-
----
+| 016 缓存表 SQL 往返、同键覆盖、过期/按线查询 | `api/subway-timetable-cache.test.ts` · 3 例 | JSONB 相等、同键仅一行、过滤结果精确 | 2 |
+| 抓取链：nSearch → lineDetail → 每站每方向 preTimetable | `packages/transit-adapter/src/__tests__/subway-timetable-provider.test.ts` ·「抓一条线…」 | 2 行、站序/方向/首末正确 | 1 |
+| 签名算法（合成 24 字节 key 的固定向量） | 同上 ·「signs a timestamp with a provided 24-byte key」 | base64 向量 == 期望值 | 1 |
+| 方向映射：高德首站决定 0/1，缺省用 7 号线约定 | 同上 · 两例 | 47/46 的 direction | 1 |
+| 末班后空表不覆盖缓存 | 同上 ·「rejects an empty timetable instead of overwriting the cache」 | `fetchLine` 抛错 | 1 |
+| TTL 内不重抓、过期重抓、缺一侧补抓 | `apps/server/src/__tests__/subway-timetable-refresh.test.ts` · 3 例 | `fetchLine` 调用次数 | 1 |
+| 日型缺省不拿另一天顶替 | `packages/transit-adapter/src/__tests__/subway-timetable-cache.test.ts` ·「returns null for a day type that was never fetched」 | 返回 null | 1 |
+| 016 迁移文本、顺序、回滚段 | `apps/server/src/__tests__/migration-016-subway-timetable-cache.test.ts` | 表/列/主键/索引/只删本表 | 1 |
 
 ## 横切用例（服务多个 F，不属单一编号）
 
@@ -313,7 +316,8 @@
    （轨道/站点节点/列车动态/视口交互）与画布像素 —— 这个仓库没有 canvas 测试台。
 3. **F7 加到主屏**：安装面的字段、图标与「不加 worker、不加推送」已逐条钉住；仍**未覆盖**
    真实安装与「点一下直达」的端到端 —— 属浏览器 e2e。
-4. **F13**：存储迁移本体（008 迁移 + 导入 + DB 加载路径）—— **代码未实施，无 spec**。既有覆写机制有覆盖。
+4. **F13**：运行时抓取 + 缓存本体已覆盖（016、provider、TTL、空表保护，见上表）。仍**未覆盖**：
+   「关注后 20~40 秒窗口内页面如何呈现推演→精确的切换」属浏览器 e2e；「精确表驱动的列车动画」属 F15，尚未实施。
 5. **「此刻在跑的节拍」与「轮询真的按它跑」之间那一步**：接口答出的生效值有 spec（F11 第 5 行），
    来源规则与清空的回落也都有；仍**未覆盖**服务自身的定时器真的按 N 秒触发一次 ——
    观测它要靠真实推送节奏，属浏览器层，未做。

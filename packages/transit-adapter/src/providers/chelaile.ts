@@ -61,7 +61,7 @@ const HEADERS: Record<string, string> = {
   'Referer': 'https://servicewechat.com/wx71d589ea01ce3321/814/page-frame.html',
 }
 
-function cryptoSign(params: Record<string, string>): string {
+export function cryptoSign(params: Record<string, string>): string {
   const salt = getSignSalt()
   const s = Object.entries(params).map(([k, v]) => `"${k}"="${v}"`).join('&') + salt
   return crypto.createHash('md5').update(s, 'utf8').digest('hex')

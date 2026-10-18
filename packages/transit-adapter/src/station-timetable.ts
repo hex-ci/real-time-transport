@@ -18,8 +18,12 @@ export interface DayTimetable {
 
 export interface DirectionTimetable {
   name: string
-  workday: DayTimetable
-  weekend: DayTimetable
+  /**
+   * 两个日型都可缺省：运行时缓存只拿得到「服务器当天」的日型。
+   * 缺哪一天就查不到哪一天，调用方回落到推演，绝不拿另一个日型顶替。
+   */
+  workday?: DayTimetable
+  weekend?: DayTimetable
 }
 
 export interface StationTimetable {
@@ -145,6 +149,7 @@ export function queryStationArrivals(
   const refDate = opts.now ? new Date(opts.now.getTime() + 8 * 3600 * 1000) : new Date(Date.now() + 8 * 3600 * 1000)
   const dayType = opts.dayType || dayTypeForDate(operatingDateOf(refDate))
   const day = dir[dayType]
+  if (!day) return null
 
   const arrivals: StationArrival[] = []
   const window = serviceWindowOf(day)

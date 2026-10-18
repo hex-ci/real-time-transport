@@ -7,8 +7,16 @@ import {
   TransitAggregator,
   AmapGisService,
   StationTimetableService,
+  SubwayTimetableFetcher,
+  buildSubwayTrips,
+  dayTypeForDate,
+  isCompleteSubwayTimetableRow,
+  operatingDateOf,
+  operatingDaySeconds,
+  timetablesFromCacheRows,
+  tripArrivalFor,
 } from '@real-time-transport/transit-adapter'
-import type { ConnectionMode } from '@real-time-transport/transit-adapter'
+import type { ConnectionMode, StationTimetable, SubwayTimetableCacheRow, SubwayTrip } from '@real-time-transport/transit-adapter'
 import type {
   ArrivalBasis,
   ArrivalRow,
@@ -62,6 +70,17 @@ import type {
   StoredUserSettings,
 } from '../db/client.js'
 import { legLiveReading, pairTargetedReads, type TargetedArrival } from './commute-chain-assembly.js'
+
+/**
+ * 地铁时刻表缓存 TTL（天）。时刻表按季度调图，7 天是最坏情况下的过期窗口；
+ * 想更省请求可以调大，代价是调图后旧表可能多留几天。
+ */
+const SUBWAY_TIMETABLE_TTL_DAYS = 7
+const SUBWAY_TIMETABLE_TTL_MS = SUBWAY_TIMETABLE_TTL_DAYS * 24 * 3600 * 1000
+/** 每小时只读 DB 扫一次过期行；没有过期行就不发任何请求。 */
+const SUBWAY_TIMETABLE_CHECK_MS = 3600 * 1000
+/** 抓取失败后的冷却，避免用户每次进页面都重打上游。 */
+const SUBWAY_TIMETABLE_FAIL_COOLDOWN_MS = 10 * 60 * 1000
 
 /**
  * 当前本地 `HH:MM` —— 存储的通勤时段使用的形式（本地时钟，与通勤档案读的钟一致）。
@@ -188,6 +207,16 @@ export class TransitService {
   private amap: AmapGisService
   private chelaile: ChelaileProvider
   private timetables: StationTimetableService
+  private subwayTimetableFetcher: SubwayTimetableFetcher
+  /** 每小时扫描过期行；启动时也会先跑一次。 */
+  private subwayTimetableTimer: NodeJS.Timeout | null = null
+  /** 同一线路在途只抓一轮。 */
+  private subwayTimetableInflight = new Map<string, Promise<void>>()
+  /** lineId → 在该时刻之前不必再判断是否过期（抓取成功或失败冷却都写这里）。 */
+  private subwayTimetableFreshUntil = new Map<string, number>()
+  private subwayTimetableRefreshRunning = false
+  /** lineId:direction:dayType → 从各站表还原出的列车；时刻表重载时清空。 */
+  private subwayTrips = new Map<string, SubwayTrip[]>()
   /**
    * 按 `${lineId}_${direction}` 作键，不能只按 lineId：地铁一条线两个方向共用一个 lineId。
    */
@@ -227,10 +256,16 @@ export class TransitService {
     apizeroKey?: string
     amapKey?: string
     pollIntervalSec?: number
+    /** 测试注入；生产由 AMap 构造默认抓取器。 */
+    subwayTimetableFetcher?: SubwayTimetableFetcher
+    /** 测试注入；生产默认空表，由缓存装载。 */
+    stationTimetables?: StationTimetable[]
   }) {
     this.amap = new AmapGisService(options?.amapKey || process.env.AMAP_MAPS_API_KEY)
     this.chelaile = new ChelaileProvider()
-    this.timetables = new StationTimetableService()
+    this.timetables = new StationTimetableService(options?.stationTimetables)
+    this.subwayTimetableFetcher = options?.subwayTimetableFetcher
+      ?? new SubwayTimetableFetcher({ amap: this.amap })
     // 把地铁引擎接到本服务带缓存的 getLineDetail 上：直播轮询路径复用 DB 里的静态几何，
     // 不再每 18s 重问 Amap。
     const universalSubway = new UniversalSubwayEngine(this.amap, this.timetables, (lineId, direction, cityCode) =>
@@ -329,6 +364,7 @@ export class TransitService {
     )
 
     if (cached) {
+      this.scheduleSubwayTimetable(cached.lineId, cached.cityCode, cached.lineName)
       if (hasGeometry) {
         return cached
       }
@@ -344,6 +380,7 @@ export class TransitService {
 
     const detail = await this.aggregator.getLineDetail(lineId, direction, cityCode)
     if (detail) {
+      this.scheduleSubwayTimetable(detail.lineId, detail.cityCode, detail.lineName)
       const source = lineId.startsWith('subway_') ? 'amap' : 'chelaile'
       await this.db.upsertCachedLine(detail, source).catch(() => {})
       return detail
@@ -737,6 +774,29 @@ export class TransitService {
    *
    * 答案还带该站台的 F1 `reference` 行，用的是调用方显示的同一批到站分钟。
    */
+  /**
+   * 一条线某方向某日型的列车还原（懒建、按线缓存）。任何一站没有表就不猜位置：
+   * `buildSubwayTrips` 会给空结果，站点行保持只有时刻、没有站数。
+   */
+  private subwayTripsFor(
+    lineId: string,
+    direction: number,
+    dayType: 'workday' | 'weekend',
+    stops: Station[],
+  ): SubwayTrip[] {
+    const key = `${lineId}:${direction}:${dayType}`
+    const cached = this.subwayTrips.get(key)
+    if (cached) return cached
+
+    const stationTimes = stops.map((stop) => {
+      const day = this.timetables.getRaw(lineId, stop.name)?.directions[String(direction)]?.[dayType]
+      return day ? operatingDaySeconds(day) : []
+    })
+    const trips = buildSubwayTrips(stationTimes)
+    this.subwayTrips.set(key, trips)
+    return trips
+  }
+
   async getStationArrivals(
     lineId: string,
     stationName: string,
@@ -757,6 +817,8 @@ export class TransitService {
      * 只有注册时刻表有它，实时与模拟路径以 null 说明没有。
      */
     note: string | null
+    /** 没有在途车辆可列时，官方时刻表里的下一班；有车可列时为 null/缺省。 */
+    nextScheduled?: { time: string } | null
     reference: DepartureReference | null
   } | null> {
     const now = Date.now()
@@ -773,11 +835,51 @@ export class TransitService {
 
     const exact = this.timetables.query(lineId, stationName, direction, nowSecOfDay, { count })
     if (exact) {
-      const arrivals: ArrivalRow[] = exact.arrivals.map(a => ({
-        time: a.time,
-        etaSeconds: a.etaSeconds,
-        provenance: 'exact_timetable',
-      }))
+      // 站点弹窗要和公交一样有「还有几站 / 多少米」：把各站表还原成列车，
+      // 再看这趟车此刻在哪一段。时刻仍是表里的原文，位置由同一份表推出。
+      const targetIndex = station ? station.order - 1 : -1
+      const trips = detail && targetIndex >= 0
+        ? this.subwayTripsFor(lineId, direction, exact.dayType, detail.stops)
+        : []
+      const tripsByTargetTime = new Map<number, SubwayTrip>()
+      for (const trip of trips) {
+        const time = trip.times[targetIndex]
+        if (typeof time === 'number') tripsByTargetTime.set(time, trip)
+      }
+
+      const scheduled: ArrivalRow[] = []
+      const positioned: ArrivalRow[] = []
+      for (const a of exact.arrivals) {
+        // `StationArrival.secOfDay` 是 0..24h 的钟点；跨 0 点的尾班要落回
+        // 运营日时间轴，才能和列车表里的 24h+ 时刻对上。
+        const arrivalSec = a.secOfDay < 4 * 3600 ? a.secOfDay + 24 * 3600 : a.secOfDay
+        const trip = tripsByTargetTime.get(arrivalSec)
+        const position = trip
+          ? tripArrivalFor(trip, targetIndex, nowSecOfDay, detail?.stationDistances)
+          : null
+        const row: ArrivalRow = {
+          time: a.time,
+          etaSeconds: a.etaSeconds,
+          provenance: 'exact_timetable',
+          // 地铁只报「还有几站」：站间距离是站点坐标的直线累计，不是轨道里程，
+          // 对用户没有可靠的公里含义。公里/速度留给公交。
+          ...(position?.isAtStation
+            ? { isAtStation: true, stopsAway: 0 }
+            : position
+              ? { stopsAway: position.stopsAway }
+              : {}),
+        }
+        scheduled.push(row)
+        if (position) positioned.push(row)
+      }
+      // 完整线路能还原车次时，才把「没有车」的钟点从到站列表里拿掉；
+      // 没有完整表就无从判断车在不在，继续保留官方钟点。列表为空时给
+      // 一行独立的下一班官方时刻，不与到站预测混排。
+      const hasTrips = trips.length > 0
+      const arrivals = hasTrips ? positioned : scheduled
+      const nextScheduled = hasTrips && positioned.length === 0 && exact.arrivals.length > 0
+        ? { time: (exact.arrivals.find(a => a.etaSeconds > 0) ?? exact.arrivals[0]!).time }
+        : null
       return {
         isExact: true,
         arrivals,
@@ -791,6 +893,7 @@ export class TransitService {
         // F-C：时刻表自己的注意事项随它所限定的发车一起走；
         // 空串不是注意事项 —— 没有可说时该字段是 null，渲染方的 v-if 于是陈述事实而不是测空白。
         note: exact.note.trim() ? exact.note : null,
+        nextScheduled,
         // 注册时刻表是时钟的函数而非缓存观测，因此永不陈旧：步行比较可以直接用它。
         reference: await this.departureReference({ station: stationPoint(station), arrivals, trust: 'ok' }),
       }
@@ -1364,10 +1467,150 @@ export class TransitService {
     }
   }
 
+  // ---------- 地铁时刻表：缓存装载 / TTL 刷新 ----------
+
+  private currentSubwayDayType(): 'workday' | 'weekend' {
+    return dayTypeForDate(operatingDateOf(new Date(Date.now() + 8 * 3600 * 1000)))
+  }
+
+  /**
+   * 启动时把当前日型的缓存一次性装进内存；随后每小时只读 DB 扫过期行。
+   * 没有关注线路时抓 0 条，这是正常状态。
+   */
+  async startSubwayTimetableRefresh(): Promise<void> {
+    await this.loadSubwayTimetablesFromCache().catch((err) => {
+      console.warn('subway timetable cache load failed:', err)
+    })
+    if (this.subwayTimetableTimer) return
+    void this.refreshSubwayTimetables()
+    this.subwayTimetableTimer = setInterval(() => {
+      void this.refreshSubwayTimetables()
+    }, SUBWAY_TIMETABLE_CHECK_MS)
+    this.subwayTimetableTimer.unref()
+  }
+
+  private async loadSubwayTimetablesFromCache(): Promise<void> {
+    const rows = await this.db.loadSubwayTimetables(this.currentSubwayDayType())
+    this.timetables.loadFrom(timetablesFromCacheRows(rows))
+    this.subwayTrips.clear()
+
+    const byLine = new Map<string, SubwayTimetableCacheRow[]>()
+    for (const row of rows) {
+      const list = byLine.get(row.lineId) ?? []
+      list.push(row)
+      byLine.set(row.lineId, list)
+    }
+    for (const [lineId, lineRows] of byLine) {
+      this.markSubwayTimetableFresh(lineId, lineRows)
+    }
+  }
+
+  /**
+   * 两个方向都有当前日型的行、且都没过期，才认为这条线不需要抓。
+   * 只有一侧的行（抓取中途失败）会在下一次 ensure 时补抓。
+   */
+  private markSubwayTimetableFresh(lineId: string, rows: SubwayTimetableCacheRow[]): boolean {
+    const dayType = this.currentSubwayDayType()
+    const today = rows.filter(row => row.dayType === dayType && isCompleteSubwayTimetableRow(row))
+    const now = Date.now()
+    if (today.length < 2 || !today.every(row => now - row.fetchedAt <= SUBWAY_TIMETABLE_TTL_MS)) {
+      return false
+    }
+    this.subwayTimetableFreshUntil.set(
+      lineId,
+      Math.min(...today.map(row => row.fetchedAt)) + SUBWAY_TIMETABLE_TTL_MS,
+    )
+    return true
+  }
+
+  /** 末班后到次日开服前（北京 01:00-04:00）不抓：接口只回空表。 */
+  private isSubwayQuietHours(): boolean {
+    const bjHour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours()
+    return bjHour >= 1 && bjHour < 4
+  }
+
+  /** 只刷新关注列表里的地铁线；过期才真的发请求。 */
+  private async refreshSubwayTimetables(): Promise<void> {
+    if (this.subwayTimetableRefreshRunning || this.isSubwayQuietHours()) return
+    this.subwayTimetableRefreshRunning = true
+    try {
+      const favorites = await this.db.getFavorites(DEFAULT_USER_ID)
+      for (const favorite of favorites) {
+        if (!favorite.lineId.startsWith('subway_')) continue
+        await this.ensureSubwayTimetable(favorite.lineId, favorite.cityCode, favorite.lineName)
+          .catch((err) => {
+            console.warn(`subway timetable refresh failed for ${favorite.lineId}:`, err)
+          })
+      }
+    }
+    catch (err) {
+      console.warn('subway timetable refresh scan failed:', err)
+    }
+    finally {
+      this.subwayTimetableRefreshRunning = false
+    }
+  }
+
+  /**
+   * 确保一条线的当前日型表可用。未过期直接返回；在途共用同一个 Promise；
+   * 抓取失败进入冷却，页面继续用旧表/推演，不会每次请求都打上游。
+   */
+  async ensureSubwayTimetable(lineId: string, cityCode: string, lineName: string): Promise<void> {
+    if (!lineId.startsWith('subway_')) return
+    if ((this.subwayTimetableFreshUntil.get(lineId) ?? 0) > Date.now()) return
+    if (this.isSubwayQuietHours()) return
+
+    const inflight = this.subwayTimetableInflight.get(lineId)
+    if (inflight) return inflight
+
+    const task = this.fetchAndStoreSubwayTimetable(lineId, cityCode, lineName)
+      .finally(() => {
+        this.subwayTimetableInflight.delete(lineId)
+      })
+    this.subwayTimetableInflight.set(lineId, task)
+    return task
+  }
+
+  private async fetchAndStoreSubwayTimetable(
+    lineId: string,
+    cityCode: string,
+    lineName: string,
+  ): Promise<void> {
+    const cached = await this.db.loadSubwayTimetablesForLine(lineId)
+    this.timetables.loadFrom(timetablesFromCacheRows(cached))
+    this.subwayTrips.clear()
+    if (this.markSubwayTimetableFresh(lineId, cached)) return
+
+    try {
+      const fetched = await this.subwayTimetableFetcher.fetchLine({ cityCode, lineId, lineName })
+      for (const row of fetched) {
+        await this.db.upsertSubwayTimetableLine(row)
+      }
+      const all = await this.db.loadSubwayTimetablesForLine(lineId)
+      this.timetables.loadFrom(timetablesFromCacheRows(all))
+      this.subwayTrips.clear()
+      this.markSubwayTimetableFresh(lineId, all)
+    }
+    catch (err) {
+      this.subwayTimetableFreshUntil.set(lineId, Date.now() + SUBWAY_TIMETABLE_FAIL_COOLDOWN_MS)
+      throw err
+    }
+  }
+
+  private scheduleSubwayTimetable(lineId: string, cityCode: string, lineName: string): void {
+    void this.ensureSubwayTimetable(lineId, cityCode, lineName).catch((err) => {
+      console.warn(`subway timetable ensure failed for ${lineId}:`, err)
+    })
+  }
+
   stop(): void {
     if (this.pollingTimer) {
       clearInterval(this.pollingTimer)
       this.pollingTimer = null
+    }
+    if (this.subwayTimetableTimer) {
+      clearInterval(this.subwayTimetableTimer)
+      this.subwayTimetableTimer = null
     }
   }
 }

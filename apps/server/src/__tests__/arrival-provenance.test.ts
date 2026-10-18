@@ -3,6 +3,7 @@ import type { Database } from '../db/client.js'
 import type { LineDetail, LiveLineStatus } from '@real-time-transport/shared'
 import { TransitService } from '../services/transit.service.js'
 import { buildApp } from '../app.js'
+import { STATION_TIMETABLES } from './support/station-timetables.fixture.js'
 
 /**
  * 服务端的 F4：每一行到达都声明自己那个数是什么种类。
@@ -315,7 +316,7 @@ describe('F4: the arrivals route ships a provenance on every row', () => {
   it('marks a registered station timetable 精确时刻表, per row', async () => {
     freezeAt('2026-09-24T08:30:00')
     stubAmap([subwayLineFixture(['群芳', '乙站'])])
-    const app = await buildApp({ amapKey: 'test-key' })
+    const app = await buildApp({ amapKey: 'test-key', stationTimetables: STATION_TIMETABLES })
     try {
       // 固定数据的首站，是本仓唯一持有已发布分钟级时刻表的站（方向 0）。
       const data = await arrivals(app, '群芳')

@@ -6,6 +6,7 @@ import type {
   LineDetail,
   UserFavoriteLine,
 } from '@real-time-transport/shared'
+import type { DayType, SubwayTimetableCacheRow } from '@real-time-transport/transit-adapter'
 
 const { Pool } = pg
 
@@ -267,6 +268,8 @@ export class Database {
    */
   private inMemoryCreatedAt = 0
   private inMemoryLineCache = new Map<string, { detail: LineDetail, fetchedAt: number }>()
+  /** 地铁时刻表缓存按 (city, line, subLine, dayType) 索引；镜像 SQL 的主键。 */
+  private inMemorySubwayTimetables = new Map<string, SubwayTimetableCacheRow>()
   private inMemorySettings = new Map<string, StoredUserSettings>()
   /**
    * 链路按 id 索引，腿放在链路里 —— 与 SQL schema 的 `ON DELETE CASCADE` 一致：
@@ -1071,6 +1074,154 @@ export class Database {
       }
     }
     this.inMemoryLineCache.set(key, { detail, fetchedAt: Date.now() })
+  }
+
+  // ---------- 地铁时刻表缓存 ----------
+
+  private subwayTimetableKey(
+    row: Pick<SubwayTimetableCacheRow, 'cityCode' | 'lineId' | 'subLineId' | 'dayType'>,
+  ): string {
+    return `${row.cityCode}|${row.lineId}|${row.subLineId}|${row.dayType}`
+  }
+
+  private mapSubwayTimetableRow(raw: unknown): SubwayTimetableCacheRow {
+    const row = raw as {
+      city_code: string
+      line_id: string
+      sub_line_id: number
+      direction: number
+      day_type: DayType
+      service_date: string | Date | null
+      payload: SubwayTimetableCacheRow['payload']
+      fetched_at: string | Date
+    }
+    // DATE 是日历日，不是时刻：按本地年月日读，避免 UTC 换算把它挪到前一天。
+    const serviceDate = row.service_date instanceof Date
+      ? `${row.service_date.getFullYear()}-${String(row.service_date.getMonth() + 1).padStart(2, '0')}-${String(row.service_date.getDate()).padStart(2, '0')}`
+      : String(row.service_date ?? '').slice(0, 10)
+    return {
+      cityCode: row.city_code,
+      lineId: row.line_id,
+      subLineId: Number(row.sub_line_id),
+      direction: Number(row.direction),
+      dayType: row.day_type,
+      serviceDate,
+      payload: row.payload,
+      fetchedAt: new Date(row.fetched_at).getTime(),
+    }
+  }
+
+  /** 当前日型的全部缓存行；库不可用时读内存副本（与 SQL 同语义）。 */
+  async loadSubwayTimetables(dayType: DayType): Promise<SubwayTimetableCacheRow[]> {
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT city_code, line_id, sub_line_id, direction, day_type, service_date, payload, fetched_at
+             FROM subway_timetable_cache
+            WHERE day_type = $1`,
+          [dayType],
+        )
+        return res.rows.map(row => this.mapSubwayTimetableRow(row))
+      }
+      catch {
+      }
+    }
+    return [...this.inMemorySubwayTimetables.values()].filter(row => row.dayType === dayType)
+  }
+
+  /** 一条线的全部日型行；刷新时用它合并另一个日型的旧表。 */
+  async loadSubwayTimetablesForLine(lineId: string): Promise<SubwayTimetableCacheRow[]> {
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT city_code, line_id, sub_line_id, direction, day_type, service_date, payload, fetched_at
+             FROM subway_timetable_cache
+            WHERE line_id = $1`,
+          [lineId],
+        )
+        return res.rows.map(row => this.mapSubwayTimetableRow(row))
+      }
+      catch {
+      }
+    }
+    return [...this.inMemorySubwayTimetables.values()].filter(row => row.lineId === lineId)
+  }
+
+  async getSubwayTimetableLine(
+    cityCode: string,
+    lineId: string,
+    subLineId: number,
+    dayType: DayType,
+  ): Promise<SubwayTimetableCacheRow | null> {
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT city_code, line_id, sub_line_id, direction, day_type, service_date, payload, fetched_at
+             FROM subway_timetable_cache
+            WHERE city_code = $1 AND line_id = $2 AND sub_line_id = $3 AND day_type = $4`,
+          [cityCode, lineId, subLineId, dayType],
+        )
+        return res.rows.length > 0 ? this.mapSubwayTimetableRow(res.rows[0]) : null
+      }
+      catch {
+      }
+    }
+    return this.inMemorySubwayTimetables.get(
+      this.subwayTimetableKey({ cityCode, lineId, subLineId, dayType }),
+    ) ?? null
+  }
+
+  /**
+   * 写一行；成功覆盖同主键旧行。写失败仍保留内存副本 —— 缓存的价值在于
+   * 「这次读得到」，库恢复后下一次刷新会补写。
+   */
+  async upsertSubwayTimetableLine(row: SubwayTimetableCacheRow): Promise<void> {
+    this.inMemorySubwayTimetables.set(this.subwayTimetableKey(row), row)
+    if (!this.pool) return
+    try {
+      await this.pool.query(
+        `INSERT INTO subway_timetable_cache
+           (city_code, line_id, sub_line_id, direction, day_type, service_date, payload, fetched_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (city_code, line_id, sub_line_id, day_type)
+         DO UPDATE SET
+           direction = EXCLUDED.direction,
+           service_date = EXCLUDED.service_date,
+           payload = EXCLUDED.payload,
+           fetched_at = EXCLUDED.fetched_at`,
+        [
+          row.cityCode,
+          row.lineId,
+          row.subLineId,
+          row.direction,
+          row.dayType,
+          row.serviceDate,
+          JSON.stringify(row.payload),
+          new Date(row.fetchedAt).toISOString(),
+        ],
+      )
+    }
+    catch {
+    }
+  }
+
+  /** `fetched_at < cutoffMs` 的当前日型行，供 TTL 扫描入队。 */
+  async listExpiredSubwayTimetables(dayType: DayType, cutoffMs: number): Promise<SubwayTimetableCacheRow[]> {
+    if (this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT city_code, line_id, sub_line_id, direction, day_type, service_date, payload, fetched_at
+             FROM subway_timetable_cache
+            WHERE day_type = $1 AND fetched_at < $2`,
+          [dayType, new Date(cutoffMs).toISOString()],
+        )
+        return res.rows.map(row => this.mapSubwayTimetableRow(row))
+      }
+      catch {
+      }
+    }
+    return [...this.inMemorySubwayTimetables.values()]
+      .filter(row => row.dayType === dayType && row.fetchedAt < cutoffMs)
   }
 
   async close(): Promise<void> {

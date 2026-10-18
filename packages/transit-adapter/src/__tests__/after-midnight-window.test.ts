@@ -5,6 +5,7 @@ import {
   UniversalSubwayEngine,
   serviceWindowSeconds,
 } from '../index.js'
+import { STATION_TIMETABLES } from './fixtures/subway-timetables.fixture.js'
 
 /**
  * G2：运营日不从 00:00 开始，所以跨 0 点的末班属于下一个日历日。
@@ -102,7 +103,7 @@ describe('G2: the direction whose last departure is after midnight runs a cohere
   it('answers with trains at 00:10 for direction 1, whose table ends at 00:16', async () => {
     stubAmap()
     freezeAtBeijing(AFTER_MIDNIGHT)
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
 
     const live = await engine.getLiveStatus(LINE_ID, 1, '027')
 
@@ -118,7 +119,7 @@ describe('G2: the direction whose last departure is after midnight runs a cohere
     // 整体推后一天，这个方向会在末班几小时之后仍报出车。
     stubAmap()
     freezeAtBeijing(AFTER_MIDNIGHT)
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
 
     const live = await engine.getLiveStatus(LINE_ID, 0, '027')
 

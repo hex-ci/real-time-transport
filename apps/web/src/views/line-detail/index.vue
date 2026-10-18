@@ -112,6 +112,8 @@ const stationArrivals = shallowRef<{
    * 与下面的班次一起渲染，绝不改写。
    */
   note?: string | null
+  /** 没有在途车辆可列时，下一班时刻表时间；有车可列时不出现。 */
+  nextScheduled?: { time: string } | null
 } | null>(null)
 
 /**
@@ -525,9 +527,14 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
     // 没有分钟就是没有分钟。本分支原本会退回的外推（快照速度套在剩余各站上）误差没有固定的符号，故该行陈述缺失。
     const mins = statedArrivalMinutes(next)
     if (mins === null) return { text: ARRIVAL_MINUTE_UNAVAILABLE_TEXT, mark: null }
-    // 公开下发的发车时刻是钟点而非位置：时间就是全部答案，旁边没有距离或站数可报。
+    // 地铁只报钟点和站数：站间距离是站点坐标的直线累计，不是轨道里程；
+    // 公里和速度是公交的观测口径，不往地铁上套。
     if (next.provenance === 'exact_timetable') {
-      return { text: `${next.time} 到站 (约 ${mins} 分钟)`, mark }
+      const stopsText = stopsTextOf(next.stopsAway)
+      return {
+        text: `${next.time} 到站 (约 ${mins} 分钟${stopsText ? ` · ${stopsText}` : ''})`,
+        mark,
+      }
     }
     const stopsText = stopsTextOf(next.stopsAway)
     const distText = next.distanceMeters && next.distanceMeters > 0

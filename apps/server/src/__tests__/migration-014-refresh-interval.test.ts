@@ -64,10 +64,11 @@ describe('014：实时刷新间隔入库（用户可调整个系统的实时性�
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步之前那一步：015 在它之后，是它让出了这个位置', () => {
+  it('是当前最新的一步之前两步：015 与 016 在它之后，是它们让出了这个位置', () => {
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
-    expect(files[files.length - 1]).toBe('015_favorite-followed-stations.sql')
-    expect(files[files.length - 2]).toBe(FILE)
+    expect(files[files.length - 1]).toBe('016_subway_timetable_cache.sql')
+    expect(files[files.length - 2]).toBe('015_favorite-followed-stations.sql')
+    expect(files[files.length - 3]).toBe(FILE)
   })
 
   it('前向段加 refresh_interval_sec 列，可空、无默认值 —— NULL 是「没选过」，不是 18', () => {

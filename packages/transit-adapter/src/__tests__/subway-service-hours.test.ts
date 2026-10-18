@@ -6,6 +6,7 @@ import {
   StationTimetableService,
   UniversalSubwayEngine,
 } from '../index.js'
+import { STATION_TIMETABLES } from './fixtures/subway-timetables.fixture.js'
 
 /**
  * 服务时间是关于线路的事实，没有就是没有。
@@ -61,7 +62,7 @@ afterEach(() => {
 describe('service hours are reported as the facts they are, or not at all', () => {
   it('reports empty hours — never 05:30 / 23:00 — when the upstream omits them', async () => {
     stubAmap(lineWithoutHours('地铁88号线', UNCOVERED_STOPS))
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
 
     const detail = await engine.getLineDetail('subway_027_88', 0, '027')
     expect(detail).not.toBeNull()
@@ -86,7 +87,7 @@ describe('service hours are reported as the facts they are, or not at all', () =
     ]))
     // 已发布的官方时刻表覆盖本夹具的线路/站点（方向 0 = 5:16 / 23:06）。
     // 真实数据永远优先于替代值和空值。
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
 
     const detail = await engine.getLineDetail('subway_027_7', 0, '027')
     expect(detail).not.toBeNull()
@@ -105,7 +106,7 @@ describe('service hours are reported as the facts they are, or not at all', () =
       start_time: '0516',
       end_time: '2306',
     })
-    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService())
+    const engine = new UniversalSubwayEngine(new AmapGisService('test-key'), new StationTimetableService(STATION_TIMETABLES))
 
     const detail = await engine.getLineDetail('subway_027_88', 0, '027')
     expect(detail!.firstBusTime).toBe('05:16')

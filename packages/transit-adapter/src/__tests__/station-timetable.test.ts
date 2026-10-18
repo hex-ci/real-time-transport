@@ -5,12 +5,14 @@ import {
   dayTypeForDate,
   nextDepartureEtaSeconds,
 } from '../index.js'
+import { STATION_TIMETABLES } from './fixtures/subway-timetables.fixture.js'
 
-// 与下面的生产表一起使用的这些 id 与站名就是那张表的主键：它们索引
-// `src/data/subway-timetables.data.ts` 里转录的真实上游数据，必须
+// 与下面的夹具表一起使用的这些 id 与站名就是那张表的主键：它们索引
+// `fixtures/subway-timetables.fixture.ts` 里转录的真实上游数据，必须
 // 与之一致 —— 改名会静默废掉精确时刻表分支。
+
 describe('StationTimetableService (precise timetable overlay)', () => {
-  const svc = new StationTimetableService()
+  const svc = new StationTimetableService(STATION_TIMETABLES)
 
   it('normalizes a station name to the key the table is indexed by', () => {
     expect(normalizeStationName('群芳站')).toBe('群芳')

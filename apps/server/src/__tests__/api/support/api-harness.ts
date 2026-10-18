@@ -3,6 +3,7 @@ import pg from 'pg'
 import { describe, vi, type Mock } from 'vitest'
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify'
 import { buildApp } from '../../../app.js'
+import type { StationTimetable } from '@real-time-transport/transit-adapter'
 
 /**
  * API 层的地基：把 app 装在进程里（`app.inject()`，不开端口、不发真实网络请求），
@@ -94,6 +95,8 @@ export interface HarnessOptions {
   store?: StoreKind
   /** 缺省从 `DATABASE_URL` 派生；无论从哪来都要过 `_test` 闸。 */
   databaseUrl?: string
+  /** 测试注入的精确时刻表；生产默认空表。 */
+  stationTimetables?: StationTimetable[]
 }
 
 /** 双引号包裹标识符：表名取自系统目录，但仍不拼接裸标识符。 */
@@ -156,7 +159,10 @@ export async function createApiHarness(options: HarnessOptions = {}): Promise<Ap
   }
 
   // 内存路径显式不传 databaseUrl —— 走内存是因为没给库，不是因为库不可达。
-  const app = await buildApp(store === 'sql' ? { databaseUrl } : {})
+  const app = await buildApp({
+    ...(store === 'sql' ? { databaseUrl } : {}),
+    ...(options.stationTimetables ? { stationTimetables: options.stationTimetables } : {}),
+  })
 
   // 上游（车来了/高德）在进程内只有一个入口。默认桩拒绝一切调用：真调上游在 CI 里既慢
   // 又不可复现，还会拿真实密钥打到别人家的服务上。要上游数据的用例自己装 `upstream`。

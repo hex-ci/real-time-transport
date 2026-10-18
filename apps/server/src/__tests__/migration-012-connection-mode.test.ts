@@ -66,7 +66,7 @@ describe('012：接驳方式入库（每段乘车段一份，未选过就是 NUL
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步之前三步：013、014 与 015 在它之后，是它们让出了这个位置', () => {
+  it('是当前最新的一步之前三步：013、014、015 与 016 在它之后，是它们让出了这个位置', () => {
     // 013 给设置行加了锚点的地点名与来源，014 又加实时刷新间隔，015 再给关注行加两个方向的关注站，
     // 故「按文件名排最后」这一行 012 不再持有。钉住的是**谁在它之后**，而不是它自己永远垫底。
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
@@ -75,6 +75,7 @@ describe('012：接驳方式入库（每段乘车段一份，未选过就是 NUL
       '013_user-settings-anchor-place.sql',
       '014_user-settings-refresh-interval.sql',
       '015_favorite-followed-stations.sql',
+      '016_subway_timetable_cache.sql',
     ])
   })
 

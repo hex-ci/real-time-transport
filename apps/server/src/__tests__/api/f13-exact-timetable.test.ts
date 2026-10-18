@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApiHarness, describeEachStore, type ApiHarness } from './support/api-harness.js'
+import { STATION_TIMETABLES } from '../support/station-timetables.fixture.js'
 
 /**
  * F13 精确时刻表与推演的分工，走在站牌的路由上：`GET /lines/:lineId/stations/:stationName/arrivals`。
@@ -13,8 +14,8 @@ import { createApiHarness, describeEachStore, type ApiHarness } from './support/
  * 上计数器在这里不是检测者：地铁的实时路径经引擎解析已缓存的线路详情，一次上游请求都不发，
  * 所以「有没有读上游」分不出这两个分支（这一点写在代码里，免得下一个人以为它在看）。
  *
- * 地铁7号线 / 群芳是注册表里唯一有官方时刻表的站点（`subway-timetables.data.ts`，不得手改），
- * 因此这里用它；其余站名是占位。上游一律桩掉。
+ * 地铁7号线 / 群芳的官方时刻表来自测试夹具（`support/station-timetables.fixture.ts`，
+ * 生产由运行时缓存装载）；因此这里用它，其余站名是占位。上游一律桩掉。
  */
 
 const LINE_ID = 'subway_027_7'
@@ -60,7 +61,7 @@ describeEachStore('F13 精确时刻表优先于推演', (store) => {
     vi.stubEnv('AMAP_MAPS_API_KEY', 'test-key')
     vi.stubEnv('TRANSIT_SIMULATION', 'false')
     vi.stubEnv('DEMO_MODE', 'false')
-    api = await createApiHarness({ store })
+    api = await createApiHarness({ store, stationTimetables: STATION_TIMETABLES })
 
     // 地铁的静态读取：线路名是唯一的入口，其余端点（站点周边等）一律给空。
     api.upstream.mockImplementation(async (url: unknown) => {
@@ -108,12 +109,13 @@ describeEachStore('F13 精确时刻表优先于推演', (store) => {
     const data = await arrivalsOf(TRANSCRIBED, 1)
 
     expect(data.isExact).toBe(true)
-    // 每行都是表自己的发车：没有车辆 id，也没有「还有几站」这类观测。
+    // 每行都是表自己的发车：没有车辆 id。位置需要整条线的表；这个夹具只装了群芳一站，
+    // 所以这里没有「还有几站」——不是精确行不允许有。
     expect(data.arrivals).toEqual([
       { time: '00:08', etaSeconds: 180, provenance: 'exact_timetable' },
       { time: '00:16', etaSeconds: 660, provenance: 'exact_timetable' },
     ])
-    expect(data.arrivals.every(row => row.busId === undefined && row.stopsAway === undefined)).toBe(true)
+    expect(data.arrivals.every(row => row.busId === undefined)).toBe(true)
     // 时刻表自己的注意事项随它所限定的发车一起走。
     expect(data.note).toBe(NOTE)
     // 运营状态取自这个站自己的首末班，不是线路的。

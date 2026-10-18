@@ -20,6 +20,7 @@ import {
 } from '@lucide/vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import type { LineDetail, LiveBus, Station } from '@real-time-transport/shared'
+import { scheduleDistanceAt } from './schedule-distance'
 import { distanceToSegment } from '@real-time-transport/shared/geo'
 import {
   computeRouteLayout,
@@ -212,8 +213,12 @@ interface AnimatedVehicle {
   speedFactor: number
   /** 上游报的下一站站序（1-based）：巡航外推的上限钳在该站站台；缺失时退回定位点钳制。 */
   nextOrder: number | undefined
+  /** 精确时刻表线路的到站/发车时间线；有它时整段按时间匀速插值。 */
+  schedule: LiveBus['schedule'] | undefined
   /** 引擎侧真实速度（m/s）；来源不报时为 undefined。 */
   speedMs: number | undefined
+  /** 上游是否给了速度；没有几何的地铁不给速度，也就不显示 km/h 标签。 */
+  speedStated: boolean
   /** 停靠站台（引擎报约 0 速度）：不做航位推算。 */
   dwell: boolean
   /** 因车辆在引擎侧消失而淡出；透明度到 0 时移除。 */
@@ -561,6 +566,18 @@ function initAnimation(): void {
         v.container.opacity(1)
       }
 
+      const scheduledDist = scheduleDistanceAt(v.schedule, Date.now(), effectiveStationDistances.value)
+      if (scheduledDist !== null) {
+        v.displayedDist = Math.max(0, Math.min(L, scheduledDist))
+        v.fixDist = v.displayedDist
+        v.fixPending = false
+        const pos = layoutPosition(v.displayedDist)
+        v.container.position({ x: pos.x, y: pos.y })
+        v.body.rotation(pos.angleDeg)
+        if (v.label && v.label.opacity() !== 0) v.label.opacity(0)
+        continue
+      }
+
       const base = v.dwell ? 0 : (v.speedMs ?? DEFAULT_SPEED_MS)
 
       if (v.fixPending && v.fixDist !== null) {
@@ -679,7 +696,7 @@ function initAnimation(): void {
       if (v.label) {
         const actualSpeed = dt > 0 ? (v.displayedDist - prevDist) / dt : 0
         const kmh = Math.round(Math.max(0, actualSpeed) * 3.6)
-        const targetOp = kmh > 0 ? 1 : 0
+        const targetOp = v.speedStated && kmh > 0 ? 1 : 0
         if (kmh > 0) {
           const text = `${kmh}km/h`
           if (v.label.text() !== text) v.label.text(text)
@@ -1157,7 +1174,9 @@ function syncVehicles(): void {
         frozenUntil: 0,
         speedFactor: 1,
         nextOrder: bus.nextOrder,
+        schedule: bus.schedule,
         speedMs,
+        speedStated: speedMs !== undefined,
         dwell,
         removing: false,
         spawnAt: -1,
@@ -1177,7 +1196,9 @@ function syncVehicles(): void {
       v.fixPending = true
       v.fixUpdatedAt = fixUpdatedAt
       v.nextOrder = bus.nextOrder
+      v.schedule = bus.schedule
       v.speedMs = speedMs
+      v.speedStated = speedMs !== undefined
       v.dwell = dwell
     }
   }

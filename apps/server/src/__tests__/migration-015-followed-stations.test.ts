@@ -76,9 +76,10 @@ describe('015：关注线路记下两个方向的关注站（与时段无关的�
     expect(DOWN!.trim().length).toBeGreaterThan(0)
   })
 
-  it('是当前最新的一步：按文件名排，它排在已有的每一条之后', () => {
+  it('曾经是当前最新的一步：016 在它之后，是它让出了这个位置', () => {
     const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith('.sql')).sort()
-    expect(files[files.length - 1]).toBe(FILE)
+    expect(files[files.length - 1]).toBe('016_subway_timetable_cache.sql')
+    expect(files[files.length - 2]).toBe(FILE)
   })
 
   it('前向段加的就是那四列：两个方向各一对 (站名, 站序)', () => {

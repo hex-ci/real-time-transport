@@ -11,6 +11,7 @@ import Konva from 'konva'
 import {
   Expand,
   GitCommitHorizontal,
+  Info,
   Minus,
   MoveHorizontal,
   Plus,
@@ -27,6 +28,12 @@ import {
   type RouteLayoutMode,
   type RouteLayoutResult,
 } from '@/composables/use-route-layout'
+import {
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
+} from 'reka-ui'
 import { Tooltip } from '@/components/ui/tooltip'
 import type { StationAnchor } from '../types'
 
@@ -1716,33 +1723,86 @@ function handleResize(): void {
 
 <template>
   <div class="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-    <!-- 桌面端顶部 HUD / 图例栏（md 及以上） -->
+    <!-- 桌面端顶部 HUD（md 及以上）。完整图例只在 xl 放得下；md–lg
+         收进一个图例按钮，点开看同一组说明，避免四字标签被压成两行。 -->
     <div class="hidden md:flex shrink-0 items-center justify-between gap-2 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 text-xs backdrop-blur-md">
-      <div class="flex items-center gap-3">
-        <span class="flex items-center gap-1.5 font-medium text-slate-300">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-cyan-400"></span>
-          拓扑线路
-        </span>
-        <span class="flex items-center gap-1.5 text-slate-400">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
-          当前定位
-        </span>
-        <span class="flex items-center gap-1.5 text-slate-400">
-          <span class="text-sm font-bold leading-none text-sky-200">›</span>
-          行驶方向
-        </span>
-        <span class="flex items-center gap-1.5 text-slate-400">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
-          上班上车
-        </span>
-        <span class="flex items-center gap-1.5 text-slate-400">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
-          下班上车
-        </span>
-        <span class="flex items-center gap-1.5 text-slate-400">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-100"></span>
-          首末站
-        </span>
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="hidden xl:flex shrink-0 items-center gap-3">
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap font-medium text-slate-300">
+            <span class="inline-block h-2.5 w-2.5 rounded-full bg-cyan-400"></span>
+            拓扑线路
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+            <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+            当前定位
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+            <span class="text-sm font-bold leading-none text-sky-200">›</span>
+            行驶方向
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+            <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+            上班上车
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+            <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
+            下班上车
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+            <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-100"></span>
+            首末站
+          </span>
+        </div>
+
+        <PopoverRoot>
+          <PopoverTrigger as-child>
+            <button
+              type="button"
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-800/80 text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300 active:scale-95 xl:hidden"
+              aria-label="查看地图图例"
+              title="查看地图图例"
+            >
+              <Info class="h-4 w-4" />
+            </button>
+          </PopoverTrigger>
+          <PopoverPortal>
+            <PopoverContent
+              side="bottom"
+              align="start"
+              :side-offset="6"
+              class="z-50 w-64 rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+            >
+              <div class="mb-2 text-xs font-semibold text-slate-400">地图图例</div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-xs text-slate-300">
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="inline-block h-2.5 w-2.5 rounded-full bg-cyan-400"></span>
+                  拓扑线路
+                </span>
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+                  当前定位
+                </span>
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="text-sm font-bold leading-none text-sky-200">›</span>
+                  行驶方向
+                </span>
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+                  上班上车
+                </span>
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="inline-block h-2.5 w-2.5 rounded-full bg-violet-400"></span>
+                  下班上车
+                </span>
+                <span class="flex items-center gap-1.5 whitespace-nowrap">
+                  <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-100"></span>
+                  首末站
+                </span>
+              </div>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
+
         <div class="ml-2 flex items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5">
           <button
             type="button"

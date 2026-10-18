@@ -7,7 +7,7 @@ import {
   PopoverPortal,
   PopoverRoot,
 } from 'reka-ui'
-import { X } from '@lucide/vue'
+import { Monitor, X } from '@lucide/vue'
 import type { ArrivalRow, Station } from '@real-time-transport/shared'
 import { statedArrivalMinutes } from '@real-time-transport/shared'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
@@ -38,10 +38,13 @@ const props = defineProps<{
   etaMark?: string | null
   freshness: string
   isRefreshing?: boolean
+  /** 公交站台可以跳到电子站牌；地铁暂不支持。 */
+  canOpenStationBoard?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'open-station-board'): void
 }>()
 
 const isOpen = computed(() => Boolean(props.station && props.anchor))
@@ -225,6 +228,16 @@ const virtualAnchor = computed(() => {
           >
             {{ arrivals.note }}
           </p>
+
+          <button
+            v-if="canOpenStationBoard"
+            type="button"
+            class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700/80 bg-slate-800/60 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300 active:scale-[0.99]"
+            @click="emit('open-station-board')"
+          >
+            <Monitor class="h-3.5 w-3.5" aria-hidden="true" />
+            查看电子站牌
+          </button>
         </div>
 
         <!-- 浮层的精确箭头：两段式无缝开口 V，遮住卡片基线 -->

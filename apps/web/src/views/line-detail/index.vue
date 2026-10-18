@@ -47,6 +47,7 @@ import { stopsTextOf } from './stops-text'
 import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
+import { temporaryStationQueryOf } from '@/views/station-board/temporary-station-query'
 import { AT_PLATFORM_ETA_TEXT } from './at-platform'
 import { estimateSubwayArrivalSeconds } from './pending-estimate'
 
@@ -389,6 +390,23 @@ function onStationAnchorChange(anchor: StationAnchor): void {
 function onCloseStationPopover(): void {
   selectedStation.value = null
   stationAnchor.value = null
+}
+
+/** 公交站台跳到电子站牌；站台身份只走 URL 参数，不写任何「最后看的站」。 */
+function openStationBoard(): void {
+  const station = selectedStation.value
+  const detail = currentLineDetail.value
+  if (!station?.id || !detail || detail.type !== 'bus') return
+  onCloseStationPopover()
+  void router.push({
+    path: '/station-board',
+    query: temporaryStationQueryOf({
+      id: station.id,
+      name: station.name,
+      lat: station.lat,
+      lng: station.lng,
+    }),
+  })
 }
 
 /**
@@ -766,7 +784,9 @@ onUnmounted(() => {
         :eta-mark="selectedStationEta.mark"
         :freshness="liveFreshnessLabel"
         :is-refreshing="isRefreshingLive"
+        :can-open-station-board="currentLineDetail?.type === 'bus' && Boolean(selectedStation?.id)"
         @close="onCloseStationPopover"
+        @open-station-board="openStationBoard"
       />
     </div>
   </div>

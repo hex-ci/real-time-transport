@@ -47,11 +47,25 @@ import {
   type BoardRow,
 } from './board-rows'
 import { rememberedStationId, rememberStationId } from './remembered-station'
+import {
+  temporaryStationFromSearch,
+  temporaryStationSearchParamsOf,
+  withoutTemporaryStationSearch,
+} from './temporary-station-query'
 
 const transitStore = useTransitStore()
 const cityStore = useCityStore()
 const locationStore = useLocationStore()
 const { favorites } = storeToRefs(transitStore)
+
+/** 临时站台只改地址栏；不经过 Vue Router 的注入，F5 仍从 URL 恢复。 */
+function replaceTemporarySearch(params: URLSearchParams): void {
+  if (typeof window === 'undefined') return
+  if (!window.history || typeof window.history.replaceState !== 'function') return
+  const qs = params.toString()
+  const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
+  window.history.replaceState(window.history.state, '', url)
+}
 
 const options = shallowRef<StationOption[]>([])
 /** 关注线路的站表（未合并、未截断的那一份），定位变化时要用它重新合成列表。 */
@@ -74,9 +88,16 @@ let listBuiltAt: { lat: number, lng: number } | null = null
  * 那一条悄悄分家：距离与坐标停在旧的那一份上。
  */
 const currentStationId = shallowRef('')
-const current = computed<StationOption | null>(() =>
-  options.value.find(option => option.stationId === currentStationId.value) ?? null,
-)
+/**
+ * 从线路详情 URL 带来的临时站台。它是列表第一项，但不属于任何常规来源：
+ * 不写 remembered-station，也不参与关注站/附近站/锚点的合并。
+ */
+const temporaryOption = shallowRef<StationOption | null>(null)
+const current = computed<StationOption | null>(() => {
+  const temporary = temporaryOption.value
+  if (temporary && temporary.stationId === currentStationId.value) return temporary
+  return options.value.find(option => option.stationId === currentStationId.value) ?? null
+})
 const rows = shallowRef<BoardRow[]>([])
 const readAt = shallowRef<number | null>(null)
 /** 本屏读的是哪个站台：行是关于它的，故它随行一起记账。 */
@@ -94,7 +115,9 @@ const rebuildPending = shallowRef(false)
 const landmarkHint = shallowRef('')
 
 /** 「最近的站台也在 3 公里外」那句话：规则在 `station-options.ts`，这一页只渲染它。 */
-const outOfNearbyNote = computed(() => outOfNearbyNoteOf(options.value))
+const outOfNearbyNote = computed(() =>
+  outOfNearbyNoteOf(options.value.filter(option => option.origin !== 'temporary')),
+)
 
 /** 当前站台离我多远（只说距离，不带来源标记）：页头那一句用它。 */
 const currentDistanceText = computed(() => distanceTextOf(current.value?.distanceMeters ?? null))
@@ -218,10 +241,24 @@ async function loadNearbyStops(): Promise<void> {
  * 「298 米」排在「278 米」上面，那条「最近的在前」当场作废。
  */
 function refreshOptions(): void {
+  const temporary = temporaryOption.value
+  const measuredTemporary = temporary
+    ? withDistances([temporary], locationStore.userCoords)[0] ?? null
+    : null
+  temporaryOption.value = measuredTemporary
+
   const merged = mergeStationSources(followedOptions.value, nearbyOptions.value)
   // 钉过的站台先用它自己解析出来的身份（id 与坐标）盖住同名项：它才是用户钉的那一个。
   const identified = applyAnchors(merged, anchorOptions.value)
-  options.value = arrangeOptions(withDistances(identified, locationStore.userCoords), 30)
+  const ranked = arrangeOptions(withDistances(identified, locationStore.userCoords), 30)
+  options.value = measuredTemporary
+    ? [
+        measuredTemporary,
+        ...ranked.filter(option =>
+          option.stationId !== measuredTemporary.stationId && option.name !== measuredTemporary.name,
+        ),
+      ]
+    : ranked
   listBuiltAt = locationStore.userCoords
 }
 
@@ -241,7 +278,7 @@ async function loadStationOptions(): Promise<void> {
 
   const remembered = rememberedStationId(cityStore.currentCode)
   const present = (stationId: string) => options.value.some(option => option.stationId === stationId)
-  if (!current.value || !present(currentStationId.value)) {
+  if (!temporaryOption.value && (!current.value || !present(currentStationId.value))) {
     currentStationId.value = (remembered && present(remembered) ? remembered : options.value[0]?.stationId) ?? ''
   }
 }
@@ -282,8 +319,33 @@ async function rebuildListIfMoved(fix: { lat: number, lng: number } | null): Pro
  * 记忆先落，与「选中的是不是当前这一站」无关：按定位而最近的那个恰好就是当前这一站时，
  * 解不解除固定是两件不同的事，不该因为重复选中而被跳过。
  */
+function isTemporary(option: StationOption | null): boolean {
+  return Boolean(option && temporaryOption.value && option.stationId === temporaryOption.value.stationId)
+}
+
+/** URL 是临时站的唯一持久化；选正常站时移掉它，选回临时站时恢复它。 */
+function syncTemporaryQuery(option: StationOption | null): void {
+  const params = withoutTemporaryStationSearch(window.location.search)
+  const temporary = temporaryOption.value
+  if (temporary && isTemporary(option)) {
+    const stationParams = temporaryStationSearchParamsOf({
+      id: temporary.stationId,
+      name: temporary.name,
+      lat: temporary.lat,
+      lng: temporary.lng,
+    })
+    for (const [key, value] of stationParams) params.set(key, value)
+  }
+  replaceTemporarySearch(params)
+}
+
 function applyStation(option: StationOption | null, remember: boolean): void {
-  rememberStationId(cityStore.currentCode, remember ? option?.stationId ?? '' : '')
+  const temporary = isTemporary(option)
+  // 临时站不是用户的常规选择：留在列表里可以选回来，但不写 remembered-station。
+  if (!temporary) {
+    rememberStationId(cityStore.currentCode, remember ? option?.stationId ?? '' : '')
+  }
+  syncTemporaryQuery(option)
   if (option?.stationId === currentStationId.value) {
     void readBoard()
     return
@@ -369,6 +431,20 @@ useIntervalFn(() => {
 
 /** GPS 雷达：在**已有选项**里找最近的真实站台，找不到就如实说它不在关注线路里。 */
 async function detectNearby(): Promise<void> {
+  if (temporaryOption.value) {
+    // 「重新定位」的意思是退出临时视图，回到已有的自动逻辑；先清 URL，
+    // 再按原流程请求定位/跟随最近站。
+    temporaryOption.value = null
+    options.value = options.value.filter(option => option.origin !== 'temporary')
+    rows.value = []
+    readAt.value = null
+    rowsStationId.value = ''
+    readState.value = 'reading'
+    if (!options.value.some(option => option.stationId === currentStationId.value)) {
+      currentStationId.value = options.value[0]?.stationId ?? ''
+    }
+    replaceTemporarySearch(withoutTemporaryStationSearch(window.location.search))
+  }
   const coords = locationStore.userCoords
   if (!coords) {
     detecting.value = true
@@ -400,15 +476,30 @@ async function detectNearby(): Promise<void> {
 }
 
 onMounted(async () => {
+  const temporary = temporaryStationFromSearch(window.location.search)
+  if (temporary) {
+    temporaryOption.value = {
+      name: temporary.stationName,
+      stationId: temporary.stationId,
+      lat: temporary.lat,
+      lng: temporary.lng,
+      distanceMeters: null,
+      origin: 'temporary',
+    }
+    currentStationId.value = temporary.stationId
+  }
   await transitStore.fetchFavorites()
   // 开始定位：没有它，列表量不出「离我多远」、也问不到附近的站台 —— 刷新后一直空着，
   // 直到别的页面（首页、线路页）碰巧请求过定位。拒绝授权在这里是空操作，故绝不重复询问。
   locationStore.requestLocation()
   await loadStationOptions()
+  if (temporaryOption.value) currentStationId.value = temporaryOption.value.stationId
   if (current.value) await readBoard()
 })
 
 watch(() => cityStore.currentCode, async () => {
+  temporaryOption.value = null
+  replaceTemporarySearch(withoutTemporaryStationSearch(window.location.search))
   options.value = []
   followedOptions.value = []
   nearbyOptions.value = []

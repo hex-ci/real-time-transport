@@ -9,8 +9,11 @@ import { distanceTextOf } from '@/distance-copy'
  * 故它们要能被直接测。
  */
 
-/** 这个选项凭什么出现在列表里：数据源说它在我附近，或只是关注线路的站表里有它。 */
-export type StationOrigin = 'nearby' | 'followed'
+/**
+ * 这个选项凭什么出现在列表里：数据源说它在我附近、只是关注线路的站表里有它，
+ * 或它是从线路详情临时带过来的一站（URL 参数，不属于用户的常规选择）。
+ */
+export type StationOrigin = 'nearby' | 'followed' | 'temporary'
 
 /**
  * 我钉过的站台（F1）：两个通勤上车点，或某个方向的关注站。
@@ -95,6 +98,7 @@ export function mergeStationSources(
  * 于是「哪些站是关注线路经过的」读作：**没有带任何标记那些**。
  */
 export function originMarkOf(option: StationOption): string | null {
+  if (option.origin === 'temporary') return '临时'
   return option.origin === 'nearby' ? '附近' : null
 }
 

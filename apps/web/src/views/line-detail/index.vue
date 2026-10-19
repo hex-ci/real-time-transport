@@ -48,7 +48,7 @@ import { operatingLabelOf, operatingTextOf } from '@/operating-copy'
 import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { temporaryStationQueryOf } from '@/views/station-board/temporary-station-query'
-import { AT_PLATFORM_ETA_TEXT } from './at-platform'
+import { atStationEtaText, isTerminalStop } from './at-platform'
 import { estimateSubwayArrivalSeconds } from './pending-estimate'
 
 const {
@@ -524,6 +524,14 @@ function isBusAtPlatform(b: { travelTimeSec?: number, distanceFromStart?: number
   return b.nextOrder === targetOrder
 }
 
+const selectedStationIsTerminal = computed(() =>
+  isTerminalStop(currentLineDetail.value?.stops ?? [], selectedStation.value?.order),
+)
+
+const atStationText = computed(() =>
+  atStationEtaText(selectedStationIsTerminal.value, isSubway.value),
+)
+
 const selectedStationEta = computed<{ text: string, mark: string | null }>(() => {
   if (!selectedStation.value) return { text: '等待发车', mark: null }
   const targetOrder = selectedStation.value.order
@@ -540,7 +548,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
     const mark = provenanceLabelOf(next.provenance)
     if (next.isAtStation) {
       // 对车在哪里的观测，不是数字：标记限定的是数字，而这个断言没有数字。行的种类仍在下面的列表里显示。
-      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
+      return { text: atStationText.value, mark: null }
     }
     // 没有分钟就是没有分钟。本分支原本会退回的外推（快照速度套在剩余各站上）误差没有固定的符号，故该行陈述缺失。
     const mins = statedArrivalMinutes(next)
@@ -589,7 +597,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
     const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
-      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
+      return { text: atStationText.value, mark: null }
     }
     if (passedBuses.length > 0) {
       return { text: '本班车已过本站 · 前序暂无在途车', mark: null }
@@ -619,7 +627,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
     const servingNow = allBuses.some(b => isBusAtPlatform(b, targetOrder))
     if (servingNow) {
       // 与上面的 at-platform 分支同一条规则：没有数字的陈述不带标记。
-      return { text: AT_PLATFORM_ETA_TEXT, mark: null }
+      return { text: atStationText.value, mark: null }
     }
     if (passed.length > 0) {
       return { text: '本班车已过本站 · 前序暂无在途车', mark: null }
@@ -632,7 +640,7 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
   // （服务端把它做成 `isAtStation` 行，头条因此说在站那一句）。回退分支曾漏掉这一判，
   // 于是同一辆车在服务端是在站文案、在这里却报出一个站数。
   if (isBusAtPlatform(bus, targetOrder)) {
-    return { text: AT_PLATFORM_ETA_TEXT, mark: null }
+    return { text: atStationText.value, mark: null }
   }
 
   // 与服务端同一条规则（`stopsAwayOf`）：这个回退分支曾自己算一遍，用的还是从车头数的那种算法，

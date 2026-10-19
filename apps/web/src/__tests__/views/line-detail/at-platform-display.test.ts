@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { AT_PLATFORM_ETA_TEXT } from '../../../views/line-detail/at-platform'
+import {
+  AT_PLATFORM_ETA_TEXT,
+  AT_TERMINAL_ETA_TEXT,
+  AT_TERMINAL_SUBWAY_ETA_TEXT,
+  atStationEtaText,
+  isTerminalStop,
+} from '../../../views/line-detail/at-platform'
 
 /**
  * 显示侧的 F-A 与 F-C。
@@ -34,10 +40,35 @@ describe('F-A: the at-platform state is a statement, not a number', () => {
     expect(AT_PLATFORM_ETA_TEXT).not.toMatch(/\d/)
   })
 
+  it('distinguishes a terminal arrival from a departure', () => {
+    expect(atStationEtaText(false, false)).toBe(AT_PLATFORM_ETA_TEXT)
+    expect(atStationEtaText(true, false)).toBe(AT_TERMINAL_ETA_TEXT)
+    expect(atStationEtaText(true, true)).toBe(AT_TERMINAL_SUBWAY_ETA_TEXT)
+    expect(AT_TERMINAL_ETA_TEXT).toContain('终点站')
+    expect(AT_TERMINAL_SUBWAY_ETA_TEXT).toContain('终点站')
+    expect(AT_TERMINAL_ETA_TEXT).not.toContain('即将发车')
+    expect(AT_TERMINAL_SUBWAY_ETA_TEXT).not.toContain('即将发车')
+  })
+
+  it('recognizes only the last stop of a non-loop direction as terminal', () => {
+    const stops = [
+      { name: '起点', order: 1 },
+      { name: '中间', order: 2 },
+      { name: '终点', order: 3 },
+    ]
+    expect(isTerminalStop(stops, 3)).toBe(true)
+    expect(isTerminalStop(stops, 1)).toBe(false)
+    expect(isTerminalStop(stops, 2)).toBe(false)
+    expect(isTerminalStop(stops, undefined)).toBe(false)
+    expect(isTerminalStop(stops, 4)).toBe(false)
+    expect(isTerminalStop([{ name: '环线站', order: 1 }, { name: '环线站', order: 2 }], 2)).toBe(false)
+  })
+
   it('is the ONE wording, chosen by the module rather than typed into the view', () => {
     // 同一句话曾站在本视图的三个分支里；能在三处漂移的措辞就是一个事实变成三种读数的路径。
     expect(view).not.toContain('车辆正在本站')
-    expect(view).toContain('AT_PLATFORM_ETA_TEXT')
+    expect(view).toContain('atStationEtaText')
+    expect(view).toContain('atStationText')
   })
 
   it('answers a row that is at the platform BEFORE any minute arithmetic', () => {
@@ -48,7 +79,7 @@ describe('F-A: the at-platform state is a statement, not a number', () => {
     expect(branch, 'the arrivals branch no longer checks isAtStation').toBeGreaterThan(-1)
     expect(minuteMath, 'the arrivals minute is no longer computed there').toBeGreaterThan(-1)
     expect(branch, 'the minute is computed before the at-platform state is answered').toBeLessThan(minuteMath)
-    expect(view.slice(branch, minuteMath)).toContain('AT_PLATFORM_ETA_TEXT')
+    expect(view.slice(branch, minuteMath)).toContain('atStationText')
   })
 
   it('renders no per-row minute for a row the server marked at the platform', () => {

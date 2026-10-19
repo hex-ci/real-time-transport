@@ -9,12 +9,15 @@ const LINE = {
   cityCode: '027',
 }
 
-function rows(fetchedAt: number): SubwayTimetableCacheRow[] {
+function rows(
+  fetchedAt: number,
+  dayType: 'workday' | 'weekend' = 'workday',
+): SubwayTimetableCacheRow[] {
   const base = {
     cityCode: '027',
     lineId: LINE.lineId,
-    dayType: 'workday' as const,
-    serviceDate: '2026-10-19',
+    dayType,
+    serviceDate: dayType === 'weekend' ? '2026-10-24' : '2026-10-19',
     payload: {
       lineName: '地铁7号线',
       directionName: '开往环球度假区',
@@ -67,6 +70,21 @@ describe('地铁时刻表 TTL', () => {
     vi.setSystemTime(new Date('2026-10-27T02:00:00.000Z'))
     await service.ensureSubwayTimetable(LINE.lineId, LINE.cityCode, LINE.lineName)
     expect(fetchLine).toHaveBeenCalledTimes(2)
+  })
+
+  it('切到周末后，工作日 TTL 不会挡住周末表抓取', async () => {
+    await service.ensureSubwayTimetable(LINE.lineId, LINE.cityCode, LINE.lineName)
+    expect(fetchLine).toHaveBeenCalledTimes(1)
+    expect(await db.loadSubwayTimetables('workday')).toHaveLength(2)
+
+    // 周六 10:00 北京：工作日那张表仍写着 TTL 内，但当前日型换成 weekend。
+    vi.setSystemTime(new Date('2026-10-24T02:00:00.000Z'))
+    fetchLine.mockImplementation(async () => rows(Date.now(), 'weekend'))
+    await service.ensureSubwayTimetable(LINE.lineId, LINE.cityCode, LINE.lineName)
+
+    expect(fetchLine).toHaveBeenCalledTimes(2)
+    expect(await db.loadSubwayTimetables('weekend')).toHaveLength(2)
+    expect(await db.loadSubwayTimetables('workday')).toHaveLength(2)
   })
 
   it('两个方向的行都齐才算新鲜；缺一侧会补抓', async () => {

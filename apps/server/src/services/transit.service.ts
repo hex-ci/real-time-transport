@@ -1474,6 +1474,17 @@ export class TransitService {
   }
 
   /**
+   * 新鲜度必须按「线路 + 日型」记。只用 lineId 时，周五抓出的工作日
+   * TTL 会挡住周六的周末表，直到 7 天后或进程重启。
+   */
+  private subwayTimetableFreshKey(
+    lineId: string,
+    dayType: 'workday' | 'weekend' = this.currentSubwayDayType(),
+  ): string {
+    return `${lineId}:${dayType}`
+  }
+
+  /**
    * 启动时把当前日型的缓存一次性装进内存；随后每小时只读 DB 扫过期行。
    * 没有关注线路时抓 0 条，这是正常状态。
    */
@@ -1511,13 +1522,17 @@ export class TransitService {
    */
   private markSubwayTimetableFresh(lineId: string, rows: SubwayTimetableCacheRow[]): boolean {
     const dayType = this.currentSubwayDayType()
+    const key = this.subwayTimetableFreshKey(lineId, dayType)
     const today = rows.filter(row => row.dayType === dayType && isCompleteSubwayTimetableRow(row))
     const now = Date.now()
     if (today.length < 2 || !today.every(row => now - row.fetchedAt <= SUBWAY_TIMETABLE_TTL_MS)) {
+      // 缺一侧或过期：当前日型没有新鲜表，必须清掉当前键。
+      // 不能留下上一日型或旧一轮的 line 级时间戳。
+      this.subwayTimetableFreshUntil.delete(key)
       return false
     }
     this.subwayTimetableFreshUntil.set(
-      lineId,
+      key,
       Math.min(...today.map(row => row.fetchedAt)) + SUBWAY_TIMETABLE_TTL_MS,
     )
     return true
@@ -1557,17 +1572,18 @@ export class TransitService {
    */
   async ensureSubwayTimetable(lineId: string, cityCode: string, lineName: string): Promise<void> {
     if (!lineId.startsWith('subway_')) return
-    if ((this.subwayTimetableFreshUntil.get(lineId) ?? 0) > Date.now()) return
+    const key = this.subwayTimetableFreshKey(lineId)
+    if ((this.subwayTimetableFreshUntil.get(key) ?? 0) > Date.now()) return
     if (this.isSubwayQuietHours()) return
 
-    const inflight = this.subwayTimetableInflight.get(lineId)
+    const inflight = this.subwayTimetableInflight.get(key)
     if (inflight) return inflight
 
     const task = this.fetchAndStoreSubwayTimetable(lineId, cityCode, lineName)
       .finally(() => {
-        this.subwayTimetableInflight.delete(lineId)
+        this.subwayTimetableInflight.delete(key)
       })
-    this.subwayTimetableInflight.set(lineId, task)
+    this.subwayTimetableInflight.set(key, task)
     return task
   }
 
@@ -1592,7 +1608,10 @@ export class TransitService {
       this.markSubwayTimetableFresh(lineId, all)
     }
     catch (err) {
-      this.subwayTimetableFreshUntil.set(lineId, Date.now() + SUBWAY_TIMETABLE_FAIL_COOLDOWN_MS)
+      this.subwayTimetableFreshUntil.set(
+        this.subwayTimetableFreshKey(lineId),
+        Date.now() + SUBWAY_TIMETABLE_FAIL_COOLDOWN_MS,
+      )
       throw err
     }
   }

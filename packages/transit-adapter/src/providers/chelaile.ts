@@ -695,6 +695,10 @@ export class ChelaileProvider implements ITransitProvider {
             : (hasDistRaw && distNum === -1 ? -1 : undefined),
           distanceFromStart,
           travelTimeSec: targetTravelTimeSec,
+          // `state` 是上游对「车停在站台上」的陈述（实测 1 ↔ travelTime 0）。
+          // 它比速度可靠：停站时上游仍会报 5~11 m/s，按那个速度外推会跑出站。
+          // 只在来源真的给了 1 时说；其他取值不推断成「不在站」。
+          ...(Number(b.state) === 1 ? { atStop: true } : {}),
           license: b.licence ? String(b.licence) : undefined,
           updatedAt: Date.now(),
         }

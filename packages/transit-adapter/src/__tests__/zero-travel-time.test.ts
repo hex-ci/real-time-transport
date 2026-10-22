@@ -73,3 +73,21 @@ describe('F-A: a vehicle at the platform is reported as being there, not as a mi
     expect(status!.buses[0]!.travelTimeSec).toBeUndefined()
   })
 })
+
+describe('the at-stop statement survives as `atStop`', () => {
+  it('marks a vehicle the source puts on the platform', async () => {
+    // `state: 1` 是上游对「停在站台上」的陈述，实测与 travelTime 0 一一对应。
+    const provider = providerAnswering(payload(0, { state: 1 }))
+    const status = await provider.getLiveStatus('010-1-0', 0, '010', { targetOrder: 2 })
+
+    expect(status!.buses[0]!.atStop).toBe(true)
+  })
+
+  it('does not read any other state value as being at the platform', async () => {
+    // 0 是「在路上」，其他取值含义未确证：都不许推断成在场。
+    const provider = providerAnswering(payload(120, { state: 0 }))
+    const status = await provider.getLiveStatus('010-1-0', 0, '010', { targetOrder: 2 })
+
+    expect(status!.buses[0]!.atStop).toBeUndefined()
+  })
+})

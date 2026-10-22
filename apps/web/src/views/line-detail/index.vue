@@ -49,6 +49,7 @@ import { provenanceLabelOf } from '@/provenance-copy'
 import { ARRIVAL_MINUTE_UNAVAILABLE_TEXT } from '@/arrival-copy'
 import { temporaryStationQueryOf } from '@/views/station-board/temporary-station-query'
 import { atStationEtaText, isTerminalStop } from './at-platform'
+import { arrivalsAfterLivePass } from './live-arrivals'
 import { estimateSubwayArrivalSeconds } from './pending-estimate'
 
 const {
@@ -532,6 +533,26 @@ const atStationText = computed(() =>
   atStationEtaText(selectedStationIsTerminal.value, isSubway.value),
 )
 
+/**
+ * 弹窗的到站答案，按最新一份实时读数过滤掉已经开过本站的行。
+ *
+ * 答案每 30 秒才重读，线路图每 18 秒换一份读数：不过滤的话，车已经开出
+ * 半站，弹窗还停在「在站」那一句上，与线路图上的位置矛盾。
+ */
+const freshStationArrivals = computed(() => {
+  const answer = stationArrivals.value
+  const station = selectedStation.value
+  if (!answer || !station) return answer
+  return {
+    ...answer,
+    arrivals: arrivalsAfterLivePass(
+      answer.arrivals,
+      currentLiveStatus.value?.buses ?? [],
+      station.order,
+    ),
+  }
+})
+
 const selectedStationEta = computed<{ text: string, mark: string | null }>(() => {
   if (!selectedStation.value) return { text: '等待发车', mark: null }
   const targetOrder = selectedStation.value.order
@@ -543,8 +564,9 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
   const vehicleMark = provenanceLabelOf(vehicleProvenanceOf(currentLiveStatus.value?.dataSource))
 
   // 1. 引擎返回的精确到站
-  if (stationArrivals.value && stationArrivals.value.arrivals.length > 0) {
-    const next = stationArrivals.value.arrivals[0]!
+  const answer = freshStationArrivals.value
+  if (answer && answer.arrivals.length > 0) {
+    const next = answer.arrivals[0]!
     const mark = provenanceLabelOf(next.provenance)
     if (next.isAtStation) {
       // 对车在哪里的观测，不是数字：标记限定的是数字，而这个断言没有数字。行的种类仍在下面的列表里显示。
@@ -570,9 +592,9 @@ const selectedStationEta = computed<{ text: string, mark: string | null }>(() =>
   }
 
   // 2) 引擎明确确认没有接近的车辆
-  if (stationArrivals.value && stationArrivals.value.arrivals.length === 0) {
+  if (answer && answer.arrivals.length === 0) {
     // F3：营运日优先。还没开始或已经结束，那就是答案——关于在途车辆的说法会是在描述一条没在跑的线路。
-    const operating = stationArrivals.value.operatingStatus
+    const operating = answer.operatingStatus
     if (operating && (operating.state === 'after_last' || operating.state === 'before_first')) {
       return { text: operatingTextOf(operating), mark: null }
     }
@@ -787,7 +809,7 @@ onUnmounted(() => {
       <StationPopover
         :station="selectedStation"
         :anchor="stationAnchor"
-        :arrivals="stationArrivals"
+        :arrivals="freshStationArrivals"
         :eta="selectedStationEta.text"
         :eta-mark="selectedStationEta.mark"
         :freshness="liveFreshnessLabel"

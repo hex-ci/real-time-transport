@@ -81,6 +81,12 @@ export const LiveBusSchema = z.object({
   distanceFromStart: z.number().min(0).optional(),
   travelTimeSec: z.number().optional(),
   /**
+   * 上游自己陈述车辆停在站台上。不是由速度或里程推出来的：车来了对停站的车
+   * 仍会报 5~11 m/s 的瞬时速度，按那个速度外推会让图标在弹窗说「正在本站」时
+   * 已经开出半站。只在来源真的这么说时出现，缺省表示来源没说。
+   */
+  atStop: z.boolean().optional(),
+  /**
    * 精确时刻表线路的到站/发车时间线（epoch ms）：前端按它匀速插值，
    * 保证进站落在表内时刻、出站落在停站结束。公交没有这个字段。
    */

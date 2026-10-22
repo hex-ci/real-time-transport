@@ -249,6 +249,8 @@ const CATCHUP_CONVERGE_SEC = 3.5 // 用 3.5 秒平滑合上位置差
 const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
 const DWELL_SNAP_M = 15.0
+/** 上游把「停在站上」的车报在站台多少米内仍按站台画。 */
+const AT_STOP_SNAP_M = 90
 const DWELL_SETTLE_MS = 2.0
 const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
 const FREEZE_MAX_MS = 5000 // 冻住时长上限：超时后转低速爬行，不死等
@@ -585,6 +587,7 @@ function initAnimation(): void {
         continue
       }
 
+      // 在站的车不做航位推算：它的位置就是来源报的那一点，速度再大也不往前走。
       const base = v.dwell ? 0 : (v.speedMs ?? DEFAULT_SPEED_MS)
 
       if (v.fixPending && v.fixDist !== null) {
@@ -596,7 +599,15 @@ function initAnimation(): void {
           v.lastFixAt = time
 
           const delta = v.fixDist - v.displayedDist
-          if (delta > 0) {
+          if (v.dwell) {
+            // 来源说车停在站上：位置就是它报的那一点。数据往前挪了几十米
+            // 也不能用追赶速度冲过去 —— 那一冲正好会把图标送出站台。
+            v.mode = 'hold'
+            v.convergeTo = v.fixDist
+            v.frozenUntil = Number.POSITIVE_INFINITY
+            v.speedFactor = 0
+          }
+          else if (delta > 0) {
             v.mode = 'catchup'
             v.convergeTo = v.fixDist
             v.speedFactor = 1
@@ -687,6 +698,11 @@ function initAnimation(): void {
         // 从后方接近时与原来一样指数滑入；若历史原因已超调一点，也允许拉回——
         // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
         if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
+          nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
+        }
+        else if (plat !== null && v.fixDist !== null && Math.abs(v.fixDist - plat) <= AT_STOP_SNAP_M) {
+          // 上游把站台报在几十米外（里程取整/标定差），图标不能因此离开站台：
+          // 它自己的陈述是「停在站上」，画布就该画在站上。
           nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
         }
       }
@@ -1158,7 +1174,11 @@ function syncVehicles(): void {
     const speedMs = typeof bus.speed === 'number' && Number.isFinite(bus.speed)
       ? bus.speed
       : undefined
-    const dwell = speedMs !== undefined && speedMs < DWELL_SPEED_THRESHOLD_MS
+    // 停站以上游自己的陈述为准（`atStop`），不按速度猜：车来了对停在站台的
+    // 车仍会报 5~11 m/s，按那个速度外推 18 秒就是 200 米，正好落在下一段中间。
+    // 没有该字段（地铁引擎、备用来源）时才退回低速判据。
+    const dwell = bus.atStop === true
+      || (bus.atStop === undefined && speedMs !== undefined && speedMs < DWELL_SPEED_THRESHOLD_MS)
     const fixUpdatedAt = bus.updatedAt ?? Date.now()
 
     let v = vehicleMap.get(id)

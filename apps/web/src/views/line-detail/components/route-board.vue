@@ -22,6 +22,7 @@ import {
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import type { LineDetail, LiveBus, Station } from '@real-time-transport/shared'
 import { scheduleDistanceAt } from './schedule-distance'
+import { GLIDE_CONVERGE_SEC, MAX_BUS_SPEED_MS, dwellTarget, glideStep } from '../glide'
 import { distanceToSegment } from '@real-time-transport/shared/geo'
 import {
   computeRouteLayout,
@@ -244,14 +245,14 @@ interface AnimatedVehicle {
 
 const vehicleMap = new Map<string, AnimatedVehicle>()
 
-const MAX_BUS_SPEED_MS = 16.0 // 城市公交的物理速度上限 57.6 km/h
-const CATCHUP_CONVERGE_SEC = 3.5 // 用 3.5 秒平滑合上位置差
+const CATCHUP_CONVERGE_SEC = GLIDE_CONVERGE_SEC // 用 3.5 秒平滑合上位置差
 const DEFAULT_SPEED_MS = 6.0
 const DWELL_SPEED_THRESHOLD_MS = 1.0
-const DWELL_SNAP_M = 15.0
-/** 上游把「停在站上」的车报在站台多少米内仍按站台画。 */
-const AT_STOP_SNAP_M = 90
-const DWELL_SETTLE_MS = 2.0
+/** 上游把「停在站上」的车报在离站台多少米内仍算停在这一站。 */
+const AT_STOP_PLATFORM_TOLERANCE_M = 90
+/** 进站减速区：距站台这么远开始收油，避免在站牌前一下刹死。 */
+const ARRIVAL_DECEL_M = 40
+const ARRIVAL_MIN_SPEED_MS = 0.8
 const OVERSHOOT_EPS_M = 0.5 // 超过数据位置此距离即判定为外推出超前
 const FREEZE_MAX_MS = 5000 // 冻住时长上限：超时后转低速爬行，不死等
 const RECOVER_SPEED_FACTOR = 0.3 // 冻住超时后的爬行速度系数
@@ -587,8 +588,27 @@ function initAnimation(): void {
         continue
       }
 
-      // 在站的车不做航位推算：它的位置就是来源报的那一点，速度再大也不往前走。
-      const base = v.dwell ? 0 : (v.speedMs ?? DEFAULT_SPEED_MS)
+      // 停站：来源说车已经停在站台上。目标就是站台，但从当前画到的位置过去
+      // 必须真的走完那段路——吸附等于瞬移：90 米的指数吸附实测冲到过 1224 km/h。
+      // 速度标签按 0 处理：车确实停着，滑行只是画面在收敛。
+      if (v.dwell) {
+        const plat = v.fixDist !== null ? nearestPlatformDist(v.fixDist) : null
+        const target = dwellTarget(v.fixDist, plat, AT_STOP_PLATFORM_TOLERANCE_M) ?? v.displayedDist
+        const next = v.displayedDist + glideStep(v.displayedDist, target, dt)
+        v.displayedDist = Math.max(0, Math.min(L, next))
+        v.mode = 'cruise'
+        v.convergeTo = target
+        v.fixPending = false
+        v.lastFixUpdatedAt = v.fixUpdatedAt
+        v.speedFactor = 1
+        if (v.label && v.label.opacity() !== 0) v.label.opacity(0)
+        const pos = layoutPosition(v.displayedDist)
+        v.container.position({ x: pos.x, y: pos.y })
+        v.body.rotation(pos.angleDeg)
+        continue
+      }
+
+      const base = v.speedMs ?? DEFAULT_SPEED_MS
 
       if (v.fixPending && v.fixDist !== null) {
         const isNewObservation = v.fixUpdatedAt !== v.lastFixUpdatedAt
@@ -681,6 +701,15 @@ function initAnimation(): void {
         }
       }
 
+      // 进站减速：快到站台时按剩余距离收油，避免在站牌前一下刹死。
+      if (v.mode === 'cruise' && effectiveSpeed > 0) {
+        const cap = cruiseCapDist(v)
+        const remaining = cap !== null ? cap - v.displayedDist : Number.POSITIVE_INFINITY
+        if (remaining > 0 && remaining < ARRIVAL_DECEL_M) {
+          effectiveSpeed = Math.max(ARRIVAL_MIN_SPEED_MS, effectiveSpeed * remaining / ARRIVAL_DECEL_M)
+        }
+      }
+
       const prevDist = v.displayedDist
       let nextDist = prevDist + effectiveSpeed * dt
 
@@ -692,25 +721,9 @@ function initAnimation(): void {
         if (cap !== null && nextDist > cap) nextDist = cap
       }
 
-      if (v.dwell) {
-        const plat = nearestPlatformDist(nextDist)
-        // 停靠吸附（双向）：车在站上时把图标轻轻拉向站台圆心。
-        // 从后方接近时与原来一样指数滑入；若历史原因已超调一点，也允许拉回——
-        // dwell 意味着真车静止在站上，此时"修正位置"比"永不后退"更准确。
-        if (plat !== null && Math.abs(plat - nextDist) < DWELL_SNAP_M) {
-          nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
-        }
-        else if (plat !== null && v.fixDist !== null && Math.abs(v.fixDist - plat) <= AT_STOP_SNAP_M) {
-          // 上游把站台报在几十米外（里程取整/标定差），图标不能因此离开站台：
-          // 它自己的陈述是「停在站上」，画布就该画在站上。
-          nextDist += (plat - nextDist) * Math.min(1, dt * DWELL_SETTLE_MS)
-        }
-      }
-
-      // 单调性：行驶中严格不后退；停靠时允许向站台做小幅位置修正（见上）。
-      v.displayedDist = v.dwell
-        ? Math.max(0, Math.min(L, nextDist))
-        : Math.max(prevDist, Math.min(L, nextDist))
+      // 单调性：行驶中的车严格不后退。外推超前时上面已经选择冻住等数据，
+      // 不靠回退来对齐。
+      v.displayedDist = Math.max(prevDist, Math.min(L, nextDist))
 
       // 速度标签跟动画实际速度走：冻住/钳住时图标没动，标签渐隐；
       // 动起来时渐显。用实际位移（钳制后）算，不用 effectiveSpeed——

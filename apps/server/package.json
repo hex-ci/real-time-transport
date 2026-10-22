@@ -21,7 +21,7 @@
     "@fastify/websocket": "^11.3.4",
     "@real-time-transport/shared": "workspace:*",
     "@real-time-transport/transit-adapter": "workspace:*",
-    "fastify": "^5.12.6",
+    "fastify": "^5.12.7",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "ws": "^8.22.0",
@@ -33,6 +33,6 @@
     "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.5"
   }
 }
